@@ -11,6 +11,10 @@ full access to the modern HTTP handler, site map, scope, scanner-issue, and UI A
 
 ## What it does
 
+![Recon Hound pipeline overview](docs/img/architecture.svg)
+
+![Recon Hound suite tab](docs/img/ui-tabs.svg)
+
 - Watches in-scope HTTP requests and responses through a Montoya `HttpHandler`.
 - Scans request + response content with the Java `RegexHound` port (secrets, tokens, keys, PEM
   material, cloud credentials, provider-specific patterns, JWTs, and more, with entropy gating and
@@ -38,6 +42,8 @@ full access to the modern HTTP handler, site map, scope, scanner-issue, and UI A
 
 ### Passive XSS surface mapping
 
+![Passive reflected-XSS surface mapping](docs/img/xss-reflection.svg)
+
 Recon Hound maps reflected cross-site-scripting surface passively, using techniques distilled from
 the PortSwigger XSS cheat sheet:
 
@@ -61,6 +67,8 @@ reflections are also raised as tentative Burp audit issues.
 
 ### Passive web-hygiene, source maps, and API surface
 
+![Passive intelligence: hygiene, source maps, API surface](docs/img/passive-intel.svg)
+
 More passive analysis runs on every in-scope response:
 
 - **Web hygiene** (`WebHygieneEngine`) — flags **CORS** misconfiguration (Origin reflection or
@@ -79,6 +87,10 @@ never injects payloads on its own. Confirming XSS still means manually firing a 
 vector against an authorised target.
 
 ### Active testing (opt-in, off by default)
+
+![Active testing — Collaborator out-of-band flow](docs/img/active-testing.svg)
+
+![Access-control / IDOR testing](docs/img/access-control.svg)
 
 An opt-in **Active testing** panel adds discovery and confirmation that require sending crafted
 traffic. It is **disabled by default**, scope-checked per request, throttled, and request-capped.
@@ -111,6 +123,8 @@ findings arrive asynchronously as the Collaborator poller correlates interaction
 
 ### AI analysis (optional, manual)
 
+![AI analysis — manual, multi-provider](docs/img/ai-analysis.svg)
+
 An **AI analysis** tab can send pasted content (recovered JavaScript, source maps, responses, or a
 finding) to a large language model for review — endpoint/parameter extraction, DOM source→sink
 hints, secret spotting, and triage. Providers: **Anthropic (Claude)**, **OpenAI**, **xAI (Grok)**,
@@ -134,6 +148,8 @@ and **Google Gemini**, each called over raw HTTPS (no vendor SDK is bundled).
 > prohibit sharing target data with third parties — only use it on data you are authorised to share.
 
 ## Reporting
+
+![Reporting — where findings surface](docs/img/reporting.svg)
 
 Findings surface in three places:
 
