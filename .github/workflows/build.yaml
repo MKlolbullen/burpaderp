@@ -7,6 +7,7 @@ on:
       - 'build.gradle'
       - 'src/**'
       - '.github/workflows/build.yaml'
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -18,12 +19,18 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
+          cache: 'gradle'
+      
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
       
       - name: Build with Gradle
         run: ./gradlew build
       
       - name: Upload JAR as artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: burp-recon-hound
           path: build/libs/burp-recon-hound.jar
+          retention-days: 90
