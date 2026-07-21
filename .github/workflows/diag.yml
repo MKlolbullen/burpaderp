@@ -1,8 +1,8 @@
 name: Diag
 
-# Temporary diagnostic: uses no third-party actions. If this run succeeds while
-# ci.yml/release.yml startup-fail, the block is the repository's allowed-actions
-# policy, not the workflow files. This file will be removed after diagnosis.
+# Temporary diagnostic: proves `./gradlew clean build` works using ONLY
+# GitHub-owned actions (actions/*), i.e. WITHOUT gradle/actions, which the
+# repository's allowed-actions policy currently blocks. Removed after diagnosis.
 
 on:
   push:
@@ -14,15 +14,17 @@ permissions:
   contents: read
 
 jobs:
-  ping:
+  build-probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Echo
-        run: echo "diag ok - no third-party actions used"
-
-  checkout-probe:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout (GitHub-owned action)
+      - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - run: echo "actions/checkout is allowed"
+      - name: Set up JDK 21
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Build with the Gradle wrapper (no gradle/actions)
+        run: ./gradlew clean build --no-daemon
+      - name: Show built jar
+        run: ls -l build/libs/
