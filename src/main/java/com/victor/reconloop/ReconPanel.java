@@ -67,6 +67,8 @@ final class ReconPanel extends JPanel {
         JButton ctButton = new JButton("Enumerate (crt.sh)");
         JTextField paramUrl = new JTextField(22);
         JButton paramButton = new JButton("Discover params (Arjun)");
+        JTextField graphqlUrl = new JTextField(22);
+        JButton graphqlButton = new JButton("Introspect GraphQL");
         JButton runActive = new JButton("Run active tests on in-scope site map");
 
         JPanel activePanel = new JPanel();
@@ -84,6 +86,22 @@ final class ReconPanel extends JPanel {
         activeRow2.add(new JLabel("Param-discovery URL:")); activeRow2.add(paramUrl); activeRow2.add(paramButton);
         activeRow2.add(new JLabel("Param wordlist: " + controller.paramWordlistSize()));
         activePanel.add(activeRow2);
+
+        JPanel activeRow3 = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        activeRow3.add(new JLabel("GraphQL URL:")); activeRow3.add(graphqlUrl); activeRow3.add(graphqlButton);
+        activePanel.add(activeRow3);
+
+        // Access-control / IDOR (Autorize-style)
+        JTextArea acHeaders = new JTextArea(2, 60);
+        acHeaders.setToolTipText("Alternate identity headers, one per line, e.g. 'Cookie: session=lowpriv' or 'Authorization: Bearer ...'");
+        JCheckBox acUnauth = new JCheckBox("Unauthenticated (strip auth)", false);
+        JButton acButton = new JButton("Run access-control test (safe methods)");
+        JPanel acRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        acRow.add(new JLabel("Access-control alternate identity:"));
+        acRow.add(new JScrollPane(acHeaders));
+        acRow.add(acUnauth);
+        acRow.add(acButton);
+        activePanel.add(acRow);
         controls.add(activePanel);
 
         JLabel status = new JLabel(controller.status());
@@ -122,7 +140,9 @@ final class ReconPanel extends JPanel {
         activeBudget.addChangeListener(e -> controller.setActiveRequestBudget((Integer) activeBudget.getValue()));
         ctButton.addActionListener(e -> controller.enumerateSubdomains(ctDomain.getText()));
         paramButton.addActionListener(e -> controller.discoverParameters(paramUrl.getText()));
+        graphqlButton.addActionListener(e -> controller.introspectGraphql(graphqlUrl.getText()));
         runActive.addActionListener(e -> controller.runActiveTests());
+        acButton.addActionListener(e -> controller.runAccessControlTest(acHeaders.getText(), acUnauth.isSelected()));
         maxRequests.addChangeListener(e -> controller.setMaxRequests((Integer) maxRequests.getValue()));
         maxRedirects.addChangeListener(e -> controller.setMaxRedirects((Integer) maxRedirects.getValue()));
         addSeeds.addActionListener(e -> {
