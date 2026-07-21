@@ -324,6 +324,9 @@ final class ReconController implements HttpHandler {
 
         for (ResponseSignalEngine.Signal signal : responseSignals.analyze(response)) {
             addSyntheticFinding(signal.severity(), "response", signal.name(), location, signal.value(), request.url());
+            if (!"INFO".equals(signal.severity()) && !"LOW".equals(signal.severity())) {
+                addSignalIssue(signal, location, request.url(), pair);
+            }
         }
 
         if (detectReflections.get()) {
@@ -431,6 +434,36 @@ final class ReconController implements HttpHandler {
             }
         }
         publishStatus();
+    }
+
+    private void addSignalIssue(ResponseSignalEngine.Signal signal, String location, String url, HttpRequestResponse pair) {
+        if (pair == null) return;
+        String dedupe = "signal-issue\0" + signal.name() + "\0" + signal.value() + "\0" + url;
+        if (!issueDedupe.add(dedupe)) return;
+
+        AuditIssueSeverity severity = switch (signal.severity()) {
+            case "HIGH" -> AuditIssueSeverity.HIGH;
+            case "MEDIUM" -> AuditIssueSeverity.MEDIUM;
+            default -> AuditIssueSeverity.LOW;
+        };
+
+        String detail = "<b>Response signal: " + escape(signal.name()) + "</b><br>"
+                + "Location: " + escape(location) + "<br>"
+                + "Evidence: <code>" + escape(signal.value()) + "</code><br><br>"
+                + "Recon Hound flags disclosure signals (stack traces, debug/error output, source-map "
+                + "references, directory listings, internal-hostname hints) in in-scope responses.";
+
+        AuditIssue issue = auditIssue(
+                "Recon Hound: " + signal.name(),
+                detail,
+                "Suppress verbose errors and stack traces in production, remove source-map references from "
+                        + "public assets, disable directory listing, and avoid leaking internal hostnames.",
+                url, severity, AuditIssueConfidence.FIRM,
+                "Recon Hound passively inspects in-scope responses for information-disclosure signals.",
+                "Disclosure findings are heuristic; confirm the leaked content is sensitive before reporting.",
+                severity, pair
+        );
+        api.siteMap().add(issue);
     }
 
     private void addSyntheticFinding(String severity, String provider, String rule, String location, String value, String url) {
