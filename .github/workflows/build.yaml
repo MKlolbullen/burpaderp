@@ -6,8 +6,7 @@ on:
     paths:
       - 'build.gradle'
       - 'src/**'
-      - '.github/workflows/build.yml'
-
+      - '.github/workflows/build.yaml'
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,4 +26,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: burp-recon-hound
+          tags: v.0.2.0
           path: build/libs/burp-recon-hound.jar
