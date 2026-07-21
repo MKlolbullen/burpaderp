@@ -1,0 +1,94 @@
+name: Release
+
+# Build the extension jar and publish a GitHub Release for every commit that
+# lands on the default branch. Each release gets an auto-incrementing version
+# (0.2.<run number>) and the built jar attached as an asset.
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@da187c8e6ffbd3802e00f2477aa5a822b25f2dda # v4.4.4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@da187c8e6ffbd3802e00f2477aa5a822b25f2dda # v4.4.4
+
+      - name: Compute version
+        id: version
+        run: |
+          set -euo pipefail
+          # Commit count is monotonic on main and maps to exactly one commit, so a
+          # given version never collides with a different commit (unlike run_number,
+          # which resets to 1 if this workflow file is ever renamed).
+          PATCH="$(git rev-list --count HEAD)"
+          VERSION="0.2.${PATCH}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build jar
+        run: ./gradlew clean build --no-daemon -PreleaseVersion=${{ steps.version.outputs.version }}
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          SHA_SHORT: ${{ steps.version.outputs.sha_short }}
+        run: |
+          set -euo pipefail
+          JAR="build/libs/burp-recon-hound-${VERSION}.jar"
+          test -f "$JAR"
+
+          NOTES="$(mktemp)"
+          {
+            printf 'Automated release built from commit `%s` on `main`, using Java 21 against `montoya-api:2026.7`.\n\n' "$SHA_SHORT"
+            printf '**Install:** Burp Suite → Extensions → Installed → Add → Java → select `burp-recon-hound-%s.jar`.\n' "$VERSION"
+          } > "$NOTES"
+
+          # Make re-runs idempotent, but never clobber a tag that belongs to a
+          # different commit (e.g. after a history rewrite): verify the existing
+          # tag points at this commit before replacing it, else fail loudly.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            EXISTING_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" -q .object.sha 2>/dev/null || true)"
+            if [ -n "$EXISTING_SHA" ]; then
+              DEREF="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${EXISTING_SHA}" -q .object.sha 2>/dev/null || true)"
+              [ -n "$DEREF" ] && EXISTING_SHA="$DEREF"
+            fi
+            if [ -n "$EXISTING_SHA" ] && [ "$EXISTING_SHA" != "$GITHUB_SHA" ]; then
+              echo "Refusing to overwrite $TAG: it points at $EXISTING_SHA, not $GITHUB_SHA" >&2
+              exit 1
+            fi
+            gh release delete "$TAG" --yes --cleanup-tag
+          fi
+
+          gh release create "$TAG" "$JAR" \
+            --target "$GITHUB_SHA" \
+            --title "Recon Hound ${VERSION}" \
+            --notes-file "$NOTES" \
+            --generate-notes

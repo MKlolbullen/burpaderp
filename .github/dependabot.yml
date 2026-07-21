@@ -1,0 +1,14 @@
+version: 2
+updates:
+  # Keep the SHA-pinned GitHub Actions current (opens PRs that bump the pinned
+  # commit SHA and the trailing version comment together).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  # Track the Montoya API and other Gradle dependencies.
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly

@@ -1,5 +1,8 @@
 # Recon Hound — Burp Suite Professional extension (Montoya)
 
+[![CI](https://github.com/MKlolbullen/burpaderp/actions/workflows/ci.yml/badge.svg)](https://github.com/MKlolbullen/burpaderp/actions/workflows/ci.yml)
+[![Release](https://github.com/MKlolbullen/burpaderp/actions/workflows/release.yml/badge.svg)](https://github.com/MKlolbullen/burpaderp/actions/workflows/release.yml)
+
 Recon Hound is a scope-bounded asset, attack-surface, and content-intelligence extension for
 Burp Suite Professional, written against the **Montoya API** and Java 21.
 

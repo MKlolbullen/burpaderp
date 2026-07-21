@@ -3,7 +3,8 @@ plugins {
 }
 
 group = 'com.victor'
-version = '0.2.0'
+// Overridable from CI with -PreleaseVersion=<x>; defaults to the base version for local builds.
+version = (findProperty('releaseVersion') ?: '0.2.0').toString()
 
 repositories {
     mavenCentral()
@@ -39,5 +40,5 @@ jar {
 }
 
 wrapper {
-    gradleVersion = '8.8'
+    gradleVersion = '8.14.3'
 }
