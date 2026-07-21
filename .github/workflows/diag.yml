@@ -1,0 +1,21 @@
+name: Diag
+
+# Temporary diagnostic: uses no third-party actions. If this run succeeds while
+# ci.yml/release.yml startup-fail, the block is the repository's allowed-actions
+# policy, not the workflow files. This file will be removed after diagnosis.
+
+on:
+  push:
+    branches:
+      - claude/montoya-python3-version-3mfa5x
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo
+        run: echo "diag ok - no third-party actions used"
