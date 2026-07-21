@@ -33,6 +33,7 @@ final class ReconController implements HttpHandler {
     private final PayloadLibrary payloadLibrary = new PayloadLibrary();
     private final ResponseSignalEngine responseSignals = new ResponseSignalEngine();
     private final XssReflectionEngine xssReflectionEngine = new XssReflectionEngine();
+    private final WebHygieneEngine webHygiene = new WebHygieneEngine();
     private final CertificateTransparencyClient ctClient;
     private final ParameterDiscoveryEngine parameterDiscovery;
     private final ActiveTestEngine activeTestEngine;
@@ -51,6 +52,8 @@ final class ReconController implements HttpHandler {
     private final Set<String> reflectionDedupe = ConcurrentHashMap.newKeySet();
     private final Set<String> activeDedupe = ConcurrentHashMap.newKeySet();
     private final Set<String> oobDedupe = ConcurrentHashMap.newKeySet();
+    private final Set<String> minedMaps = ConcurrentHashMap.newKeySet();
+    private final Set<String> ingestedSpecs = ConcurrentHashMap.newKeySet();
     private final Map<String, HttpRequest> originTemplates = new ConcurrentHashMap<>();
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> {
@@ -207,6 +210,73 @@ final class ReconController implements HttpHandler {
         });
     }
 
+    private static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "OPTIONS");
+
+    void runAccessControlTest(String sessionHeaders, boolean unauthenticated) {
+        AccessControlEngine engine = new AccessControlEngine(sessionHeaders, unauthenticated);
+        if (!engine.configured()) {
+            api.logging().logToError("Access-control test needs alternate session headers or the unauthenticated option.");
+            return;
+        }
+        activeWorker.submit(() -> {
+            List<HttpRequestResponse> targets = api.siteMap().requestResponses().stream()
+                    .filter(rr -> rr.request() != null && rr.hasResponse() && rr.response() != null)
+                    .filter(rr -> rr.request().isInScope())
+                    .filter(rr -> SAFE_METHODS.contains(rr.request().method().toUpperCase(Locale.ROOT)))
+                    .collect(java.util.stream.Collectors.toMap(
+                            rr -> rr.request().method() + " " + rr.request().url(),
+                            rr -> rr, (a, b) -> a, LinkedHashMap::new))
+                    .values().stream().toList();
+
+            api.logging().logToOutput("[Recon Hound] Access-control replay of " + targets.size()
+                    + " safe (GET/HEAD/OPTIONS) in-scope request(s) under the alternate identity.");
+
+            for (HttpRequestResponse original : targets) {
+                try {
+                    HttpRequest replayRequest = engine.applyIdentity(original.request());
+                    if (!api.scope().isInScope(replayRequest.url())) continue;
+                    HttpRequestResponse replay = api.http().sendRequest(replayRequest);
+                    if (replay == null || replay.response() == null) continue;
+
+                    int origLen = original.response().bodyToString().length();
+                    int replayLen = replay.response().bodyToString().length();
+                    AccessControlEngine.Result result = AccessControlEngine.classify(
+                            original.response().statusCode(), origLen,
+                            replay.response().statusCode(), replayLen);
+
+                    String url = original.request().url();
+                    String dedupe = "ac\0" + url + "\0" + result.verdict();
+                    if (!activeDedupe.add(dedupe)) continue;
+
+                    addActiveRow(result.severity(), "AccessControl", original.request().method(),
+                            result.verdict().name().toLowerCase(Locale.ROOT), result.detail(), url);
+
+                    if (result.verdict() == AccessControlEngine.Verdict.BYPASSED
+                            || result.verdict() == AccessControlEngine.Verdict.PARTIAL) {
+                        AuditIssueSeverity severity = result.verdict() == AccessControlEngine.Verdict.BYPASSED
+                                ? AuditIssueSeverity.HIGH : AuditIssueSeverity.MEDIUM;
+                        AuditIssue issue = auditIssue(
+                                "Recon Hound: broken access control (" + result.verdict().name().toLowerCase(Locale.ROOT) + ")",
+                                "<b>Access-control replay</b><br>" + escape(result.detail())
+                                        + "<br>Identity: " + (unauthenticated ? "unauthenticated" : "alternate session"),
+                                "Enforce authorization server-side on every request; do not rely on the UI hiding functionality.",
+                                url, severity,
+                                result.verdict() == AccessControlEngine.Verdict.BYPASSED
+                                        ? AuditIssueConfidence.FIRM : AuditIssueConfidence.TENTATIVE,
+                                "Recon Hound replays privileged requests under a lower-privileged identity and compares responses.",
+                                "Confirm the exposed data/action is genuinely sensitive; response size alone can mislead.",
+                                severity, replay);
+                        api.siteMap().add(issue);
+                    }
+                    publishStatus();
+                } catch (Exception e) {
+                    api.logging().logToError("Access-control replay failed", e);
+                }
+            }
+            api.logging().logToOutput("[Recon Hound] Access-control test complete.");
+        });
+    }
+
     void enqueueSeeds(String multiline) {
         if (multiline == null) return;
         for (String line : multiline.split("\\R")) {
@@ -250,6 +320,8 @@ final class ReconController implements HttpHandler {
         parameterDedupe.clear();
         reflectionDedupe.clear();
         activeDedupe.clear();
+        minedMaps.clear();
+        ingestedSpecs.clear();
         sentRequests.set(0);
         SwingUtilities.invokeLater(() -> {
             findingModel.clear();
@@ -449,6 +521,10 @@ final class ReconController implements HttpHandler {
             analyzeReflections(request, response, pair);
         }
 
+        analyzeHygiene(request, response, pair);
+        mineSourceMap(request.url(), response, pair);
+        ingestApiSpec(request.url(), response);
+
         short code = response.statusCode();
         if (code >= 300 && code < 400) {
             String target = response.headerValue("Location");
@@ -466,6 +542,115 @@ final class ReconController implements HttpHandler {
                     candidate.score(), candidate.type(), candidate.name(), classes, candidate.valuePreview(), request.url()
             )));
         }
+    }
+
+    private void analyzeHygiene(HttpRequest request, HttpResponse response, HttpRequestResponse pair) {
+        for (WebHygieneEngine.Note note : webHygiene.analyze(request, response)) {
+            String url = request == null ? "" : request.url();
+            String dedupe = "hygiene\0" + note.name() + "\0" + url;
+            if (!issueDedupe.add(dedupe)) continue;
+            SwingUtilities.invokeLater(() -> findingModel.add(new ReconModel.FindingRow(
+                    note.severity(), "hygiene", note.name(), "response", note.detail(), url)));
+            if (pair != null && ("HIGH".equals(note.severity()) || "MEDIUM".equals(note.severity()))) {
+                AuditIssueSeverity severity = "HIGH".equals(note.severity())
+                        ? AuditIssueSeverity.HIGH : AuditIssueSeverity.MEDIUM;
+                AuditIssue issue = auditIssue(
+                        "Recon Hound: " + note.name(),
+                        "<b>" + escape(note.name()) + "</b><br>" + escape(note.detail()),
+                        "Review the affected security header / token handling and harden per OWASP guidance.",
+                        url, severity, AuditIssueConfidence.FIRM,
+                        "Recon Hound passively inspects CORS, CSP and JWT hygiene in in-scope responses.",
+                        "Header-based findings are heuristic; confirm exploitability in context.",
+                        severity, pair);
+                api.siteMap().add(issue);
+            }
+        }
+    }
+
+    private void mineSourceMap(String url, HttpResponse response, HttpRequestResponse pair) {
+        try {
+            String contentType = response.headerValue("Content-Type");
+            String body = response.bodyToString();
+            if (!SourceMapMiner.looksLikeSourceMap(url, contentType, body)) return;
+            if (!minedMaps.add(url)) return;
+
+            List<SourceMapMiner.Source> sources = SourceMapMiner.parse(body);
+            if (sources.isEmpty()) return;
+            api.logging().logToOutput("[Recon Hound] Reconstructed " + sources.size() + " source(s) from " + url);
+            for (SourceMapMiner.Source source : sources) {
+                String label = "source-map:" + source.name();
+                scanMessage(source.content(), label, url, pair);
+                try {
+                    discoverFrom(URI.create(url), source.content(), label);
+                } catch (Exception ignored) {}
+            }
+            addSyntheticFinding("INFO", "sourcemap", "Source map exposed", "response",
+                    sources.size() + " original source file(s) recoverable", url);
+        } catch (Exception e) {
+            api.logging().logToError("Source-map mining failed for " + url, e);
+        }
+    }
+
+    private void ingestApiSpec(String url, HttpResponse response) {
+        try {
+            String body = response.bodyToString();
+            if (ApiSurfaceEngine.looksLikeGraphQlEndpoint(url)) {
+                if (issueDedupe.add("graphql-endpoint\0" + url)) {
+                    addSyntheticFinding("INFO", "graphql", "GraphQL endpoint", "response",
+                            "GraphQL endpoint observed; use 'Introspect GraphQL' to map the schema", url);
+                }
+            }
+            if (!ApiSurfaceEngine.looksLikeOpenApi(body)) return;
+            if (!ingestedSpecs.add(url)) return;
+
+            URI base = URI.create(url);
+            Set<String> paths = ApiSurfaceEngine.extractOpenApiPaths(body, base);
+            for (String path : paths) {
+                try {
+                    URI uri = URI.create(path);
+                    addDiscovered(uri, base, "OpenAPI spec " + url, false);
+                } catch (Exception ignored) {}
+            }
+            api.logging().logToOutput("[Recon Hound] Ingested OpenAPI spec " + url + " (" + paths.size() + " path(s))");
+            addSyntheticFinding("INFO", "openapi", "OpenAPI/Swagger spec", "response",
+                    paths.size() + " documented endpoint(s) imported", url);
+        } catch (Exception e) {
+            api.logging().logToError("API spec ingestion failed for " + url, e);
+        }
+    }
+
+    void introspectGraphql(String url) {
+        activeWorker.submit(() -> {
+            String target = url == null ? "" : url.trim();
+            if (!target.startsWith("http")) { api.logging().logToError("Invalid GraphQL URL: " + target); return; }
+            if (!api.scope().isInScope(target)) { api.logging().logToError("GraphQL target not in scope: " + target); return; }
+            try {
+                HttpRequest request = httpRequestFromUrl(target)
+                        .withMethod("POST")
+                        .withUpdatedHeader("Content-Type", "application/json")
+                        .withBody(ApiSurfaceEngine.introspectionQuery());
+                HttpRequestResponse rr = api.http().sendRequest(request);
+                if (rr == null || rr.response() == null) return;
+                String summary = ApiSurfaceEngine.summarizeIntrospection(rr.response().bodyToString());
+                boolean enabled = summary.contains("ENABLED");
+                addActiveRow(enabled ? "MEDIUM" : "INFO", "GraphQL", "introspection",
+                        enabled ? "confirmed" : "checked", summary, target);
+                if (enabled && rr.hasResponse()) {
+                    AuditIssue issue = auditIssue(
+                            "Recon Hound: GraphQL introspection enabled",
+                            "<b>GraphQL introspection is enabled</b><br>" + escape(summary),
+                            "Disable introspection in production to reduce schema disclosure.",
+                            target, AuditIssueSeverity.LOW, AuditIssueConfidence.FIRM,
+                            "Recon Hound queried the GraphQL introspection endpoint on request.",
+                            "Introspection disclosure is informational to low severity depending on exposure.",
+                            AuditIssueSeverity.LOW, rr);
+                    api.siteMap().add(issue);
+                }
+                api.logging().logToOutput("[Recon Hound] GraphQL introspection on " + target + ": " + summary);
+            } catch (Exception e) {
+                api.logging().logToError("GraphQL introspection failed for " + target, e);
+            }
+        });
     }
 
     private void analyzeReflections(HttpRequest request, HttpResponse response, HttpRequestResponse pair) {

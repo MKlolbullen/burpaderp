@@ -55,6 +55,21 @@ The results appear in two dedicated tabs — **XSS reflections** (live, per obse
 **XSS vector library** (the full catalogue as a copy-paste reference). High/medium-confidence
 reflections are also raised as tentative Burp audit issues.
 
+### Passive web-hygiene, source maps, and API surface
+
+More passive analysis runs on every in-scope response:
+
+- **Web hygiene** (`WebHygieneEngine`) — flags **CORS** misconfiguration (Origin reflection or
+  `null` origin, especially with `Allow-Credentials: true`), weak **CSP** directives
+  (`unsafe-inline`/`unsafe-eval`, source wildcards, missing `object-src`/`base-uri`), and **JWT**
+  defects (`alg:none`, brute-forceable HMAC, `kid` injection surface).
+- **Source-map reconstruction** (`SourceMapMiner`) — recovers original source from `.map` files via
+  `sourcesContent` and re-scans the recovered code for endpoints and secrets, which the minified
+  bundle usually hides.
+- **API-surface ingestion** (`ApiSurfaceEngine`) — parses **OpenAPI/Swagger** specs and imports every
+  documented path into discovery, and detects **GraphQL** endpoints. GraphQL **introspection** can be
+  run on demand from the active panel and reports whether the schema is exposed.
+
 This mapping is **passive**: Recon Hound observes only the values the target already returned and
 never injects payloads on its own. Confirming XSS still means manually firing a context-appropriate
 vector against an authorised target.
@@ -71,14 +86,21 @@ Enable it only against targets you are authorised to test.
   `~/.recon-hound/params.txt`) of common parameter names against an in-scope URL and reports names
   whose canary value is reflected or that materially change the response.
 - **Collaborator-backed active probes** — for each in-scope parameterised request:
-  - **SSRF** and **blind XSS** via Burp Collaborator: injected payloads carry a correlation tag, and
-    a background poller raises a HIGH audit issue when an out-of-band DNS/HTTP interaction confirms
-    the callback.
+  - **SSRF**, **blind XSS**, **OS command injection**, and **host-header injection** via Burp
+    Collaborator: injected payloads carry a correlation tag, and a background poller raises a HIGH
+    audit issue when an out-of-band DNS/HTTP interaction confirms the callback.
   - **SSTI**: template-arithmetic polyglots (`{{7*777}}`, `${7*777}`, `#{7*777}`, `<%=7*777%>`, …)
     confirmed only when the distinctive product `5439` is evaluated into the response.
   - **Reflected-XSS confirmation** (Dalfox/XSStrike-style): a metacharacter canary reveals which of
     `< > " '` survive unencoded at the sink.
+  - **Open redirect** and **CRLF/header injection**: confirmed from the `Location` header and
+    injected response headers respectively.
   - **WAF fingerprinting**: identifies common WAF/filter vendors from blocked responses.
+- **Access-control / IDOR testing** (`AccessControlEngine`, Autorize-style) — replays privileged
+  in-scope requests under an **alternate identity** (supplied session headers, or unauthenticated)
+  and compares responses. An equivalent successful response for the lower-privileged identity is
+  flagged as probable broken access control. Only **safe methods** (GET/HEAD/OPTIONS) are replayed by
+  default to avoid state-changing side effects.
 
 Results appear in the **Active tests** tab and, when confirmed, as Burp audit issues. Out-of-band
 findings arrive asynchronously as the Collaborator poller correlates interactions.
@@ -172,7 +194,11 @@ src/main/java/com/victor/reconloop/
 ├── XssVectorLibrary.java         # curated, context-aware XSS vector catalogue
 ├── CertificateTransparencyClient.java  # crt.sh subdomain enumeration (OSINT)
 ├── ParameterDiscoveryEngine.java # Arjun-style hidden-parameter discovery
-└── ActiveTestEngine.java         # opt-in SSRF/SSTI/XSS probing + Collaborator OOB
+├── WebHygieneEngine.java         # passive CORS / CSP / JWT analysis
+├── SourceMapMiner.java           # .map source reconstruction + re-mining
+├── ApiSurfaceEngine.java         # OpenAPI/Swagger + GraphQL surface ingestion
+├── AccessControlEngine.java      # Autorize-style IDOR / access-control testing
+└── ActiveTestEngine.java         # opt-in SSRF/SSTI/XSS/CMDi/CRLF probing + Collaborator OOB
 
 payloads/
 ├── manifest.json
