@@ -1,6 +1,8 @@
 package com.victor.reconloop;
 
 import burp.api.montoya.MontoyaApi;
+import burp.api.montoya.collaborator.CollaboratorClient;
+import burp.api.montoya.collaborator.Interaction;
 import burp.api.montoya.http.handler.*;
 import burp.api.montoya.http.message.HttpRequestResponse;
 import burp.api.montoya.http.message.requests.HttpRequest;
@@ -31,11 +33,15 @@ final class ReconController implements HttpHandler {
     private final PayloadLibrary payloadLibrary = new PayloadLibrary();
     private final ResponseSignalEngine responseSignals = new ResponseSignalEngine();
     private final XssReflectionEngine xssReflectionEngine = new XssReflectionEngine();
+    private final CertificateTransparencyClient ctClient;
+    private final ParameterDiscoveryEngine parameterDiscovery;
+    private final ActiveTestEngine activeTestEngine;
 
     private final ReconModel.FindingTableModel findingModel;
     private final ReconModel.DiscoveryTableModel discoveryModel;
     private final ReconModel.ParameterTableModel parameterModel;
     private final ReconModel.ReflectionTableModel reflectionModel;
+    private final ReconModel.ActiveTableModel activeModel;
 
     private final BlockingQueue<QueueItem> queue = new LinkedBlockingQueue<>();
     private final Set<String> queuedOrVisited = ConcurrentHashMap.newKeySet();
@@ -43,6 +49,8 @@ final class ReconController implements HttpHandler {
     private final Set<String> issueDedupe = ConcurrentHashMap.newKeySet();
     private final Set<String> parameterDedupe = ConcurrentHashMap.newKeySet();
     private final Set<String> reflectionDedupe = ConcurrentHashMap.newKeySet();
+    private final Set<String> activeDedupe = ConcurrentHashMap.newKeySet();
+    private final Set<String> oobDedupe = ConcurrentHashMap.newKeySet();
     private final Map<String, HttpRequest> originTemplates = new ConcurrentHashMap<>();
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> {
@@ -50,6 +58,20 @@ final class ReconController implements HttpHandler {
         t.setDaemon(true);
         return t;
     });
+
+    private final ExecutorService activeWorker = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "Burp-Recon-Hound-Active");
+        t.setDaemon(true);
+        return t;
+    });
+
+    private final ScheduledExecutorService oobPoller = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "Burp-Recon-Hound-Collaborator");
+        t.setDaemon(true);
+        return t;
+    });
+
+    private volatile CollaboratorClient collaborator;
 
     private final AtomicBoolean running = new AtomicBoolean(true);
     private final AtomicBoolean crawlEnabled = new AtomicBoolean(true);
@@ -59,8 +81,11 @@ final class ReconController implements HttpHandler {
     private final AtomicBoolean scanGfPatterns = new AtomicBoolean(true);
     private final AtomicBoolean followRedirects = new AtomicBoolean(true);
     private final AtomicBoolean detectReflections = new AtomicBoolean(true);
+    private final AtomicBoolean activeTestsEnabled = new AtomicBoolean(false);
     private final AtomicInteger maxRequests = new AtomicInteger(500);
     private final AtomicInteger maxRedirects = new AtomicInteger(8);
+    private final AtomicInteger activeThrottleMillis = new AtomicInteger(150);
+    private final AtomicInteger activeRequestBudget = new AtomicInteger(60);
     private final AtomicInteger sentRequests = new AtomicInteger(0);
 
     private volatile StatusListener statusListener = s -> {};
@@ -69,13 +94,19 @@ final class ReconController implements HttpHandler {
                     ReconModel.FindingTableModel findingModel,
                     ReconModel.DiscoveryTableModel discoveryModel,
                     ReconModel.ParameterTableModel parameterModel,
-                    ReconModel.ReflectionTableModel reflectionModel) {
+                    ReconModel.ReflectionTableModel reflectionModel,
+                    ReconModel.ActiveTableModel activeModel) {
         this.api = api;
         this.findingModel = findingModel;
         this.discoveryModel = discoveryModel;
         this.parameterModel = parameterModel;
         this.reflectionModel = reflectionModel;
+        this.activeModel = activeModel;
+        this.ctClient = new CertificateTransparencyClient(api);
+        this.parameterDiscovery = new ParameterDiscoveryEngine(api);
+        this.activeTestEngine = new ActiveTestEngine(api, activeThrottleMillis.get());
         worker.submit(this::workerLoop);
+        oobPoller.scheduleWithFixedDelay(this::pollCollaborator, 12, 12, TimeUnit.SECONDS);
     }
 
     interface StatusListener { void update(String status); }
@@ -89,12 +120,92 @@ final class ReconController implements HttpHandler {
     void setScanGfPatterns(boolean value) { scanGfPatterns.set(value); }
     void setFollowRedirects(boolean value) { followRedirects.set(value); }
     void setDetectReflections(boolean value) { detectReflections.set(value); }
+    void setActiveTestsEnabled(boolean value) { activeTestsEnabled.set(value); }
     void setMaxRequests(int value) { maxRequests.set(Math.max(1, value)); }
     void setMaxRedirects(int value) { maxRedirects.set(Math.max(0, value)); }
+    void setActiveRequestBudget(int value) { activeRequestBudget.set(Math.max(1, value)); }
 
     int gfPackCount() { return gfPatterns.packCount(); }
     int payloadCount() { return payloadLibrary.totalPayloads(); }
     String payloadCategories() { return String.join(", ", payloadLibrary.categories()); }
+    int paramWordlistSize() { return parameterDiscovery.wordlistSize(); }
+
+    /** Lazily creates the Collaborator client; returns false if Collaborator is unavailable. */
+    private boolean ensureCollaborator() {
+        if (collaborator != null) return true;
+        try {
+            collaborator = api.collaborator().createClient();
+            activeTestEngine.setCollaborator(collaborator);
+            api.logging().logToOutput("[Recon Hound] Collaborator client ready for OOB (SSRF / blind XSS) testing.");
+            return true;
+        } catch (Exception e) {
+            api.logging().logToError("Collaborator unavailable; OOB tests disabled", e);
+            return false;
+        }
+    }
+
+    void enumerateSubdomains(String domain) {
+        activeWorker.submit(() -> {
+            String normalized = CertificateTransparencyClient.normalizeDomain(domain);
+            if (normalized == null) {
+                api.logging().logToError("Invalid domain for crt.sh: " + domain);
+                return;
+            }
+            api.logging().logToOutput("[Recon Hound] crt.sh enumeration for " + normalized);
+            Set<String> hosts = ctClient.enumerate(normalized);
+            for (String host : hosts) {
+                try {
+                    URI uri = URI.create("https://" + host + "/");
+                    addDiscovered(uri, uri, "crt.sh CT log", false);
+                } catch (Exception ignored) {}
+            }
+            api.logging().logToOutput("[Recon Hound] crt.sh returned " + hosts.size() + " host(s) for " + normalized);
+            publishStatus();
+        });
+    }
+
+    void discoverParameters(String url) {
+        activeWorker.submit(() -> {
+            String target = url == null ? "" : url.trim();
+            if (!target.startsWith("http")) { api.logging().logToError("Invalid parameter-discovery URL: " + target); return; }
+            if (!api.scope().isInScope(target)) { api.logging().logToError("Target not in scope: " + target); return; }
+            HttpRequest base = httpRequestFromUrl(target);
+            api.logging().logToOutput("[Recon Hound] Arjun-style parameter discovery on " + target
+                    + " (" + parameterDiscovery.wordlistSize() + " candidates)");
+            for (ParameterDiscoveryEngine.Discovered found :
+                    parameterDiscovery.discover(base, activeRequestBudget.get() * 3, activeThrottleMillis.get())) {
+                addActiveRow("INFO", "PARAM", found.name(), "discovered", found.evidence(), found.url());
+            }
+            publishStatus();
+        });
+    }
+
+    void runActiveTests() {
+        if (!activeTestsEnabled.get()) {
+            api.logging().logToOutput("[Recon Hound] Active tests are disabled; enable the opt-in checkbox first.");
+            return;
+        }
+        ensureCollaborator();
+        activeWorker.submit(() -> {
+            List<HttpRequest> targets = api.siteMap().requestResponses().stream()
+                    .map(HttpRequestResponse::request)
+                    .filter(Objects::nonNull)
+                    .filter(HttpRequest::isInScope)
+                    .filter(HttpRequest::hasParameters)
+                    .collect(java.util.stream.Collectors.toMap(HttpRequest::url, r -> r, (a, b) -> a, LinkedHashMap::new))
+                    .values().stream().toList();
+
+            api.logging().logToOutput("[Recon Hound] Active testing " + targets.size() + " in-scope parameterised request(s).");
+            for (HttpRequest base : targets) {
+                if (!activeTestsEnabled.get()) break;
+                for (ActiveTestEngine.ActiveFinding finding : activeTestEngine.test(base, activeRequestBudget.get())) {
+                    reportActiveFinding(finding, base);
+                }
+                publishStatus();
+            }
+            api.logging().logToOutput("[Recon Hound] Active testing pass complete. OOB results will arrive asynchronously.");
+        });
+    }
 
     void enqueueSeeds(String multiline) {
         if (multiline == null) return;
@@ -138,12 +249,14 @@ final class ReconController implements HttpHandler {
         issueDedupe.clear();
         parameterDedupe.clear();
         reflectionDedupe.clear();
+        activeDedupe.clear();
         sentRequests.set(0);
         SwingUtilities.invokeLater(() -> {
             findingModel.clear();
             discoveryModel.clear();
             parameterModel.clear();
             reflectionModel.clear();
+            activeModel.clear();
         });
         publishStatus();
     }
@@ -151,6 +264,8 @@ final class ReconController implements HttpHandler {
     void shutdown() {
         running.set(false);
         worker.shutdownNow();
+        activeWorker.shutdownNow();
+        oobPoller.shutdownNow();
     }
 
     String status() {
@@ -161,6 +276,7 @@ final class ReconController implements HttpHandler {
                 + " | Sent: " + sentRequests.get() + "/" + maxRequests.get()
                 + " | Findings: " + issueDedupe.size()
                 + " | Reflections: " + reflectionDedupe.size()
+                + " | Active: " + activeDedupe.size()
                 + " | GF packs: " + gfPatterns.packCount()
                 + " | Payloads: " + payloadLibrary.totalPayloads();
     }
@@ -434,6 +550,90 @@ final class ReconController implements HttpHandler {
             }
         }
         publishStatus();
+    }
+
+    private void reportActiveFinding(ActiveTestEngine.ActiveFinding finding, HttpRequest base) {
+        String status = finding.confirmed() ? "confirmed" : "pending OOB";
+        String dedupe = "active\0" + finding.testClass() + "\0" + finding.parameter()
+                + "\0" + finding.url() + "\0" + finding.evidence();
+        if (!activeDedupe.add(dedupe)) return;
+
+        addActiveRow(finding.severity(), finding.testClass(), finding.parameter(), status, finding.evidence(), finding.url());
+
+        if (finding.confirmed() && !"INFO".equals(finding.severity())) {
+            AuditIssueSeverity severity = switch (finding.severity()) {
+                case "HIGH" -> AuditIssueSeverity.HIGH;
+                case "MEDIUM" -> AuditIssueSeverity.MEDIUM;
+                default -> AuditIssueSeverity.LOW;
+            };
+            String detail = "<b>Active test: " + escape(finding.testClass()) + "</b><br>"
+                    + "Parameter: <code>" + escape(finding.parameter()) + "</code><br>"
+                    + "Evidence: " + escape(finding.evidence());
+            AuditIssue issue = auditIssue(
+                    "Recon Hound: " + finding.testClass() + " (" + finding.parameter() + ")",
+                    detail,
+                    activeRemediation(finding.testClass()),
+                    finding.url(), severity, AuditIssueConfidence.FIRM,
+                    "Recon Hound actively probes parameters for SSRF, SSTI and XSS when active testing is enabled.",
+                    "Confirm the impact manually and only test targets you are authorised to assess.",
+                    severity);
+            api.siteMap().add(issue);
+        }
+    }
+
+    private void addActiveRow(String severity, String testClass, String parameter, String status, String evidence, String url) {
+        SwingUtilities.invokeLater(() -> activeModel.add(new ReconModel.ActiveRow(
+                severity, testClass, parameter, status, evidence, url)));
+    }
+
+    private static String activeRemediation(String testClass) {
+        return switch (testClass) {
+            case "SSRF", "SSRF-OOB" -> "Validate and allow-list outbound request destinations; block internal ranges and cloud metadata endpoints.";
+            case "SSTI" -> "Never pass user input into template source; use logic-less templates or strict sandboxing.";
+            case "XSS", "XSS-blind" -> "Context-encode reflected input and apply a strict Content-Security-Policy.";
+            default -> "Validate and encode user input for its output/interpreter context.";
+        };
+    }
+
+    private void pollCollaborator() {
+        CollaboratorClient client = collaborator;
+        if (client == null) return;
+        try {
+            for (Interaction interaction : client.getAllInteractions()) {
+                String key = interaction.id().toString() + "\0" + interaction.type();
+                if (!oobDedupe.add(key)) continue;
+
+                String[] context = interaction.customData()
+                        .map(ActiveTestEngine::decodeCorrelation)
+                        .orElse(null);
+                String testClass = context != null ? context[0] : "OOB";
+                String parameter = context != null ? context[1] : "(unknown)";
+                String url = context != null ? context[2] : "(unknown)";
+                String evidence = interaction.type() + " interaction from "
+                        + interaction.clientIp().getHostAddress();
+
+                addActiveRow("HIGH", testClass + "-OOB", parameter, "OOB confirmed", evidence, url);
+
+                AuditIssue issue = auditIssue(
+                        "Recon Hound: out-of-band " + testClass + " interaction",
+                        "<b>Confirmed OOB interaction</b><br>Class: " + escape(testClass) + "<br>"
+                                + "Parameter: <code>" + escape(parameter) + "</code><br>"
+                                + "Interaction: " + escape(evidence) + "<br>"
+                                + "The Collaborator payload injected into this parameter triggered a "
+                                + interaction.type() + " callback, confirming server-side request forgery "
+                                + "or blind script execution.",
+                        activeRemediation(testClass),
+                        "(unknown)".equals(url) ? "https://" + interaction.clientIp().getHostAddress() : url,
+                        AuditIssueSeverity.HIGH, AuditIssueConfidence.FIRM,
+                        "Recon Hound correlates Burp Collaborator interactions back to the injected parameter.",
+                        "OOB interactions are strong evidence; verify the affected functionality manually.",
+                        AuditIssueSeverity.HIGH);
+                api.siteMap().add(issue);
+            }
+            publishStatus();
+        } catch (Exception e) {
+            api.logging().logToError("Collaborator polling failed", e);
+        }
     }
 
     private void addSignalIssue(ResponseSignalEngine.Signal signal, String location, String url, HttpRequestResponse pair) {

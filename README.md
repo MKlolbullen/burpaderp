@@ -59,6 +59,41 @@ This mapping is **passive**: Recon Hound observes only the values the target alr
 never injects payloads on its own. Confirming XSS still means manually firing a context-appropriate
 vector against an authorised target.
 
+### Active testing (opt-in, off by default)
+
+An opt-in **Active testing** panel adds discovery and confirmation that require sending crafted
+traffic. It is **disabled by default**, scope-checked per request, throttled, and request-capped.
+Enable it only against targets you are authorised to test.
+
+- **crt.sh subdomain enumeration** — passive OSINT against the certificate-transparency log
+  (`crt.sh`, never the target). Discovered hosts feed the normal discovery/scope pipeline.
+- **Arjun-style parameter discovery** — probes a built-in wordlist (extendable via
+  `~/.recon-hound/params.txt`) of common parameter names against an in-scope URL and reports names
+  whose canary value is reflected or that materially change the response.
+- **Collaborator-backed active probes** — for each in-scope parameterised request:
+  - **SSRF** and **blind XSS** via Burp Collaborator: injected payloads carry a correlation tag, and
+    a background poller raises a HIGH audit issue when an out-of-band DNS/HTTP interaction confirms
+    the callback.
+  - **SSTI**: template-arithmetic polyglots (`{{7*777}}`, `${7*777}`, `#{7*777}`, `<%=7*777%>`, …)
+    confirmed only when the distinctive product `5439` is evaluated into the response.
+  - **Reflected-XSS confirmation** (Dalfox/XSStrike-style): a metacharacter canary reveals which of
+    `< > " '` survive unencoded at the sink.
+  - **WAF fingerprinting**: identifies common WAF/filter vendors from blocked responses.
+
+Results appear in the **Active tests** tab and, when confirmed, as Burp audit issues. Out-of-band
+findings arrive asynchronously as the Collaborator poller correlates interactions.
+
+## Reporting
+
+Findings surface in three places:
+
+- the Recon Hound **suite tab** tables (Findings, Discovered resources, Insertion points, XSS
+  reflections, Active tests);
+- Burp's **Dashboard / Target issue list** as audit issues — secrets, response-signal disclosures
+  (stack traces, source-map/internal-host leaks), reflected-XSS candidates, and confirmed active
+  findings (SSRF/SSTI/XSS, including OOB);
+- the extension **output/error log**.
+
 ## Safety / scope controls
 
 Active discovery is:
@@ -134,7 +169,10 @@ src/main/java/com/victor/reconloop/
 ├── PayloadLibrary.java           # external payload corpus indexing
 ├── RegexHound.java               # secret/credential regex engine
 ├── XssReflectionEngine.java      # passive reflected-XSS context mapper
-└── XssVectorLibrary.java         # curated, context-aware XSS vector catalogue
+├── XssVectorLibrary.java         # curated, context-aware XSS vector catalogue
+├── CertificateTransparencyClient.java  # crt.sh subdomain enumeration (OSINT)
+├── ParameterDiscoveryEngine.java # Arjun-style hidden-parameter discovery
+└── ActiveTestEngine.java         # opt-in SSRF/SSTI/XSS probing + Collaborator OOB
 
 payloads/
 ├── manifest.json

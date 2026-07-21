@@ -11,7 +11,8 @@ final class ReconPanel extends JPanel {
                ReconModel.FindingTableModel findingModel,
                ReconModel.DiscoveryTableModel discoveryModel,
                ReconModel.ParameterTableModel parameterModel,
-               ReconModel.ReflectionTableModel reflectionModel) {
+               ReconModel.ReflectionTableModel reflectionModel,
+               ReconModel.ActiveTableModel activeModel) {
         super(new BorderLayout(8, 8));
 
         JTextArea seeds = new JTextArea(5, 80);
@@ -58,6 +59,33 @@ final class ReconPanel extends JPanel {
 
         JLabel payloads = new JLabel("Payload categories: " + controller.payloadCategories());
         controls.add(payloads);
+
+        // ---- Active testing (opt-in) ----
+        JCheckBox activeEnabled = new JCheckBox("Enable active tests (fires payloads — authorized targets only)", false);
+        JSpinner activeBudget = new JSpinner(new SpinnerNumberModel(60, 1, 5000, 10));
+        JTextField ctDomain = new JTextField(18);
+        JButton ctButton = new JButton("Enumerate (crt.sh)");
+        JTextField paramUrl = new JTextField(22);
+        JButton paramButton = new JButton("Discover params (Arjun)");
+        JButton runActive = new JButton("Run active tests on in-scope site map");
+
+        JPanel activePanel = new JPanel();
+        activePanel.setLayout(new BoxLayout(activePanel, BoxLayout.Y_AXIS));
+        activePanel.setBorder(BorderFactory.createTitledBorder("Active testing (opt-in) — SSRF / SSTI / XSS via Burp Collaborator"));
+
+        JPanel activeRow1 = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        activeRow1.add(activeEnabled);
+        activeRow1.add(new JLabel("Per-request budget:")); activeRow1.add(activeBudget);
+        activeRow1.add(runActive);
+        activePanel.add(activeRow1);
+
+        JPanel activeRow2 = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        activeRow2.add(new JLabel("crt.sh domain:")); activeRow2.add(ctDomain); activeRow2.add(ctButton);
+        activeRow2.add(new JLabel("Param-discovery URL:")); activeRow2.add(paramUrl); activeRow2.add(paramButton);
+        activeRow2.add(new JLabel("Param wordlist: " + controller.paramWordlistSize()));
+        activePanel.add(activeRow2);
+        controls.add(activePanel);
+
         JLabel status = new JLabel(controller.status());
         controls.add(status);
         add(controls, BorderLayout.NORTH);
@@ -70,6 +98,8 @@ final class ReconPanel extends JPanel {
         parameters.setAutoCreateRowSorter(true);
         JTable reflectionTable = new JTable(reflectionModel);
         reflectionTable.setAutoCreateRowSorter(true);
+        JTable activeTable = new JTable(activeModel);
+        activeTable.setAutoCreateRowSorter(true);
         JTable vectorTable = buildVectorReferenceTable();
 
         JTabbedPane tabs = new JTabbedPane();
@@ -77,6 +107,7 @@ final class ReconPanel extends JPanel {
         tabs.addTab("Discovered resources", new JScrollPane(discoveries));
         tabs.addTab("Insertion points", new JScrollPane(parameters));
         tabs.addTab("XSS reflections", new JScrollPane(reflectionTable));
+        tabs.addTab("Active tests", new JScrollPane(activeTable));
         tabs.addTab("XSS vector library", new JScrollPane(vectorTable));
         add(tabs, BorderLayout.CENTER);
 
@@ -87,6 +118,11 @@ final class ReconPanel extends JPanel {
         gfPatterns.addActionListener(e -> controller.setScanGfPatterns(gfPatterns.isSelected()));
         redirects.addActionListener(e -> controller.setFollowRedirects(redirects.isSelected()));
         reflections.addActionListener(e -> controller.setDetectReflections(reflections.isSelected()));
+        activeEnabled.addActionListener(e -> controller.setActiveTestsEnabled(activeEnabled.isSelected()));
+        activeBudget.addChangeListener(e -> controller.setActiveRequestBudget((Integer) activeBudget.getValue()));
+        ctButton.addActionListener(e -> controller.enumerateSubdomains(ctDomain.getText()));
+        paramButton.addActionListener(e -> controller.discoverParameters(paramUrl.getText()));
+        runActive.addActionListener(e -> controller.runActiveTests());
         maxRequests.addChangeListener(e -> controller.setMaxRequests((Integer) maxRequests.getValue()));
         maxRedirects.addChangeListener(e -> controller.setMaxRedirects((Integer) maxRedirects.getValue()));
         addSeeds.addActionListener(e -> {
