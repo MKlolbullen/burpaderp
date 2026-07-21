@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "categories": [
+    {
+      "name": "lfi",
+      "file": "lfi.txt",
+      "payloads": 9477,
+      "bytes": 509549
+    },
+    {
+      "name": "rce",
+      "file": "rce.txt",
+      "payloads": 25,
+      "bytes": 439
+    },
+    {
+      "name": "rce_payloads",
+      "file": "rce_payloads.txt",
+      "payloads": 518,
+      "bytes": 21789
+    },
+    {
+      "name": "sqli",
+      "file": "sqli.txt",
+      "payloads": 144,
+      "bytes": 4385
+    },
+    {
+      "name": "sqli2",
+      "file": "sqli2.txt",
+      "payloads": 82,
+      "bytes": 810
+    },
+    {
+      "name": "ssti",
+      "file": "ssti.txt",
+      "payloads": 50,
+      "bytes": 4190
+    },
+    {
+      "name": "xss",
+      "file": "xss.txt",
+      "payloads": 68,
+      "bytes": 3039
+    }
+  ]
+}
