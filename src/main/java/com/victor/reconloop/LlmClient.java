@@ -25,6 +25,28 @@ final class LlmClient {
             + "sinks and their sources (potential DOM XSS), interesting or hidden functionality, and any "
             + "notable attack surface. Be concise and specific; cite the relevant code. Do not fabricate.";
 
+    static final String REQUEST_ANALYSIS_SYSTEM_PROMPT =
+            "You are a senior web-application penetration tester reviewing a single HTTP request/response "
+            + "for an authorised engagement. Explain what the endpoint does, then enumerate its attack "
+            + "surface: every parameter/header/cookie an attacker controls, the injection or logic classes "
+            + "each could enable (IDOR/BOLA, SQLi, SSRF, SSTI, XSS, open redirect, auth/session flaws, mass "
+            + "assignment), and what to change in the request to test each. Be specific and cite the exact "
+            + "field. Do not fabricate findings; mark anything speculative as such.";
+
+    static final String CHAIN_SYSTEM_PROMPT =
+            "You are a senior offensive-security engineer assisting an AUTHORISED bug-bounty tester. From the "
+            + "provided HTTP request/response or code, identify concrete vulnerabilities, then focus on how to "
+            + "CHAIN them into higher-impact attacks. For each realistic chain, give: (1) the primitives it "
+            + "combines and where each is observed here, (2) an ordered, reproducible sequence of steps with "
+            + "the exact request modifications/payloads, (3) the resulting impact (e.g. account takeover, data "
+            + "exfiltration, RCE), and (4) how to confirm it safely. Prefer chains supported by evidence in the "
+            + "input; clearly separate confirmed primitives from assumptions. Consider classic chains such as "
+            + "open-redirect -> OAuth code/token theft, SSRF -> cloud metadata -> credential use, reflected "
+            + "input + weak CSP -> XSS -> session/CSRF-token theft, IDOR + predictable IDs from source maps or "
+            + "API specs -> mass data access, host-header injection -> password-reset poisoning, and exposed "
+            + "secrets -> authenticated API abuse. Only target systems the tester is authorised to test; do not "
+            + "invent evidence.";
+
     private static final int MAX_OUTPUT_TOKENS = 4096;
     private static final int MAX_INPUT_CHARS = 200_000;
 

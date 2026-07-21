@@ -117,6 +117,12 @@ and **Google Gemini**, each called over raw HTTPS (no vendor SDK is bundled).
   persisted** to the Burp project, and requests go **direct** (not through Burp), so keys never enter
   the proxy history or trip Recon Hound's own secret scanner.
 - **Strictly manual.** Nothing is ever sent automatically — you paste content and click *Analyze*.
+- **Right-click integration.** Any request/response in Proxy history, the site map, or Repeater has a
+  **Recon Hound: AI analysis** submenu with three presets — *Explain request/response & attack
+  surface*, *Find vulnerabilities*, and *Suggest exploitation & chaining* — which load the message
+  into the AI tab and run it. The chaining preset focuses on combining primitives (e.g. open-redirect
+  → OAuth token theft, SSRF → cloud metadata, reflected input + weak CSP → XSS → token theft, IDOR +
+  predictable IDs from source maps/specs) into ordered, reproducible, higher-impact attacks.
 
 > ⚠️ **Privacy:** this sends target-derived data to a third-party LLM. Some bug-bounty programs
 > prohibit sharing target data with third parties — only use it on data you are authorised to share.
@@ -216,7 +222,8 @@ src/main/java/com/victor/reconloop/
 ├── AccessControlEngine.java      # Autorize-style IDOR / access-control testing
 ├── ActiveTestEngine.java         # opt-in SSRF/SSTI/XSS/CMDi/CRLF probing + Collaborator OOB
 ├── LlmProvider.java              # multi-vendor LLM definitions (Anthropic/OpenAI/xAI/Gemini)
-└── LlmClient.java                # manual, on-demand LLM analysis over raw HTTPS
+├── LlmClient.java                # manual, on-demand LLM analysis over raw HTTPS
+└── ReconContextMenu.java         # right-click "AI analysis" submenu (explain / find / chain)
 
 payloads/
 ├── manifest.json

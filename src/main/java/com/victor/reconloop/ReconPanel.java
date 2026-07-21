@@ -7,6 +7,16 @@ import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 
 final class ReconPanel extends JPanel {
+    private JTabbedPane tabs;
+    private Component aiTab;
+    private JComboBox<LlmProvider> aiProvider;
+    private JTextField aiModel;
+    private JPasswordField aiKey;
+    private JTextArea aiSystem;
+    private JTextArea aiInput;
+    private JTextArea aiOutput;
+    private JButton aiAnalyze;
+
     ReconPanel(MontoyaApi api, ReconController controller,
                ReconModel.FindingTableModel findingModel,
                ReconModel.DiscoveryTableModel discoveryModel,
@@ -120,14 +130,15 @@ final class ReconPanel extends JPanel {
         activeTable.setAutoCreateRowSorter(true);
         JTable vectorTable = buildVectorReferenceTable();
 
-        JTabbedPane tabs = new JTabbedPane();
+        tabs = new JTabbedPane();
         tabs.addTab("Findings", new JScrollPane(findings));
         tabs.addTab("Discovered resources", new JScrollPane(discoveries));
         tabs.addTab("Insertion points", new JScrollPane(parameters));
         tabs.addTab("XSS reflections", new JScrollPane(reflectionTable));
         tabs.addTab("Active tests", new JScrollPane(activeTable));
         tabs.addTab("XSS vector library", new JScrollPane(vectorTable));
-        tabs.addTab("AI analysis", buildAiPanel(controller));
+        aiTab = buildAiPanel(controller);
+        tabs.addTab("AI analysis", aiTab);
         add(tabs, BorderLayout.CENTER);
 
         autoLoop.addActionListener(e -> controller.setCrawlEnabled(autoLoop.isSelected()));
@@ -160,7 +171,19 @@ final class ReconPanel extends JPanel {
         api.userInterface().applyThemeToComponent(this);
     }
 
-    private static JPanel buildAiPanel(ReconController controller) {
+    /** Loads content into the AI tab, optionally sets a system-prompt preset, selects the tab, and runs. */
+    void sendToAi(String text, String systemPreset) {
+        if (aiInput == null) return;
+        SwingUtilities.invokeLater(() -> {
+            if (systemPreset != null && !systemPreset.isBlank()) aiSystem.setText(systemPreset);
+            aiInput.setText(text == null ? "" : text);
+            aiInput.setCaretPosition(0);
+            if (aiTab != null) tabs.setSelectedComponent(aiTab);
+            aiAnalyze.doClick();
+        });
+    }
+
+    private JPanel buildAiPanel(ReconController controller) {
         JPanel panel = new JPanel(new BorderLayout(6, 6));
 
         JComboBox<LlmProvider> provider = new JComboBox<>(LlmProvider.values());
@@ -169,6 +192,10 @@ final class ReconPanel extends JPanel {
         apiKey.setToolTipText("Leave blank to use the provider's environment variable; kept in memory only, never saved.");
         JButton analyze = new JButton("Analyze");
         JButton clearKey = new JButton("Clear key");
+        this.aiProvider = provider;
+        this.aiModel = model;
+        this.aiKey = apiKey;
+        this.aiAnalyze = analyze;
 
         provider.addActionListener(e -> {
             LlmProvider p = (LlmProvider) provider.getSelectedItem();
@@ -187,6 +214,9 @@ final class ReconPanel extends JPanel {
         input.setToolTipText("Paste JavaScript, recovered source, a response, or a finding to analyze.");
         JTextArea output = new JTextArea(14, 80);
         output.setEditable(false); output.setLineWrap(true); output.setWrapStyleWord(true);
+        this.aiSystem = system;
+        this.aiInput = input;
+        this.aiOutput = output;
 
         JPanel prompts = new JPanel(new GridLayout(0, 1, 4, 4));
         prompts.add(new JLabel("System prompt:"));
