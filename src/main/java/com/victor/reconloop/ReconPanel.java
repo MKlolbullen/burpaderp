@@ -5,6 +5,12 @@ import burp.api.montoya.MontoyaApi;
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.TreeSet;
 
 final class ReconPanel extends JPanel {
     private JTabbedPane tabs;
@@ -139,7 +145,7 @@ final class ReconPanel extends JPanel {
         tabs.addTab("Insertion points", new JScrollPane(parameters));
         tabs.addTab("XSS reflections", new JScrollPane(reflectionTable));
         tabs.addTab("Active tests", new JScrollPane(activeTable));
-        tabs.addTab("Hosts / IPs", new JScrollPane(assetTable));
+        tabs.addTab("Hosts / IPs", buildAssetPanel(controller, assetTable, assetModel));
         tabs.addTab("XSS vector library", new JScrollPane(vectorTable));
         aiTab = buildAiPanel(controller);
         tabs.addTab("AI analysis", aiTab);
@@ -252,6 +258,59 @@ final class ReconPanel extends JPanel {
                     });
         });
         return panel;
+    }
+
+    private static JPanel buildAssetPanel(ReconController controller, JTable table, ReconModel.AssetTableModel model) {
+        JPanel panel = new JPanel(new BorderLayout(4, 4));
+        panel.add(new JScrollPane(table), BorderLayout.CENTER);
+
+        JButton export = new JButton("Export…");
+        JButton addScope = new JButton("Add all to scope");
+        JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        bar.add(export);
+        bar.add(addScope);
+        bar.add(new JLabel("Exports hosts.txt / ips.txt / assets.txt to a chosen folder."));
+        panel.add(bar, BorderLayout.SOUTH);
+
+        export.addActionListener(e -> exportAssets(panel, model));
+        addScope.addActionListener(e -> {
+            int count = controller.addAllAssetsToScope();
+            JOptionPane.showMessageDialog(panel, "Added " + count + " host/IP asset(s) to Burp scope.");
+        });
+        return panel;
+    }
+
+    private static void exportAssets(Component parent, ReconModel.AssetTableModel model) {
+        List<ReconModel.AssetRow> rows = model.snapshot();
+        if (rows.isEmpty()) {
+            JOptionPane.showMessageDialog(parent, "No hosts/IPs collected yet.");
+            return;
+        }
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Choose export folder");
+        chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        if (chooser.showSaveDialog(parent) != JFileChooser.APPROVE_OPTION) return;
+
+        Path dir = chooser.getSelectedFile().toPath();
+        TreeSet<String> hosts = new TreeSet<>();
+        TreeSet<String> ips = new TreeSet<>();
+        TreeSet<String> all = new TreeSet<>();
+        for (ReconModel.AssetRow row : rows) {
+            all.add(row.value());
+            if ("host".equals(row.type())) hosts.add(row.value());
+            else ips.add(row.value());
+        }
+        try {
+            Files.write(dir.resolve("hosts.txt"), new ArrayList<>(hosts));
+            Files.write(dir.resolve("ips.txt"), new ArrayList<>(ips));
+            Files.write(dir.resolve("assets.txt"), new ArrayList<>(all));
+            JOptionPane.showMessageDialog(parent,
+                    "Wrote hosts.txt (" + hosts.size() + "), ips.txt (" + ips.size()
+                            + "), assets.txt (" + all.size() + ") to\n" + dir);
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(parent, "Export failed: " + ex.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
+        }
     }
 
     private static JTable buildVectorReferenceTable() {

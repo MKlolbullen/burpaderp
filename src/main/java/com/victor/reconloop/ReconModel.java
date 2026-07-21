@@ -109,5 +109,6 @@ final class ReconModel {
         }
         void add(AssetRow row) { rows.add(0, row); fireTableRowsInserted(0, 0); }
         void clear() { int n = rows.size(); rows.clear(); if (n > 0) fireTableDataChanged(); }
+        List<AssetRow> snapshot() { return new ArrayList<>(rows); }
     }
 }

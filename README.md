@@ -31,7 +31,9 @@ full access to the modern HTTP handler, site map, scope, scanner-issue, and UI A
 - Detects response signals such as stack traces, debug disclosures, source-map references, directory
   listings, and internal-hostname hints.
 - Aggregates every unique **host and IP** observed (discovered URLs, crt.sh results, and validated
-  IPv4/IPv6 literals in traffic) into a dedicated **Hosts / IPs** asset inventory tab.
+  IPv4/IPv6 literals in traffic) into a dedicated **Hosts / IPs** asset inventory tab, with
+  **Export…** (writes `hosts.txt` / `ips.txt` / `assets.txt` to a chosen folder) and **Add all to
+  scope** (adds every collected host/IP to Burp's target scope over http and https).
 - Indexes external payload `.txt` corpora without blindly auto-firing them.
 
 ### Passive XSS surface mapping

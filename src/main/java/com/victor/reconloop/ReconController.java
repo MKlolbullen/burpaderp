@@ -153,6 +153,25 @@ final class ReconController implements HttpHandler {
         }
     }
 
+    /** Adds every collected host and IP asset to Burp's target scope (both http and https). */
+    int addAllAssetsToScope() {
+        int count = 0;
+        for (String host : assetHosts) {
+            api.scope().includeInScope("https://" + host + "/");
+            api.scope().includeInScope("http://" + host + "/");
+            count++;
+        }
+        for (String ip : assetIps) {
+            String literal = ip.contains(":") ? "[" + ip + "]" : ip;
+            api.scope().includeInScope("https://" + literal + "/");
+            api.scope().includeInScope("http://" + literal + "/");
+            count++;
+        }
+        api.logging().logToOutput("[Recon Hound] Added " + count + " host/IP asset(s) to Burp scope.");
+        publishStatus();
+        return count;
+    }
+
     void enumerateSubdomains(String domain) {
         activeWorker.submit(() -> {
             String normalized = CertificateTransparencyClient.normalizeDomain(domain);
