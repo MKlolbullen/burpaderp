@@ -5,14 +5,31 @@ import burp.api.montoya.MontoyaApi;
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.TreeSet;
 
 final class ReconPanel extends JPanel {
+    private JTabbedPane tabs;
+    private Component aiTab;
+    private JComboBox<LlmProvider> aiProvider;
+    private JTextField aiModel;
+    private JPasswordField aiKey;
+    private JTextArea aiSystem;
+    private JTextArea aiInput;
+    private JTextArea aiOutput;
+    private JButton aiAnalyze;
+
     ReconPanel(MontoyaApi api, ReconController controller,
                ReconModel.FindingTableModel findingModel,
                ReconModel.DiscoveryTableModel discoveryModel,
                ReconModel.ParameterTableModel parameterModel,
                ReconModel.ReflectionTableModel reflectionModel,
-               ReconModel.ActiveTableModel activeModel) {
+               ReconModel.ActiveTableModel activeModel,
+               ReconModel.AssetTableModel assetModel) {
         super(new BorderLayout(8, 8));
 
         JTextArea seeds = new JTextArea(5, 80);
@@ -118,15 +135,20 @@ final class ReconPanel extends JPanel {
         reflectionTable.setAutoCreateRowSorter(true);
         JTable activeTable = new JTable(activeModel);
         activeTable.setAutoCreateRowSorter(true);
+        JTable assetTable = new JTable(assetModel);
+        assetTable.setAutoCreateRowSorter(true);
         JTable vectorTable = buildVectorReferenceTable();
 
-        JTabbedPane tabs = new JTabbedPane();
+        tabs = new JTabbedPane();
         tabs.addTab("Findings", new JScrollPane(findings));
         tabs.addTab("Discovered resources", new JScrollPane(discoveries));
         tabs.addTab("Insertion points", new JScrollPane(parameters));
         tabs.addTab("XSS reflections", new JScrollPane(reflectionTable));
         tabs.addTab("Active tests", new JScrollPane(activeTable));
+        tabs.addTab("Hosts / IPs", buildAssetPanel(controller, assetTable, assetModel));
         tabs.addTab("XSS vector library", new JScrollPane(vectorTable));
+        aiTab = buildAiPanel(controller);
+        tabs.addTab("AI analysis", aiTab);
         add(tabs, BorderLayout.CENTER);
 
         autoLoop.addActionListener(e -> controller.setCrawlEnabled(autoLoop.isSelected()));
@@ -157,6 +179,138 @@ final class ReconPanel extends JPanel {
 
         controller.setStatusListener(status::setText);
         api.userInterface().applyThemeToComponent(this);
+    }
+
+    /** Loads content into the AI tab, optionally sets a system-prompt preset, selects the tab, and runs. */
+    void sendToAi(String text, String systemPreset) {
+        if (aiInput == null) return;
+        SwingUtilities.invokeLater(() -> {
+            if (systemPreset != null && !systemPreset.isBlank()) aiSystem.setText(systemPreset);
+            aiInput.setText(text == null ? "" : text);
+            aiInput.setCaretPosition(0);
+            if (aiTab != null) tabs.setSelectedComponent(aiTab);
+            aiAnalyze.doClick();
+        });
+    }
+
+    private JPanel buildAiPanel(ReconController controller) {
+        JPanel panel = new JPanel(new BorderLayout(6, 6));
+
+        JComboBox<LlmProvider> provider = new JComboBox<>(LlmProvider.values());
+        JTextField model = new JTextField(((LlmProvider) provider.getSelectedItem()).defaultModel(), 22);
+        JPasswordField apiKey = new JPasswordField(26);
+        apiKey.setToolTipText("Leave blank to use the provider's environment variable; kept in memory only, never saved.");
+        JButton analyze = new JButton("Analyze");
+        JButton clearKey = new JButton("Clear key");
+        this.aiProvider = provider;
+        this.aiModel = model;
+        this.aiKey = apiKey;
+        this.aiAnalyze = analyze;
+
+        provider.addActionListener(e -> {
+            LlmProvider p = (LlmProvider) provider.getSelectedItem();
+            if (p != null) model.setText(p.defaultModel());
+        });
+
+        JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        top.add(new JLabel("Provider:")); top.add(provider);
+        top.add(new JLabel("Model:")); top.add(model);
+        top.add(new JLabel("API key (blank = $ENV):")); top.add(apiKey); top.add(clearKey);
+        top.add(analyze);
+
+        JTextArea system = new JTextArea(LlmClient.DEFAULT_JS_SYSTEM_PROMPT, 3, 80);
+        system.setLineWrap(true); system.setWrapStyleWord(true);
+        JTextArea input = new JTextArea(12, 80);
+        input.setToolTipText("Paste JavaScript, recovered source, a response, or a finding to analyze.");
+        JTextArea output = new JTextArea(14, 80);
+        output.setEditable(false); output.setLineWrap(true); output.setWrapStyleWord(true);
+        this.aiSystem = system;
+        this.aiInput = input;
+        this.aiOutput = output;
+
+        JPanel prompts = new JPanel(new GridLayout(0, 1, 4, 4));
+        prompts.add(new JLabel("System prompt:"));
+        prompts.add(new JScrollPane(system));
+        prompts.add(new JLabel("Input (sent to the selected third-party LLM — authorized data only):"));
+        prompts.add(new JScrollPane(input));
+
+        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, prompts, new JScrollPane(output));
+        split.setResizeWeight(0.6);
+
+        JLabel privacy = new JLabel("Manual only — nothing is sent until you click Analyze. Data leaves Burp to a third party.");
+
+        panel.add(top, BorderLayout.NORTH);
+        panel.add(split, BorderLayout.CENTER);
+        panel.add(privacy, BorderLayout.SOUTH);
+
+        clearKey.addActionListener(e -> apiKey.setText(""));
+        analyze.addActionListener(e -> {
+            String text = input.getText();
+            if (text == null || text.isBlank()) { output.setText("[nothing to analyze]"); return; }
+            LlmProvider p = (LlmProvider) provider.getSelectedItem();
+            output.setText("Analyzing with " + (p == null ? "?" : p.label()) + "...");
+            analyze.setEnabled(false);
+            controller.analyzeWithLlm(p, model.getText(), new String(apiKey.getPassword()),
+                    system.getText(), text, result -> {
+                        output.setText(result);
+                        output.setCaretPosition(0);
+                        analyze.setEnabled(true);
+                    });
+        });
+        return panel;
+    }
+
+    private static JPanel buildAssetPanel(ReconController controller, JTable table, ReconModel.AssetTableModel model) {
+        JPanel panel = new JPanel(new BorderLayout(4, 4));
+        panel.add(new JScrollPane(table), BorderLayout.CENTER);
+
+        JButton export = new JButton("Export…");
+        JButton addScope = new JButton("Add all to scope");
+        JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        bar.add(export);
+        bar.add(addScope);
+        bar.add(new JLabel("Exports hosts.txt / ips.txt / assets.txt to a chosen folder."));
+        panel.add(bar, BorderLayout.SOUTH);
+
+        export.addActionListener(e -> exportAssets(panel, model));
+        addScope.addActionListener(e -> {
+            int count = controller.addAllAssetsToScope();
+            JOptionPane.showMessageDialog(panel, "Added " + count + " host/IP asset(s) to Burp scope.");
+        });
+        return panel;
+    }
+
+    private static void exportAssets(Component parent, ReconModel.AssetTableModel model) {
+        List<ReconModel.AssetRow> rows = model.snapshot();
+        if (rows.isEmpty()) {
+            JOptionPane.showMessageDialog(parent, "No hosts/IPs collected yet.");
+            return;
+        }
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Choose export folder");
+        chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        if (chooser.showSaveDialog(parent) != JFileChooser.APPROVE_OPTION) return;
+
+        Path dir = chooser.getSelectedFile().toPath();
+        TreeSet<String> hosts = new TreeSet<>();
+        TreeSet<String> ips = new TreeSet<>();
+        TreeSet<String> all = new TreeSet<>();
+        for (ReconModel.AssetRow row : rows) {
+            all.add(row.value());
+            if ("host".equals(row.type())) hosts.add(row.value());
+            else ips.add(row.value());
+        }
+        try {
+            Files.write(dir.resolve("hosts.txt"), new ArrayList<>(hosts));
+            Files.write(dir.resolve("ips.txt"), new ArrayList<>(ips));
+            Files.write(dir.resolve("assets.txt"), new ArrayList<>(all));
+            JOptionPane.showMessageDialog(parent,
+                    "Wrote hosts.txt (" + hosts.size() + "), ips.txt (" + ips.size()
+                            + "), assets.txt (" + all.size() + ") to\n" + dir);
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(parent, "Export failed: " + ex.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
+        }
     }
 
     private static JTable buildVectorReferenceTable() {

@@ -30,6 +30,10 @@ full access to the modern HTTP handler, site map, scope, scanner-issue, and UI A
   path traversal/LFI, command injection/RCE, SSRF, open redirect, and IDOR/BOLA.
 - Detects response signals such as stack traces, debug disclosures, source-map references, directory
   listings, and internal-hostname hints.
+- Aggregates every unique **host and IP** observed (discovered URLs, crt.sh results, and validated
+  IPv4/IPv6 literals in traffic) into a dedicated **Hosts / IPs** asset inventory tab, with
+  **Export…** (writes `hosts.txt` / `ips.txt` / `assets.txt` to a chosen folder) and **Add all to
+  scope** (adds every collected host/IP to Burp's target scope over http and https).
 - Indexes external payload `.txt` corpora without blindly auto-firing them.
 
 ### Passive XSS surface mapping
@@ -104,6 +108,30 @@ Enable it only against targets you are authorised to test.
 
 Results appear in the **Active tests** tab and, when confirmed, as Burp audit issues. Out-of-band
 findings arrive asynchronously as the Collaborator poller correlates interactions.
+
+### AI analysis (optional, manual)
+
+An **AI analysis** tab can send pasted content (recovered JavaScript, source maps, responses, or a
+finding) to a large language model for review — endpoint/parameter extraction, DOM source→sink
+hints, secret spotting, and triage. Providers: **Anthropic (Claude)**, **OpenAI**, **xAI (Grok)**,
+and **Google Gemini**, each called over raw HTTPS (no vendor SDK is bundled).
+
+- **API keys** come from an in-memory UI field or the provider's environment variable
+  (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `GEMINI_API_KEY`). They are **never
+  persisted** to the Burp project, and requests go **direct** (not through Burp), so keys never enter
+  the proxy history or trip Recon Hound's own secret scanner.
+- **Strictly manual.** Nothing is ever sent automatically — you paste content and click *Analyze*.
+- **Right-click integration.** Any request/response in Proxy history, the site map, or Repeater has a
+  **Recon Hound: AI analysis** submenu with three presets — *Explain request/response & attack
+  surface*, *Find vulnerabilities*, and *Suggest exploitation & chaining* — which load the message
+  into the AI tab and run it. When text is highlighted in a message editor, two extra items
+  (*Analyze selected text*, *…suggest exploitation & chaining*) send just the selection. The chaining
+  preset focuses on combining primitives (e.g. open-redirect → OAuth token theft, SSRF → cloud
+  metadata, reflected input + weak CSP → XSS → token theft, IDOR + predictable IDs from source
+  maps/specs) into ordered, reproducible, higher-impact attacks.
+
+> ⚠️ **Privacy:** this sends target-derived data to a third-party LLM. Some bug-bounty programs
+> prohibit sharing target data with third parties — only use it on data you are authorised to share.
 
 ## Reporting
 
@@ -198,7 +226,10 @@ src/main/java/com/victor/reconloop/
 ├── SourceMapMiner.java           # .map source reconstruction + re-mining
 ├── ApiSurfaceEngine.java         # OpenAPI/Swagger + GraphQL surface ingestion
 ├── AccessControlEngine.java      # Autorize-style IDOR / access-control testing
-└── ActiveTestEngine.java         # opt-in SSRF/SSTI/XSS/CMDi/CRLF probing + Collaborator OOB
+├── ActiveTestEngine.java         # opt-in SSRF/SSTI/XSS/CMDi/CRLF probing + Collaborator OOB
+├── LlmProvider.java              # multi-vendor LLM definitions (Anthropic/OpenAI/xAI/Gemini)
+├── LlmClient.java                # manual, on-demand LLM analysis over raw HTTPS
+└── ReconContextMenu.java         # right-click "AI analysis" submenu (explain / find / chain)
 
 payloads/
 ├── manifest.json

@@ -12,6 +12,7 @@ final class ReconModel {
                          String surviving, String suggestion, String value, String url) {}
     record ActiveRow(String severity, String testClass, String parameter, String status,
                      String evidence, String url) {}
+    record AssetRow(String type, String value, String source) {}
 
     static final class FindingTableModel extends AbstractTableModel {
         private final String[] columns = {"Severity", "Provider", "Rule", "Location", "Value", "URL"};
@@ -94,5 +95,20 @@ final class ReconModel {
         }
         void add(ActiveRow row) { rows.add(0, row); fireTableRowsInserted(0, 0); }
         void clear() { int n = rows.size(); rows.clear(); if (n > 0) fireTableDataChanged(); }
+    }
+
+    static final class AssetTableModel extends AbstractTableModel {
+        private final String[] columns = {"Type", "Host / IP", "First seen"};
+        private final List<AssetRow> rows = new ArrayList<>();
+        @Override public int getRowCount() { return rows.size(); }
+        @Override public int getColumnCount() { return columns.length; }
+        @Override public String getColumnName(int column) { return columns[column]; }
+        @Override public Object getValueAt(int row, int col) {
+            AssetRow r = rows.get(row);
+            return switch (col) { case 0 -> r.type(); case 1 -> r.value(); default -> r.source(); };
+        }
+        void add(AssetRow row) { rows.add(0, row); fireTableRowsInserted(0, 0); }
+        void clear() { int n = rows.size(); rows.clear(); if (n > 0) fireTableDataChanged(); }
+        List<AssetRow> snapshot() { return new ArrayList<>(rows); }
     }
 }
