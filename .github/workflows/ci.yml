@@ -1,19 +1,16 @@
 name: CI
 
-# Build and validate on pull requests and feature-branch pushes. No release is
-# published here — that is handled by release.yml on pushes to main.
+# Build and validate on pull requests. No release is published here — that is
+# handled by release.yml on pushes to main.
 
 on:
   pull_request:
-  push:
-    branches-ignore:
-      - main
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Cancel superseded runs for the same branch/PR.
+# Cancel superseded runs for the same PR.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
