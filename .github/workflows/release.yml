@@ -1,0 +1,79 @@
+name: Release
+
+# Build the extension jar and publish a GitHub Release for every commit that
+# lands on the default branch. Each release gets an auto-incrementing version
+# (0.2.<run number>) and the built jar attached as an asset.
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Compute version
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION="0.2.${GITHUB_RUN_NUMBER}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build jar
+        run: ./gradlew clean build --no-daemon -PreleaseVersion=${{ steps.version.outputs.version }}
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          SHA_SHORT: ${{ steps.version.outputs.sha_short }}
+        run: |
+          set -euo pipefail
+          JAR="build/libs/burp-recon-hound-${VERSION}.jar"
+          test -f "$JAR"
+
+          NOTES="$(mktemp)"
+          {
+            printf 'Automated release built from commit `%s` on `main`, using Java 21 against `montoya-api:2026.7`.\n\n' "$SHA_SHORT"
+            printf '**Install:** Burp Suite → Extensions → Installed → Add → Java → select `burp-recon-hound-%s.jar`.\n' "$VERSION"
+          } > "$NOTES"
+
+          # Make re-runs idempotent: replace an existing release/tag for this run number.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release delete "$TAG" --yes --cleanup-tag
+          fi
+
+          gh release create "$TAG" "$JAR" \
+            --target "$GITHUB_SHA" \
+            --title "Recon Hound ${VERSION}" \
+            --notes-file "$NOTES" \
+            --generate-notes
