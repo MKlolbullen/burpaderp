@@ -203,6 +203,25 @@ final class RegexHound {
         return out;
     }
 
+    /** Extracts syntactically valid IPv4/IPv6 literals from arbitrary text (independent of severity). */
+    static List<String> extractIps(String text) {
+        if (text == null || text.isEmpty()) return List.of();
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        for (Rule rule : RULES) {
+            boolean v4 = rule.id().equals("ipv4");
+            boolean v6 = rule.id().equals("ipv6");
+            if (!v4 && !v6) continue;
+            Matcher matcher = rule.pattern().matcher(text);
+            while (matcher.find()) {
+                String value = matcher.group();
+                if (v4 && !validIpv4(value)) continue;
+                if (v6 && !validIpv6(value)) continue;
+                out.add(value);
+            }
+        }
+        return new ArrayList<>(out);
+    }
+
     static String redact(String value) {
         if (value == null) return "";
         if (value.length() <= 10) return "***";

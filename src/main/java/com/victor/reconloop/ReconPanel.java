@@ -22,7 +22,8 @@ final class ReconPanel extends JPanel {
                ReconModel.DiscoveryTableModel discoveryModel,
                ReconModel.ParameterTableModel parameterModel,
                ReconModel.ReflectionTableModel reflectionModel,
-               ReconModel.ActiveTableModel activeModel) {
+               ReconModel.ActiveTableModel activeModel,
+               ReconModel.AssetTableModel assetModel) {
         super(new BorderLayout(8, 8));
 
         JTextArea seeds = new JTextArea(5, 80);
@@ -128,6 +129,8 @@ final class ReconPanel extends JPanel {
         reflectionTable.setAutoCreateRowSorter(true);
         JTable activeTable = new JTable(activeModel);
         activeTable.setAutoCreateRowSorter(true);
+        JTable assetTable = new JTable(assetModel);
+        assetTable.setAutoCreateRowSorter(true);
         JTable vectorTable = buildVectorReferenceTable();
 
         tabs = new JTabbedPane();
@@ -136,6 +139,7 @@ final class ReconPanel extends JPanel {
         tabs.addTab("Insertion points", new JScrollPane(parameters));
         tabs.addTab("XSS reflections", new JScrollPane(reflectionTable));
         tabs.addTab("Active tests", new JScrollPane(activeTable));
+        tabs.addTab("Hosts / IPs", new JScrollPane(assetTable));
         tabs.addTab("XSS vector library", new JScrollPane(vectorTable));
         aiTab = buildAiPanel(controller);
         tabs.addTab("AI analysis", aiTab);

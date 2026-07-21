@@ -30,6 +30,8 @@ full access to the modern HTTP handler, site map, scope, scanner-issue, and UI A
   path traversal/LFI, command injection/RCE, SSRF, open redirect, and IDOR/BOLA.
 - Detects response signals such as stack traces, debug disclosures, source-map references, directory
   listings, and internal-hostname hints.
+- Aggregates every unique **host and IP** observed (discovered URLs, crt.sh results, and validated
+  IPv4/IPv6 literals in traffic) into a dedicated **Hosts / IPs** asset inventory tab.
 - Indexes external payload `.txt` corpora without blindly auto-firing them.
 
 ### Passive XSS surface mapping
@@ -120,9 +122,11 @@ and **Google Gemini**, each called over raw HTTPS (no vendor SDK is bundled).
 - **Right-click integration.** Any request/response in Proxy history, the site map, or Repeater has a
   **Recon Hound: AI analysis** submenu with three presets — *Explain request/response & attack
   surface*, *Find vulnerabilities*, and *Suggest exploitation & chaining* — which load the message
-  into the AI tab and run it. The chaining preset focuses on combining primitives (e.g. open-redirect
-  → OAuth token theft, SSRF → cloud metadata, reflected input + weak CSP → XSS → token theft, IDOR +
-  predictable IDs from source maps/specs) into ordered, reproducible, higher-impact attacks.
+  into the AI tab and run it. When text is highlighted in a message editor, two extra items
+  (*Analyze selected text*, *…suggest exploitation & chaining*) send just the selection. The chaining
+  preset focuses on combining primitives (e.g. open-redirect → OAuth token theft, SSRF → cloud
+  metadata, reflected input + weak CSP → XSS → token theft, IDOR + predictable IDs from source
+  maps/specs) into ordered, reproducible, higher-impact attacks.
 
 > ⚠️ **Privacy:** this sends target-derived data to a third-party LLM. Some bug-bounty programs
 > prohibit sharing target data with third parties — only use it on data you are authorised to share.

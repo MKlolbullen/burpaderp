@@ -1,13 +1,16 @@
 package com.victor.reconloop;
 
+import burp.api.montoya.core.Range;
 import burp.api.montoya.http.message.HttpRequestResponse;
 import burp.api.montoya.ui.contextmenu.ContextMenuEvent;
 import burp.api.montoya.ui.contextmenu.ContextMenuItemsProvider;
+import burp.api.montoya.ui.contextmenu.MessageEditorHttpRequestResponse;
 
 import javax.swing.*;
 import java.awt.Component;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Adds a "Recon Hound: AI analysis" submenu to Burp's right-click menu (Proxy history, site map,
@@ -26,13 +29,21 @@ final class ReconContextMenu implements ContextMenuItemsProvider {
 
     @Override
     public List<Component> provideMenuItems(ContextMenuEvent event) {
+        String selection = selectedText(event);
         HttpRequestResponse selected = selected(event);
-        if (selected == null) return null;
+        if (selection == null && selected == null) return null;
 
         JMenu menu = new JMenu("Recon Hound: AI analysis");
-        menu.add(item("Explain request/response & attack surface", selected, LlmClient.REQUEST_ANALYSIS_SYSTEM_PROMPT));
-        menu.add(item("Find vulnerabilities", selected, LlmClient.DEFAULT_JS_SYSTEM_PROMPT));
-        menu.add(item("Suggest exploitation & chaining", selected, LlmClient.CHAIN_SYSTEM_PROMPT));
+        if (selection != null) {
+            menu.add(fixedItem("Analyze selected text", selection, LlmClient.DEFAULT_JS_SYSTEM_PROMPT));
+            menu.add(fixedItem("Selected text: suggest exploitation & chaining", selection, LlmClient.CHAIN_SYSTEM_PROMPT));
+            if (selected != null) menu.addSeparator();
+        }
+        if (selected != null) {
+            menu.add(item("Explain request/response & attack surface", selected, LlmClient.REQUEST_ANALYSIS_SYSTEM_PROMPT));
+            menu.add(item("Find vulnerabilities", selected, LlmClient.DEFAULT_JS_SYSTEM_PROMPT));
+            menu.add(item("Suggest exploitation & chaining", selected, LlmClient.CHAIN_SYSTEM_PROMPT));
+        }
 
         List<Component> items = new ArrayList<>();
         items.add(menu);
@@ -43,6 +54,33 @@ final class ReconContextMenu implements ContextMenuItemsProvider {
         JMenuItem menuItem = new JMenuItem(label);
         menuItem.addActionListener(e -> panel.sendToAi(format(rr), systemPreset));
         return menuItem;
+    }
+
+    private JMenuItem fixedItem(String label, String text, String systemPreset) {
+        JMenuItem menuItem = new JMenuItem(label);
+        menuItem.addActionListener(e -> panel.sendToAi(text, systemPreset));
+        return menuItem;
+    }
+
+    /** Returns the user's highlighted substring within the message editor, or null if none. */
+    private static String selectedText(ContextMenuEvent event) {
+        Optional<MessageEditorHttpRequestResponse> editor = event.messageEditorRequestResponse();
+        if (editor.isEmpty()) return null;
+        MessageEditorHttpRequestResponse editorRr = editor.get();
+        Optional<Range> range = editorRr.selectionOffsets();
+        if (range.isEmpty()) return null;
+
+        boolean response = editorRr.selectionContext() == MessageEditorHttpRequestResponse.SelectionContext.RESPONSE;
+        HttpRequestResponse rr = editorRr.requestResponse();
+        String message = response
+                ? (rr.hasResponse() && rr.response() != null ? rr.response().toString() : null)
+                : (rr.request() != null ? rr.request().toString() : null);
+        if (message == null) return null;
+
+        int start = Math.max(0, range.get().startIndexInclusive());
+        int end = Math.min(message.length(), range.get().endIndexExclusive());
+        if (end <= start) return null;
+        return message.substring(start, end);
     }
 
     private static HttpRequestResponse selected(ContextMenuEvent event) {

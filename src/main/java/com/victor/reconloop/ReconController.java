@@ -44,6 +44,7 @@ final class ReconController implements HttpHandler {
     private final ReconModel.ParameterTableModel parameterModel;
     private final ReconModel.ReflectionTableModel reflectionModel;
     private final ReconModel.ActiveTableModel activeModel;
+    private final ReconModel.AssetTableModel assetModel;
 
     private final BlockingQueue<QueueItem> queue = new LinkedBlockingQueue<>();
     private final Set<String> queuedOrVisited = ConcurrentHashMap.newKeySet();
@@ -55,6 +56,8 @@ final class ReconController implements HttpHandler {
     private final Set<String> oobDedupe = ConcurrentHashMap.newKeySet();
     private final Set<String> minedMaps = ConcurrentHashMap.newKeySet();
     private final Set<String> ingestedSpecs = ConcurrentHashMap.newKeySet();
+    private final Set<String> assetHosts = ConcurrentHashMap.newKeySet();
+    private final Set<String> assetIps = ConcurrentHashMap.newKeySet();
     private final Map<String, HttpRequest> originTemplates = new ConcurrentHashMap<>();
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> {
@@ -99,13 +102,15 @@ final class ReconController implements HttpHandler {
                     ReconModel.DiscoveryTableModel discoveryModel,
                     ReconModel.ParameterTableModel parameterModel,
                     ReconModel.ReflectionTableModel reflectionModel,
-                    ReconModel.ActiveTableModel activeModel) {
+                    ReconModel.ActiveTableModel activeModel,
+                    ReconModel.AssetTableModel assetModel) {
         this.api = api;
         this.findingModel = findingModel;
         this.discoveryModel = discoveryModel;
         this.parameterModel = parameterModel;
         this.reflectionModel = reflectionModel;
         this.activeModel = activeModel;
+        this.assetModel = assetModel;
         this.ctClient = new CertificateTransparencyClient(api);
         this.parameterDiscovery = new ParameterDiscoveryEngine(api);
         this.activeTestEngine = new ActiveTestEngine(api, activeThrottleMillis.get());
@@ -323,6 +328,8 @@ final class ReconController implements HttpHandler {
         activeDedupe.clear();
         minedMaps.clear();
         ingestedSpecs.clear();
+        assetHosts.clear();
+        assetIps.clear();
         sentRequests.set(0);
         SwingUtilities.invokeLater(() -> {
             findingModel.clear();
@@ -330,6 +337,7 @@ final class ReconController implements HttpHandler {
             parameterModel.clear();
             reflectionModel.clear();
             activeModel.clear();
+            assetModel.clear();
         });
         publishStatus();
     }
@@ -350,6 +358,7 @@ final class ReconController implements HttpHandler {
                 + " | Findings: " + issueDedupe.size()
                 + " | Reflections: " + reflectionDedupe.size()
                 + " | Active: " + activeDedupe.size()
+                + " | Assets: " + (assetHosts.size() + assetIps.size())
                 + " | GF packs: " + gfPatterns.packCount()
                 + " | Payloads: " + payloadLibrary.totalPayloads();
     }
@@ -397,6 +406,7 @@ final class ReconController implements HttpHandler {
 
     private void addDiscovered(URI candidate, URI source, String sourceLabel, boolean forceQueue) {
         if (candidate == null || candidate.getHost() == null) return;
+        recordAsset(candidate.getHost(), sourceLabel);
         if (sameOriginOnly.get() && source != null && !DiscoveryEngine.sameOrigin(candidate, source)) return;
 
         String url = candidate.toString();
@@ -732,6 +742,9 @@ final class ReconController implements HttpHandler {
     }
 
     private void scanMessage(String text, String location, String url, HttpRequestResponse pair) {
+        if (text != null && text.length() < 800_000) {
+            for (String ip : RegexHound.extractIps(text)) recordIp(ip, location);
+        }
         for (RegexHound.Finding finding : regexHound.scan(text, location, url, includeInfoFindings.get())) {
             String dedupe = "hound\0" + finding.rule().id() + "\0" + finding.value() + "\0" + url;
             if (!issueDedupe.add(dedupe)) continue;
@@ -866,6 +879,29 @@ final class ReconController implements HttpHandler {
                 severity, pair
         );
         api.siteMap().add(issue);
+    }
+
+    private void recordAsset(String host, String source) {
+        if (host == null || host.isBlank()) return;
+        if (isIpLiteral(host)) { recordIp(host, source); return; }
+        String value = host.toLowerCase(Locale.ROOT);
+        if (assetHosts.add(value)) {
+            SwingUtilities.invokeLater(() -> assetModel.add(new ReconModel.AssetRow("host", value, source)));
+        }
+    }
+
+    private void recordIp(String ip, String source) {
+        if (ip == null || ip.isBlank()) return;
+        String value = ip.startsWith("[") && ip.endsWith("]") ? ip.substring(1, ip.length() - 1) : ip;
+        if (assetIps.add(value)) {
+            String type = value.contains(":") ? "ipv6" : "ipv4";
+            SwingUtilities.invokeLater(() -> assetModel.add(new ReconModel.AssetRow(type, value, source)));
+        }
+    }
+
+    private static boolean isIpLiteral(String host) {
+        String h = host.startsWith("[") && host.endsWith("]") ? host.substring(1, host.length() - 1) : host;
+        return h.matches("\\d{1,3}(?:\\.\\d{1,3}){3}") || h.contains(":");
     }
 
     private void addSyntheticFinding(String severity, String provider, String rule, String location, String value, String url) {

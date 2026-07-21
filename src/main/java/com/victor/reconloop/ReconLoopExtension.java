@@ -15,9 +15,10 @@ public final class ReconLoopExtension implements BurpExtension {
         ReconModel.ParameterTableModel parameterModel = new ReconModel.ParameterTableModel();
         ReconModel.ReflectionTableModel reflectionModel = new ReconModel.ReflectionTableModel();
         ReconModel.ActiveTableModel activeModel = new ReconModel.ActiveTableModel();
-        controller = new ReconController(api, findingModel, discoveryModel, parameterModel, reflectionModel, activeModel);
+        ReconModel.AssetTableModel assetModel = new ReconModel.AssetTableModel();
+        controller = new ReconController(api, findingModel, discoveryModel, parameterModel, reflectionModel, activeModel, assetModel);
 
-        ReconPanel panel = new ReconPanel(api, controller, findingModel, discoveryModel, parameterModel, reflectionModel, activeModel);
+        ReconPanel panel = new ReconPanel(api, controller, findingModel, discoveryModel, parameterModel, reflectionModel, activeModel, assetModel);
 
         api.http().registerHttpHandler(controller);
         api.userInterface().registerSuiteTab("Recon Hound", panel);
