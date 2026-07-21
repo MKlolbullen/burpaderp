@@ -105,6 +105,22 @@ Enable it only against targets you are authorised to test.
 Results appear in the **Active tests** tab and, when confirmed, as Burp audit issues. Out-of-band
 findings arrive asynchronously as the Collaborator poller correlates interactions.
 
+### AI analysis (optional, manual)
+
+An **AI analysis** tab can send pasted content (recovered JavaScript, source maps, responses, or a
+finding) to a large language model for review — endpoint/parameter extraction, DOM source→sink
+hints, secret spotting, and triage. Providers: **Anthropic (Claude)**, **OpenAI**, **xAI (Grok)**,
+and **Google Gemini**, each called over raw HTTPS (no vendor SDK is bundled).
+
+- **API keys** come from an in-memory UI field or the provider's environment variable
+  (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `GEMINI_API_KEY`). They are **never
+  persisted** to the Burp project, and requests go **direct** (not through Burp), so keys never enter
+  the proxy history or trip Recon Hound's own secret scanner.
+- **Strictly manual.** Nothing is ever sent automatically — you paste content and click *Analyze*.
+
+> ⚠️ **Privacy:** this sends target-derived data to a third-party LLM. Some bug-bounty programs
+> prohibit sharing target data with third parties — only use it on data you are authorised to share.
+
 ## Reporting
 
 Findings surface in three places:
@@ -198,7 +214,9 @@ src/main/java/com/victor/reconloop/
 ├── SourceMapMiner.java           # .map source reconstruction + re-mining
 ├── ApiSurfaceEngine.java         # OpenAPI/Swagger + GraphQL surface ingestion
 ├── AccessControlEngine.java      # Autorize-style IDOR / access-control testing
-└── ActiveTestEngine.java         # opt-in SSRF/SSTI/XSS/CMDi/CRLF probing + Collaborator OOB
+├── ActiveTestEngine.java         # opt-in SSRF/SSTI/XSS/CMDi/CRLF probing + Collaborator OOB
+├── LlmProvider.java              # multi-vendor LLM definitions (Anthropic/OpenAI/xAI/Gemini)
+└── LlmClient.java                # manual, on-demand LLM analysis over raw HTTPS
 
 payloads/
 ├── manifest.json

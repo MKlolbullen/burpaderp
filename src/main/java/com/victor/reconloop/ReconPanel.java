@@ -127,6 +127,7 @@ final class ReconPanel extends JPanel {
         tabs.addTab("XSS reflections", new JScrollPane(reflectionTable));
         tabs.addTab("Active tests", new JScrollPane(activeTable));
         tabs.addTab("XSS vector library", new JScrollPane(vectorTable));
+        tabs.addTab("AI analysis", buildAiPanel(controller));
         add(tabs, BorderLayout.CENTER);
 
         autoLoop.addActionListener(e -> controller.setCrawlEnabled(autoLoop.isSelected()));
@@ -157,6 +158,66 @@ final class ReconPanel extends JPanel {
 
         controller.setStatusListener(status::setText);
         api.userInterface().applyThemeToComponent(this);
+    }
+
+    private static JPanel buildAiPanel(ReconController controller) {
+        JPanel panel = new JPanel(new BorderLayout(6, 6));
+
+        JComboBox<LlmProvider> provider = new JComboBox<>(LlmProvider.values());
+        JTextField model = new JTextField(((LlmProvider) provider.getSelectedItem()).defaultModel(), 22);
+        JPasswordField apiKey = new JPasswordField(26);
+        apiKey.setToolTipText("Leave blank to use the provider's environment variable; kept in memory only, never saved.");
+        JButton analyze = new JButton("Analyze");
+        JButton clearKey = new JButton("Clear key");
+
+        provider.addActionListener(e -> {
+            LlmProvider p = (LlmProvider) provider.getSelectedItem();
+            if (p != null) model.setText(p.defaultModel());
+        });
+
+        JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        top.add(new JLabel("Provider:")); top.add(provider);
+        top.add(new JLabel("Model:")); top.add(model);
+        top.add(new JLabel("API key (blank = $ENV):")); top.add(apiKey); top.add(clearKey);
+        top.add(analyze);
+
+        JTextArea system = new JTextArea(LlmClient.DEFAULT_JS_SYSTEM_PROMPT, 3, 80);
+        system.setLineWrap(true); system.setWrapStyleWord(true);
+        JTextArea input = new JTextArea(12, 80);
+        input.setToolTipText("Paste JavaScript, recovered source, a response, or a finding to analyze.");
+        JTextArea output = new JTextArea(14, 80);
+        output.setEditable(false); output.setLineWrap(true); output.setWrapStyleWord(true);
+
+        JPanel prompts = new JPanel(new GridLayout(0, 1, 4, 4));
+        prompts.add(new JLabel("System prompt:"));
+        prompts.add(new JScrollPane(system));
+        prompts.add(new JLabel("Input (sent to the selected third-party LLM — authorized data only):"));
+        prompts.add(new JScrollPane(input));
+
+        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, prompts, new JScrollPane(output));
+        split.setResizeWeight(0.6);
+
+        JLabel privacy = new JLabel("Manual only — nothing is sent until you click Analyze. Data leaves Burp to a third party.");
+
+        panel.add(top, BorderLayout.NORTH);
+        panel.add(split, BorderLayout.CENTER);
+        panel.add(privacy, BorderLayout.SOUTH);
+
+        clearKey.addActionListener(e -> apiKey.setText(""));
+        analyze.addActionListener(e -> {
+            String text = input.getText();
+            if (text == null || text.isBlank()) { output.setText("[nothing to analyze]"); return; }
+            LlmProvider p = (LlmProvider) provider.getSelectedItem();
+            output.setText("Analyzing with " + (p == null ? "?" : p.label()) + "...");
+            analyze.setEnabled(false);
+            controller.analyzeWithLlm(p, model.getText(), new String(apiKey.getPassword()),
+                    system.getText(), text, result -> {
+                        output.setText(result);
+                        output.setCaretPosition(0);
+                        analyze.setEnabled(true);
+                    });
+        });
+        return panel;
     }
 
     private static JTable buildVectorReferenceTable() {

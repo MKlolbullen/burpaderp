@@ -34,6 +34,7 @@ final class ReconController implements HttpHandler {
     private final ResponseSignalEngine responseSignals = new ResponseSignalEngine();
     private final XssReflectionEngine xssReflectionEngine = new XssReflectionEngine();
     private final WebHygieneEngine webHygiene = new WebHygieneEngine();
+    private final LlmClient llmClient = new LlmClient();
     private final CertificateTransparencyClient ctClient;
     private final ParameterDiscoveryEngine parameterDiscovery;
     private final ActiveTestEngine activeTestEngine;
@@ -617,6 +618,22 @@ final class ReconController implements HttpHandler {
         } catch (Exception e) {
             api.logging().logToError("API spec ingestion failed for " + url, e);
         }
+    }
+
+    /** On-demand, manual LLM analysis. Runs off the EDT; the key resolves from the UI field or $ENV. */
+    void analyzeWithLlm(LlmProvider provider, String model, String uiKey, String system, String input,
+                        java.util.function.Consumer<String> onResult) {
+        activeWorker.submit(() -> {
+            String key = (uiKey != null && !uiKey.isBlank()) ? uiKey.trim() : System.getenv(provider.envVar());
+            String result;
+            try {
+                result = llmClient.complete(provider, model, key, system, input);
+            } catch (Exception e) {
+                result = "[error] " + e.getMessage();
+            }
+            String finalResult = result;
+            SwingUtilities.invokeLater(() -> onResult.accept(finalResult));
+        });
     }
 
     void introspectGraphql(String url) {
