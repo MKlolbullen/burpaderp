@@ -11,12 +11,15 @@ repositories {
 
 dependencies {
     compileOnly 'net.portswigger.burp.extensions:montoya-api:2026.7'
+    testImplementation 'junit:junit:4.13.2'
 }
 
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
     }
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -25,4 +28,16 @@ tasks.withType(JavaCompile).configureEach {
 
 jar {
     archiveBaseName = 'burp-recon-hound'
+    destinationDirectory = layout.buildDirectory.dir('libs')
+    manifest {
+        attributes(
+            'Implementation-Title': archiveBaseName,
+            'Implementation-Version': version,
+            'Created-By': "${System.getProperty('java.version')} (${System.getProperty('java.vendor')})"
+        )
+    }
+}
+
+wrapper {
+    gradleVersion = '8.8'
 }
