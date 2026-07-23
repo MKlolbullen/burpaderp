@@ -8,6 +8,7 @@ import burp.api.montoya.http.handler.*;
 import burp.api.montoya.http.message.HttpRequestResponse;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.responses.HttpResponse;
+import burp.api.montoya.persistence.PersistedObject;
 import burp.api.montoya.scanner.audit.issues.AuditIssue;
 import burp.api.montoya.scanner.audit.issues.AuditIssueConfidence;
 import burp.api.montoya.scanner.audit.issues.AuditIssueSeverity;
@@ -41,6 +42,7 @@ final class ReconController implements HttpHandler {
     private final ActiveTestEngine activeTestEngine;
     private final IssueReporter reporter;
     private final PdcpClient pdcp = new PdcpClient();
+    private volatile PersistedObject store;
 
     private final ReconModel.FindingTableModel findingModel;
     private final ReconModel.DiscoveryTableModel discoveryModel;
@@ -120,8 +122,48 @@ final class ReconController implements HttpHandler {
         this.ctClient = new CertificateTransparencyClient(api);
         this.parameterDiscovery = new ParameterDiscoveryEngine(api);
         this.activeTestEngine = new ActiveTestEngine(api, activeThrottleMillis.get());
+        try {
+            this.store = api.persistence().extensionData();
+            restoreState();
+        } catch (Exception e) {
+            api.logging().logToError("Persisted-state restore skipped", e);
+        }
         worker.submit(this::workerLoop);
         oobPoller.scheduleWithFixedDelay(this::pollCollaborator, 12, 12, TimeUnit.SECONDS);
+        oobPoller.scheduleWithFixedDelay(this::saveState, 60, 60, TimeUnit.SECONDS);
+    }
+
+    /** Restores dedupe keys, asset inventory, and Findings/Hosts rows from the Burp project. */
+    private void restoreState() {
+        if (store == null) return;
+        reporter.restore(PersistedState.loadStrings(store, PersistedState.K_FILED));
+        assetHosts.addAll(PersistedState.loadStrings(store, PersistedState.K_HOSTS));
+        assetIps.addAll(PersistedState.loadStrings(store, PersistedState.K_IPS));
+        List<ReconModel.FindingRow> findings = PersistedState.loadFindings(store);
+        List<ReconModel.AssetRow> assets = PersistedState.loadAssets(store);
+        if (findings.isEmpty() && assets.isEmpty()) return;
+        SwingUtilities.invokeLater(() -> {
+            for (int i = findings.size() - 1; i >= 0; i--) findingModel.add(findings.get(i));
+            for (int i = assets.size() - 1; i >= 0; i--) assetModel.add(assets.get(i));
+        });
+        api.logging().logToOutput("[Recon Hound] Restored " + findings.size() + " finding(s) and "
+                + (assetHosts.size() + assetIps.size()) + " asset(s) from the Burp project.");
+    }
+
+    /** Persists current state to the Burp project (runs the model snapshot on the EDT). */
+    private void saveState() {
+        if (store == null) return;
+        SwingUtilities.invokeLater(() -> {
+            try {
+                PersistedState.saveStrings(store, PersistedState.K_FILED, reporter.filedSnapshot());
+                PersistedState.saveStrings(store, PersistedState.K_HOSTS, new ArrayList<>(assetHosts));
+                PersistedState.saveStrings(store, PersistedState.K_IPS, new ArrayList<>(assetIps));
+                PersistedState.saveFindings(store, findingModel.snapshot());
+                PersistedState.saveAssets(store, assetModel.snapshot());
+            } catch (Exception e) {
+                api.logging().logToError("Persisted-state save failed", e);
+            }
+        });
     }
 
     interface StatusListener { void update(String status); }
@@ -511,14 +553,35 @@ final class ReconController implements HttpHandler {
             activeModel.clear();
             assetModel.clear();
         });
+        saveState();
         publishStatus();
     }
 
     void shutdown() {
         running.set(false);
+        saveStateBlocking();
         worker.shutdownNow();
         activeWorker.shutdownNow();
         oobPoller.shutdownNow();
+    }
+
+    /** Synchronous save for extension unload, when the async EDT task might not run in time. */
+    private void saveStateBlocking() {
+        if (store == null) return;
+        try {
+            java.util.concurrent.atomic.AtomicReference<List<ReconModel.FindingRow>> findings = new java.util.concurrent.atomic.AtomicReference<>(List.of());
+            java.util.concurrent.atomic.AtomicReference<List<ReconModel.AssetRow>> assets = new java.util.concurrent.atomic.AtomicReference<>(List.of());
+            Runnable snapshot = () -> { findings.set(findingModel.snapshot()); assets.set(assetModel.snapshot()); };
+            if (SwingUtilities.isEventDispatchThread()) snapshot.run();
+            else SwingUtilities.invokeAndWait(snapshot);
+            PersistedState.saveStrings(store, PersistedState.K_FILED, reporter.filedSnapshot());
+            PersistedState.saveStrings(store, PersistedState.K_HOSTS, new ArrayList<>(assetHosts));
+            PersistedState.saveStrings(store, PersistedState.K_IPS, new ArrayList<>(assetIps));
+            PersistedState.saveFindings(store, findings.get());
+            PersistedState.saveAssets(store, assets.get());
+        } catch (Exception e) {
+            api.logging().logToError("Persisted-state save on shutdown failed", e);
+        }
     }
 
     String status() {
@@ -1326,6 +1389,79 @@ final class ReconController implements HttpHandler {
                 api.logging().logToError("GraphQL introspection failed for " + target, e);
             }
         });
+    }
+
+    /** Active GraphQL fuzzing beyond introspection: field-suggestion leakage, alias amplification, batching. */
+    void fuzzGraphql(String url) {
+        activeWorker.submit(() -> {
+            String target = url == null ? "" : url.trim();
+            if (!target.startsWith("http")) { api.logging().logToError("Invalid GraphQL URL: " + target); return; }
+            if (!api.scope().isInScope(target)) { api.logging().logToError("GraphQL target not in scope: " + target); return; }
+            try {
+                HttpRequestResponse suggest = gqlPost(target, GraphQlFuzzEngine.suggestionQuery());
+                if (bodyOf(suggest) != null && GraphQlFuzzEngine.hasFieldSuggestions(bodyOf(suggest))) {
+                    addActiveRow("LOW", "GraphQL", "field-suggestions", "enabled", "'Did you mean' leaks schema", target);
+                    reporter.report("gql-suggest\0" + target, "GraphQL field suggestions enabled",
+                            "<b>GraphQL field suggestions are enabled</b><br>Even with introspection disabled, the server "
+                                    + "returns 'Did you mean' hints for invalid fields, leaking schema details that help an attacker map the API.",
+                            "Disable did-you-mean/field suggestions in production.",
+                            target, AuditIssueSeverity.LOW, AuditIssueConfidence.FIRM,
+                            "Recon Hound probes GraphQL with an invalid field to detect suggestion leakage.",
+                            "Schema disclosure via suggestions is low severity but aids further attacks.", suggest);
+                }
+
+                int aliases = 100;
+                HttpRequestResponse alias = gqlPost(target, GraphQlFuzzEngine.aliasQuery(aliases));
+                if (bodyOf(alias) != null && GraphQlFuzzEngine.aliasingProcessed(bodyOf(alias), aliases)) {
+                    addActiveRow("MEDIUM", "GraphQL", "alias-amplification", "enabled", aliases + " aliases in one request", target);
+                    reporter.report("gql-alias\0" + target, "GraphQL alias-based amplification",
+                            "<b>GraphQL processes many field aliases per request</b><br>" + aliases + " aliases of a field were "
+                                    + "processed in a single request. Aliasing amplifies work/attempts (brute-forcing a login mutation, "
+                                    + "resource exhaustion) while sending one request, bypassing per-request rate limits.",
+                            "Enforce query cost/complexity limits and cap aliases per request.",
+                            target, AuditIssueSeverity.MEDIUM, AuditIssueConfidence.FIRM,
+                            "Recon Hound sends an alias-amplified query to test cost controls.",
+                            "Confirm the amplification is usable against a sensitive operation.", alias);
+                }
+
+                HttpRequestResponse batch = gqlPost(target, GraphQlFuzzEngine.batchQuery());
+                if (bodyOf(batch) != null && GraphQlFuzzEngine.batchingProcessed(bodyOf(batch))) {
+                    addActiveRow("MEDIUM", "GraphQL", "query-batching", "enabled", "array of operations processed", target);
+                    reporter.report("gql-batch\0" + target, "GraphQL query batching enabled",
+                            "<b>GraphQL query batching is enabled</b><br>The endpoint processed a JSON array of operations in a "
+                                    + "single request. Batching enables rate-limit bypass and brute force by packing many operations per request.",
+                            "Disable array-based query batching, or apply per-operation rate limiting and cost analysis.",
+                            target, AuditIssueSeverity.MEDIUM, AuditIssueConfidence.FIRM,
+                            "Recon Hound sends a batched operation array to test whether batching is enabled.",
+                            "Confirm batching is usable against a sensitive operation.", batch);
+                }
+                api.logging().logToOutput("[Recon Hound] GraphQL fuzzing complete for " + target);
+            } catch (Exception e) {
+                api.logging().logToError("GraphQL fuzzing failed for " + target, e);
+            }
+            publishStatus();
+        });
+    }
+
+    private HttpRequestResponse gqlPost(String url, String jsonBody) {
+        HttpRequest request = httpRequestFromUrl(url)
+                .withMethod("POST")
+                .withUpdatedHeader("Content-Type", "application/json")
+                .withBody(jsonBody);
+        return api.http().sendRequest(request);
+    }
+
+    private static String bodyOf(HttpRequestResponse rr) {
+        return rr != null && rr.response() != null ? rr.response().bodyToString() : null;
+    }
+
+    /** Recon Hound's own audit issues on the site map (for report export). */
+    List<AuditIssue> reconIssues() {
+        List<AuditIssue> out = new ArrayList<>();
+        for (AuditIssue issue : api.siteMap().issues()) {
+            if (issue != null && issue.name() != null && issue.name().startsWith("Recon Hound")) out.add(issue);
+        }
+        return out;
     }
 
     private void analyzeReflections(HttpRequest request, HttpResponse response, HttpRequestResponse pair) {

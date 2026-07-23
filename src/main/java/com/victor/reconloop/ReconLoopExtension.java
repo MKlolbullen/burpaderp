@@ -35,6 +35,7 @@ public final class ReconLoopExtension implements BurpExtension {
         api.logging().logToOutput("Registered a passive ScanCheck: Recon Hound's detectors also run inside Burp's native scan pipeline (secrets, CORS/CSP/JWT, disclosure signals, reflections).");
         api.logging().logToOutput("Every finding (passive, active, OOB, LLM, Nuclei/PDCP) is filed as a native Burp audit issue on the site map (Dashboard / Issues), not just the plugin tabs.");
         api.logging().logToOutput("AI: right-click any request/response for manual LLM review, or use 'Analyze in-scope JS' for an on-demand, budget-capped JS bug-hunt that files findings (bug + PoC + chain) as Burp issues.");
+        api.logging().logToOutput("GraphQL fuzzing (suggestions/aliasing/batching), SARIF + Markdown export of findings, and per-project state persistence are available.");
         api.logging().logToOutput("Active GET discovery is scope-bounded, same-origin by default, capped, and deduplicated.");
     }
 }

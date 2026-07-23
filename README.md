@@ -127,6 +127,10 @@ Enable it only against targets you are authorised to test.
 - **Subdomain-takeover check** (`SubdomainTakeoverEngine`) — fetches each enumerated host and matches
   known "unclaimed resource" fingerprints (GitHub Pages, S3, Heroku, Fastly, Shopify, …). A match
   flags a likely dangling DNS record an attacker could claim.
+- **GraphQL fuzzing** (`GraphQlFuzzEngine`, beyond introspection) — probes a GraphQL endpoint for
+  **field-suggestion** leakage ("Did you mean …" discloses schema even with introspection off),
+  **alias amplification** (many aliases processed per request → rate-limit bypass / brute force), and
+  **query batching** (an array of operations accepted per request). Each positive is a native issue.
 
 Results appear in the **Active tests** tab and, when confirmed, as Burp audit issues. Out-of-band
 findings arrive asynchronously as the Collaborator poller correlates interactions.
@@ -202,6 +206,12 @@ Findings surface in three places:
   traffic (passive scan or an active scan), contributing issues Burp owns and consolidates. The crawl
   and scan-check paths share one deduplicated reporter, so a finding is never filed twice;
 - the extension **output/error log**.
+
+The **Findings** tab can **export** Recon Hound's audit issues to **SARIF 2.1.0** (for code-scanning
+dashboards / CI ingestion) or **Markdown** (a bug-bounty-ready writeup grouped by severity). Plugin
+state — the issue-dedupe keys, the host/IP asset inventory, and the Findings/Hosts rows — is
+**persisted to the Burp project** (`api.persistence()`), so reopening the project or reloading the
+extension restores your results and avoids re-filing findings already reported.
 
 ## Safety / scope controls
 
