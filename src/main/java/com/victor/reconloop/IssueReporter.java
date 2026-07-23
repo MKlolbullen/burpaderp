@@ -43,6 +43,16 @@ final class IssueReporter {
         };
     }
 
+    /** Maps a string confidence label onto Burp's confidence enum. */
+    static AuditIssueConfidence confidence(String label) {
+        if (label == null) return AuditIssueConfidence.TENTATIVE;
+        return switch (label.toUpperCase(Locale.ROOT)) {
+            case "CERTAIN" -> AuditIssueConfidence.CERTAIN;
+            case "FIRM" -> AuditIssueConfidence.FIRM;
+            default -> AuditIssueConfidence.TENTATIVE;
+        };
+    }
+
     /** True once a finding with this dedupe key has been filed. */
     boolean alreadyFiled(String dedupeKey) {
         return dedupeKey != null && filed.contains(dedupeKey);

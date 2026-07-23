@@ -137,7 +137,14 @@ and **Google Gemini**, each called over raw HTTPS (no vendor SDK is bundled).
   (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `GEMINI_API_KEY`). They are **never
   persisted** to the Burp project, and requests go **direct** (not through Burp), so keys never enter
   the proxy history or trip Recon Hound's own secret scanner.
-- **Strictly manual.** Nothing is ever sent automatically — you paste content and click *Analyze*.
+- **On-demand, nothing auto-fires.** Nothing is sent until you click a button.
+- **Automated JS bug-hunt → native issues.** The AI tab has an **Analyze in-scope JS** button with a
+  per-run *file budget*. It collects in-scope JavaScript from the site map (deduplicated, skipping
+  files already reviewed), sends each to the selected LLM asking for **strict JSON**, and files every
+  returned finding as a **native Burp audit issue** — including a concrete **proof-of-concept** and,
+  where the model sees it, an **exploit chain** for higher impact. The budget caps how many files are
+  sent per run; any remainder is reported (never silently dropped) so you can raise the budget and
+  continue. Runs off the UI thread; results also mirror to the *Active tests* tab.
 - **Right-click integration.** Any request/response in Proxy history, the site map, or Repeater has a
   **Recon Hound: AI analysis** submenu with three presets — *Explain request/response & attack
   surface*, *Find vulnerabilities*, and *Suggest exploitation & chaining* — which load the message
@@ -158,9 +165,13 @@ Findings surface in three places:
 
 - the Recon Hound **suite tab** tables (Findings, Discovered resources, Insertion points, XSS
   reflections, Active tests);
-- Burp's **Dashboard / Target issue list** as audit issues — secrets, response-signal disclosures
-  (stack traces, source-map/internal-host leaks), reflected-XSS candidates, and confirmed active
-  findings (SSRF/SSTI/XSS, including OOB);
+- Burp's **Dashboard / Target issue list** as native audit issues — **every** finding is filed here
+  through a single reporter, so results are included in Burp's own reports and never live only in the
+  plugin tabs. This covers secrets, response-signal disclosures (stack traces, source-map/internal-host
+  leaks), reflected-parameter/XSS candidates, web-hygiene (CORS/CSP/JWT) issues, exposed source maps
+  and OpenAPI/GraphQL surface, gf-pattern hits, broken-access-control/IDOR, confirmed active findings
+  (SSRF/SSTI/XSS, including Collaborator OOB), and LLM-identified JavaScript bugs (with PoC and chain).
+  Informational results are filed at `INFORMATION` severity so nothing is dropped;
 - the extension **output/error log**.
 
 ## Safety / scope controls

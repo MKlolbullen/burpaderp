@@ -55,6 +55,7 @@ final class ReconController implements HttpHandler {
     private final Set<String> oobDedupe = ConcurrentHashMap.newKeySet();
     private final Set<String> minedMaps = ConcurrentHashMap.newKeySet();
     private final Set<String> ingestedSpecs = ConcurrentHashMap.newKeySet();
+    private final Set<String> llmJsAnalyzed = ConcurrentHashMap.newKeySet();
     private final Set<String> assetHosts = ConcurrentHashMap.newKeySet();
     private final Set<String> assetIps = ConcurrentHashMap.newKeySet();
     private final Map<String, HttpRequest> originTemplates = new ConcurrentHashMap<>();
@@ -347,6 +348,7 @@ final class ReconController implements HttpHandler {
         activeDedupe.clear();
         minedMaps.clear();
         ingestedSpecs.clear();
+        llmJsAnalyzed.clear();
         assetHosts.clear();
         assetIps.clear();
         sentRequests.set(0);
@@ -694,6 +696,127 @@ final class ReconController implements HttpHandler {
             String finalResult = result;
             SwingUtilities.invokeLater(() -> onResult.accept(finalResult));
         });
+    }
+
+    /**
+     * On-demand, budget-capped LLM review of every in-scope JavaScript response in the site map.
+     * Each parsed finding (bug + PoC + optional exploit chain) is filed as a native Burp audit issue
+     * via {@link IssueReporter} and mirrored to the Active-tests table. Runs off the EDT; JS files
+     * already analysed in a previous run are skipped, and no more than {@code maxFiles} fresh files
+     * are sent per run (any remainder is reported, never silently dropped).
+     */
+    void analyzeInScopeJavaScriptWithLlm(LlmProvider provider, String model, String uiKey,
+                                         int maxFiles, java.util.function.Consumer<String> onDone) {
+        activeWorker.submit(() -> {
+            if (provider == null) {
+                SwingUtilities.invokeLater(() -> onDone.accept("[error] No LLM provider selected."));
+                return;
+            }
+            String key = (uiKey != null && !uiKey.isBlank()) ? uiKey.trim() : System.getenv(provider.envVar());
+            if (key == null || key.isBlank()) {
+                SwingUtilities.invokeLater(() -> onDone.accept(
+                        "[error] No API key. Set it in the field or export $" + provider.envVar() + "."));
+                return;
+            }
+
+            List<HttpRequestResponse> jsPairs = api.siteMap().requestResponses().stream()
+                    .filter(rr -> rr.request() != null && rr.hasResponse() && rr.response() != null)
+                    .filter(rr -> rr.request().isInScope())
+                    .filter(this::looksLikeJavaScript)
+                    .collect(java.util.stream.Collectors.toMap(
+                            rr -> rr.request().url(), rr -> rr, (a, b) -> a, LinkedHashMap::new))
+                    .values().stream().toList();
+
+            int totalInScope = jsPairs.size();
+            int analyzed = 0, findings = 0, skippedBudget = 0, errors = 0;
+            api.logging().logToOutput("[Recon Hound][LLM] JS analysis: " + totalInScope
+                    + " in-scope JS file(s) in the site map, budget " + maxFiles + " per run.");
+
+            for (HttpRequestResponse rr : jsPairs) {
+                String url = rr.request().url();
+                if (llmJsAnalyzed.contains(url)) continue;   // analysed in an earlier run
+                if (analyzed >= maxFiles) { skippedBudget++; continue; }
+                llmJsAnalyzed.add(url);
+                analyzed++;
+
+                String body = rr.response().bodyToString();
+                api.logging().logToOutput("[Recon Hound][LLM] Reviewing " + url + " (" + body.length() + " chars)");
+                LlmClient.LlmAnalysis analysis = llmClient.analyzeJavaScript(provider, model, key, url, body);
+                if (analysis.findings().isEmpty() && analysis.error() != null) {
+                    if (analysis.error().startsWith("[error]") || analysis.error().startsWith("[HTTP")) errors++;
+                    api.logging().logToOutput("[Recon Hound][LLM] " + url + ": " + firstLine(analysis.error()));
+                }
+                for (LlmClient.LlmFinding finding : analysis.findings()) {
+                    findings++;
+                    fileLlmFinding(finding, url, rr);
+                }
+                publishStatus();
+            }
+
+            int fAnalyzed = analyzed, fFindings = findings, fSkipped = skippedBudget, fErrors = errors, fTotal = totalInScope;
+            StringBuilder summary = new StringBuilder();
+            summary.append("LLM JS analysis complete: ").append(fAnalyzed).append(" file(s) analysed, ")
+                    .append(fFindings).append(" finding(s) filed as native Burp issues");
+            if (fErrors > 0) summary.append(", ").append(fErrors).append(" file(s) errored");
+            if (fSkipped > 0) {
+                summary.append(". ").append(fSkipped).append(" file(s) left over the ").append(maxFiles)
+                        .append("-file budget (of ").append(fTotal)
+                        .append(" in-scope JS) — raise the budget and run again to continue.");
+            } else {
+                summary.append(". All ").append(fTotal).append(" in-scope JS file(s) covered.");
+            }
+            api.logging().logToOutput("[Recon Hound] " + summary);
+            SwingUtilities.invokeLater(() -> onDone.accept(summary.toString()));
+        });
+    }
+
+    private boolean looksLikeJavaScript(HttpRequestResponse rr) {
+        try {
+            String url = rr.request().url().toLowerCase(Locale.ROOT);
+            int q = url.indexOf('?');
+            String path = q >= 0 ? url.substring(0, q) : url;
+            if (path.endsWith(".js") || path.endsWith(".mjs") || path.endsWith(".jsx") || path.endsWith(".ts")) return true;
+            String contentType = rr.response().headerValue("Content-Type");
+            return contentType != null && contentType.toLowerCase(Locale.ROOT).contains("javascript");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void fileLlmFinding(LlmClient.LlmFinding finding, String url, HttpRequestResponse pair) {
+        String detail = "<b>LLM-identified issue: " + escape(finding.title()) + "</b><br>"
+                + (finding.vulnClass().isBlank() ? "" : "Class: " + escape(finding.vulnClass()) + "<br>")
+                + "Source: <code>" + escape(url) + "</code><br><br>"
+                + (finding.description().isBlank() ? "" : "<b>Description</b><br>" + escape(finding.description()) + "<br><br>")
+                + (finding.evidence().isBlank() ? "" : "<b>Evidence</b><br><code>" + escape(finding.evidence()) + "</code><br><br>")
+                + (finding.poc().isBlank() ? "" : "<b>Proof of concept</b><br><code>" + escape(finding.poc()) + "</code><br><br>")
+                + (finding.chain().isBlank() ? "" : "<b>Exploit chain (higher impact)</b><br>" + escape(finding.chain()) + "<br><br>")
+                + "<i>Generated by an LLM from client-side source. Verify the PoC against an authorised target "
+                + "before reporting — LLM output can be wrong or fabricated.</i>";
+        String remediation = finding.remediation().isBlank()
+                ? "Validate and encode untrusted input at the identified sink; review the cited code path."
+                : finding.remediation();
+
+        addActiveRow(finding.severity(), "LLM-JS",
+                finding.vulnClass().isBlank() ? finding.title() : finding.vulnClass(),
+                "reported", firstLine(finding.description().isBlank() ? finding.title() : finding.description()), url);
+
+        reporter.report(
+                "llm-js\0" + url + "\0" + finding.title(),
+                "LLM: " + finding.title(),
+                detail, remediation, url,
+                IssueReporter.severity(finding.severity()), IssueReporter.confidence(finding.confidence()),
+                "Recon Hound sent in-scope JavaScript to a user-configured LLM for on-demand vulnerability review.",
+                "LLM output can be inaccurate or fabricated; confirm the PoC before relying on this finding.",
+                pair);
+    }
+
+    private static String firstLine(String value) {
+        if (value == null) return "";
+        String line = value.strip();
+        int nl = line.indexOf('\n');
+        if (nl >= 0) line = line.substring(0, nl);
+        return line.length() > 200 ? line.substring(0, 197) + "..." : line;
     }
 
     void introspectGraphql(String url) {
