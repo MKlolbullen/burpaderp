@@ -202,6 +202,10 @@ final class ReconPanel extends JPanel {
         apiKey.setToolTipText("Leave blank to use the provider's environment variable; kept in memory only, never saved.");
         JButton analyze = new JButton("Analyze");
         JButton clearKey = new JButton("Clear key");
+        JSpinner jsBudget = new JSpinner(new SpinnerNumberModel(15, 1, 500, 5));
+        JButton analyzeJs = new JButton("Analyze in-scope JS → Burp issues");
+        analyzeJs.setToolTipText("Sends in-scope JavaScript from the site map to the selected LLM, "
+                + "up to the file budget, and files each structured finding (bug + PoC + chain) as a native Burp issue.");
         this.aiProvider = provider;
         this.aiModel = model;
         this.aiKey = apiKey;
@@ -217,6 +221,12 @@ final class ReconPanel extends JPanel {
         top.add(new JLabel("Model:")); top.add(model);
         top.add(new JLabel("API key (blank = $ENV):")); top.add(apiKey); top.add(clearKey);
         top.add(analyze);
+
+        JPanel jsBar = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        jsBar.add(new JLabel("Automated JS bug-hunt — files/run:"));
+        jsBar.add(jsBudget);
+        jsBar.add(analyzeJs);
+        jsBar.add(new JLabel("(on-demand, budget-capped; results become native Burp issues)"));
 
         JTextArea system = new JTextArea(LlmClient.DEFAULT_JS_SYSTEM_PROMPT, 3, 80);
         system.setLineWrap(true); system.setWrapStyleWord(true);
@@ -237,13 +247,32 @@ final class ReconPanel extends JPanel {
         JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, prompts, new JScrollPane(output));
         split.setResizeWeight(0.6);
 
-        JLabel privacy = new JLabel("Manual only — nothing is sent until you click Analyze. Data leaves Burp to a third party.");
+        JLabel privacy = new JLabel("Nothing is sent until you click a button. Data leaves Burp to the selected third-party LLM — authorized data only.");
 
-        panel.add(top, BorderLayout.NORTH);
+        JPanel north = new JPanel();
+        north.setLayout(new BoxLayout(north, BoxLayout.Y_AXIS));
+        north.add(top);
+        north.add(jsBar);
+        panel.add(north, BorderLayout.NORTH);
         panel.add(split, BorderLayout.CENTER);
         panel.add(privacy, BorderLayout.SOUTH);
 
         clearKey.addActionListener(e -> apiKey.setText(""));
+        analyzeJs.addActionListener(e -> {
+            LlmProvider p = (LlmProvider) provider.getSelectedItem();
+            int budget = (Integer) jsBudget.getValue();
+            output.setText("Analyzing up to " + budget + " in-scope JS file(s) with "
+                    + (p == null ? "?" : p.label()) + "... findings will appear as native Burp issues and in the Findings/Active tabs.");
+            analyzeJs.setEnabled(false);
+            analyze.setEnabled(false);
+            controller.analyzeInScopeJavaScriptWithLlm(p, model.getText(), new String(apiKey.getPassword()),
+                    budget, summary -> {
+                        output.setText(summary);
+                        output.setCaretPosition(0);
+                        analyzeJs.setEnabled(true);
+                        analyze.setEnabled(true);
+                    });
+        });
         analyze.addActionListener(e -> {
             String text = input.getText();
             if (text == null || text.isBlank()) { output.setText("[nothing to analyze]"); return; }

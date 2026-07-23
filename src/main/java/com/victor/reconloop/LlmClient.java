@@ -6,6 +6,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Minimal, dependency-free client that sends a single-shot prompt to a configured {@link LlmProvider}
@@ -47,6 +50,31 @@ final class LlmClient {
             + "secrets -> authenticated API abuse. Only target systems the tester is authorised to test; do not "
             + "invent evidence.";
 
+    /**
+     * Structured JS review prompt: the model must return machine-parseable JSON
+     * so each finding can be filed as a native Burp audit issue (with a PoC and,
+     * where applicable, an exploit chain) rather than free-form text.
+     */
+    static final String JS_FINDINGS_SYSTEM_PROMPT =
+            "You are a senior application-security reviewer assisting an AUTHORISED bug-bounty tester. "
+            + "Analyse the provided JavaScript / client-side source for security vulnerabilities and, where "
+            + "possible, how they could be chained into higher-impact attacks.\n\n"
+            + "Return STRICT JSON ONLY — no prose, no markdown, no code fences. Use exactly this schema:\n"
+            + "{\"findings\":[{"
+            + "\"title\":\"short specific finding name\","
+            + "\"severity\":\"HIGH|MEDIUM|LOW|INFO\","
+            + "\"confidence\":\"CERTAIN|FIRM|TENTATIVE\","
+            + "\"vuln_class\":\"e.g. DOM XSS, hardcoded secret, SSRF, open redirect, prototype pollution, insecure postMessage, IDOR, CORS misconfig\","
+            + "\"description\":\"what the bug is and why it is exploitable, citing the specific function/sink/source in the code\","
+            + "\"evidence\":\"the exact code snippet or symbol that demonstrates it\","
+            + "\"poc\":\"a concrete reproducible proof-of-concept: the URL, request, or DOM interaction that triggers it, with the payload\","
+            + "\"chain\":\"if this primitive can be combined with other issues for higher impact (account takeover, RCE, data exfiltration), give the ordered chain; otherwise an empty string\","
+            + "\"remediation\":\"how to fix it\""
+            + "}]}\n\n"
+            + "Only report issues you can justify from the code; mark uncertain ones TENTATIVE. If there are no "
+            + "issues, return {\"findings\":[]}. Do not fabricate evidence. Never suggest testing systems the "
+            + "tester is not authorised to assess.";
+
     private static final int MAX_OUTPUT_TOKENS = 4096;
     private static final int MAX_INPUT_CHARS = 200_000;
 
@@ -84,6 +112,85 @@ final class LlmClient {
         } catch (Exception e) {
             return "[error] Request failed: " + e.getMessage();
         }
+    }
+
+    /** A single structured vulnerability finding returned by the LLM. */
+    record LlmFinding(String title, String severity, String confidence, String vulnClass,
+                      String description, String evidence, String poc, String chain, String remediation) {}
+
+    /** Result of a structured analysis: parsed findings plus an optional error/raw fallback message. */
+    record LlmAnalysis(List<LlmFinding> findings, String error) {}
+
+    /**
+     * Sends one JavaScript resource to the LLM for structured vulnerability review and parses the
+     * JSON findings. On a transport/HTTP error, or when the reply cannot be parsed as findings, the
+     * returned {@link LlmAnalysis} carries an {@code error} message and an empty findings list.
+     */
+    LlmAnalysis analyzeJavaScript(LlmProvider provider, String model, String apiKey, String sourceUrl, String source) {
+        String input = "// Source URL: " + (sourceUrl == null ? "(unknown)" : sourceUrl) + "\n"
+                + (source == null ? "" : source);
+        String raw = complete(provider, model, apiKey, JS_FINDINGS_SYSTEM_PROMPT, input);
+        if (raw == null || raw.startsWith("[error]") || raw.startsWith("[HTTP") || raw.startsWith("[warning]")) {
+            return new LlmAnalysis(List.of(), raw == null ? "[error] no response" : raw);
+        }
+        List<LlmFinding> findings = parseFindings(raw);
+        return new LlmAnalysis(findings, findings.isEmpty() ? "[no findings parsed] " + snippet(raw) : null);
+    }
+
+    /** Extracts findings from the model's reply, tolerating code fences and surrounding prose. */
+    static List<LlmFinding> parseFindings(String raw) {
+        List<LlmFinding> out = new ArrayList<>();
+        String json = isolateJson(raw);
+        if (json == null) return out;
+        try {
+            Object root = Json.parse(json);
+            Map<String, Object> obj = Json.asObject(root);
+            List<Object> arr = obj != null ? Json.asArray(obj.get("findings")) : Json.asArray(root);
+            if (arr == null) return out;
+            for (Object item : arr) {
+                Map<String, Object> f = Json.asObject(item);
+                if (f == null) continue;
+                out.add(new LlmFinding(
+                        nz(Json.str(f, "title"), "Untitled finding"),
+                        nz(Json.str(f, "severity"), "INFO"),
+                        nz(Json.str(f, "confidence"), "TENTATIVE"),
+                        nz(Json.str(f, "vuln_class"), ""),
+                        nz(Json.str(f, "description"), ""),
+                        nz(Json.str(f, "evidence"), ""),
+                        nz(Json.str(f, "poc"), ""),
+                        nz(Json.str(f, "chain"), ""),
+                        nz(Json.str(f, "remediation"), "")));
+            }
+        } catch (Exception ignored) {
+            // malformed JSON -> caller falls back to the raw error message
+        }
+        return out;
+    }
+
+    /** Strips markdown fences and returns the outermost JSON object/array substring, or null. */
+    static String isolateJson(String raw) {
+        if (raw == null) return null;
+        String t = raw.strip();
+        if (t.startsWith("```")) {
+            int nl = t.indexOf('\n');
+            if (nl >= 0) t = t.substring(nl + 1);
+            int fence = t.lastIndexOf("```");
+            if (fence >= 0) t = t.substring(0, fence);
+            t = t.strip();
+        }
+        int start = t.indexOf('{');
+        int arrStart = t.indexOf('[');
+        if (start < 0 || (arrStart >= 0 && arrStart < start)) start = arrStart;
+        if (start < 0) return null;
+        int endObj = t.lastIndexOf('}');
+        int endArr = t.lastIndexOf(']');
+        int end = Math.max(endObj, endArr);
+        if (end < start) return null;
+        return t.substring(start, end + 1);
+    }
+
+    private static String nz(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
     }
 
     /** Reads the first JSON string value for {@code "field"}, honouring escapes. */

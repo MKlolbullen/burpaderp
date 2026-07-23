@@ -7,7 +7,6 @@ import burp.api.montoya.http.handler.*;
 import burp.api.montoya.http.message.HttpRequestResponse;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.responses.HttpResponse;
-import burp.api.montoya.scanner.audit.issues.AuditIssue;
 import burp.api.montoya.scanner.audit.issues.AuditIssueConfidence;
 import burp.api.montoya.scanner.audit.issues.AuditIssueSeverity;
 
@@ -22,7 +21,6 @@ import static burp.api.montoya.http.handler.RequestToBeSentAction.continueWith;
 import static burp.api.montoya.http.handler.ResponseReceivedAction.continueWith;
 import static burp.api.montoya.http.message.HttpRequestResponse.httpRequestResponse;
 import static burp.api.montoya.http.message.requests.HttpRequest.httpRequestFromUrl;
-import static burp.api.montoya.scanner.audit.issues.AuditIssue.auditIssue;
 
 final class ReconController implements HttpHandler {
     private final MontoyaApi api;
@@ -38,6 +36,7 @@ final class ReconController implements HttpHandler {
     private final CertificateTransparencyClient ctClient;
     private final ParameterDiscoveryEngine parameterDiscovery;
     private final ActiveTestEngine activeTestEngine;
+    private final IssueReporter reporter;
 
     private final ReconModel.FindingTableModel findingModel;
     private final ReconModel.DiscoveryTableModel discoveryModel;
@@ -56,6 +55,7 @@ final class ReconController implements HttpHandler {
     private final Set<String> oobDedupe = ConcurrentHashMap.newKeySet();
     private final Set<String> minedMaps = ConcurrentHashMap.newKeySet();
     private final Set<String> ingestedSpecs = ConcurrentHashMap.newKeySet();
+    private final Set<String> llmJsAnalyzed = ConcurrentHashMap.newKeySet();
     private final Set<String> assetHosts = ConcurrentHashMap.newKeySet();
     private final Set<String> assetIps = ConcurrentHashMap.newKeySet();
     private final Map<String, HttpRequest> originTemplates = new ConcurrentHashMap<>();
@@ -105,6 +105,7 @@ final class ReconController implements HttpHandler {
                     ReconModel.ActiveTableModel activeModel,
                     ReconModel.AssetTableModel assetModel) {
         this.api = api;
+        this.reporter = new IssueReporter(api);
         this.findingModel = findingModel;
         this.discoveryModel = discoveryModel;
         this.parameterModel = parameterModel;
@@ -280,8 +281,9 @@ final class ReconController implements HttpHandler {
                             || result.verdict() == AccessControlEngine.Verdict.PARTIAL) {
                         AuditIssueSeverity severity = result.verdict() == AccessControlEngine.Verdict.BYPASSED
                                 ? AuditIssueSeverity.HIGH : AuditIssueSeverity.MEDIUM;
-                        AuditIssue issue = auditIssue(
-                                "Recon Hound: broken access control (" + result.verdict().name().toLowerCase(Locale.ROOT) + ")",
+                        reporter.report(
+                                "ac-issue\0" + url + "\0" + result.verdict(),
+                                "broken access control (" + result.verdict().name().toLowerCase(Locale.ROOT) + ")",
                                 "<b>Access-control replay</b><br>" + escape(result.detail())
                                         + "<br>Identity: " + (unauthenticated ? "unauthenticated" : "alternate session"),
                                 "Enforce authorization server-side on every request; do not rely on the UI hiding functionality.",
@@ -290,8 +292,7 @@ final class ReconController implements HttpHandler {
                                         ? AuditIssueConfidence.FIRM : AuditIssueConfidence.TENTATIVE,
                                 "Recon Hound replays privileged requests under a lower-privileged identity and compares responses.",
                                 "Confirm the exposed data/action is genuinely sensitive; response size alone can mislead.",
-                                severity, replay);
-                        api.siteMap().add(issue);
+                                replay);
                     }
                     publishStatus();
                 } catch (Exception e) {
@@ -347,6 +348,7 @@ final class ReconController implements HttpHandler {
         activeDedupe.clear();
         minedMaps.clear();
         ingestedSpecs.clear();
+        llmJsAnalyzed.clear();
         assetHosts.clear();
         assetIps.clear();
         sentRequests.set(0);
@@ -542,9 +544,7 @@ final class ReconController implements HttpHandler {
 
         for (ResponseSignalEngine.Signal signal : responseSignals.analyze(response)) {
             addSyntheticFinding(signal.severity(), "response", signal.name(), location, signal.value(), request.url());
-            if (!"INFO".equals(signal.severity()) && !"LOW".equals(signal.severity())) {
-                addSignalIssue(signal, location, request.url(), pair);
-            }
+            addSignalIssue(signal, location, request.url(), pair);
         }
 
         if (detectReflections.get()) {
@@ -553,7 +553,7 @@ final class ReconController implements HttpHandler {
 
         analyzeHygiene(request, response, pair);
         mineSourceMap(request.url(), response, pair);
-        ingestApiSpec(request.url(), response);
+        ingestApiSpec(request.url(), response, pair);
 
         short code = response.statusCode();
         if (code >= 300 && code < 400) {
@@ -581,19 +581,15 @@ final class ReconController implements HttpHandler {
             if (!issueDedupe.add(dedupe)) continue;
             SwingUtilities.invokeLater(() -> findingModel.add(new ReconModel.FindingRow(
                     note.severity(), "hygiene", note.name(), "response", note.detail(), url)));
-            if (pair != null && ("HIGH".equals(note.severity()) || "MEDIUM".equals(note.severity()))) {
-                AuditIssueSeverity severity = "HIGH".equals(note.severity())
-                        ? AuditIssueSeverity.HIGH : AuditIssueSeverity.MEDIUM;
-                AuditIssue issue = auditIssue(
-                        "Recon Hound: " + note.name(),
-                        "<b>" + escape(note.name()) + "</b><br>" + escape(note.detail()),
-                        "Review the affected security header / token handling and harden per OWASP guidance.",
-                        url, severity, AuditIssueConfidence.FIRM,
-                        "Recon Hound passively inspects CORS, CSP and JWT hygiene in in-scope responses.",
-                        "Header-based findings are heuristic; confirm exploitability in context.",
-                        severity, pair);
-                api.siteMap().add(issue);
-            }
+            reporter.report(
+                    "hygiene-issue\0" + note.name() + "\0" + url,
+                    note.name(),
+                    "<b>" + escape(note.name()) + "</b><br>" + escape(note.detail()),
+                    "Review the affected security header / token handling and harden per OWASP guidance.",
+                    url, IssueReporter.severity(note.severity()), AuditIssueConfidence.FIRM,
+                    "Recon Hound passively inspects CORS, CSP and JWT hygiene in in-scope responses.",
+                    "Header-based findings are heuristic; confirm exploitability in context.",
+                    pair);
         }
     }
 
@@ -616,18 +612,42 @@ final class ReconController implements HttpHandler {
             }
             addSyntheticFinding("INFO", "sourcemap", "Source map exposed", "response",
                     sources.size() + " original source file(s) recoverable", url);
+            reporter.report("sourcemap-issue\0" + url,
+                    "source map exposed",
+                    "<b>JavaScript source map is publicly exposed</b><br>"
+                            + "URL: <code>" + escape(url) + "</code><br>"
+                            + "Recovered original source files: " + sources.size() + "<br><br>"
+                            + "Exposed source maps reveal original (pre-minification) source, including comments, "
+                            + "internal paths, endpoints and sometimes secrets. Recon Hound re-scanned the recovered "
+                            + "sources for endpoints and credentials.",
+                    "Remove <code>.map</code> files (or their <code>//# sourceMappingURL</code> references) from "
+                            + "production, or restrict access to them.",
+                    url, AuditIssueSeverity.INFORMATION, AuditIssueConfidence.CERTAIN,
+                    "Recon Hound reconstructs original sources from exposed source maps and mines them for endpoints/secrets.",
+                    "Impact depends on what the recovered source reveals; review the reconstructed files.",
+                    pair);
         } catch (Exception e) {
             api.logging().logToError("Source-map mining failed for " + url, e);
         }
     }
 
-    private void ingestApiSpec(String url, HttpResponse response) {
+    private void ingestApiSpec(String url, HttpResponse response, HttpRequestResponse pair) {
         try {
             String body = response.bodyToString();
             if (ApiSurfaceEngine.looksLikeGraphQlEndpoint(url)) {
                 if (issueDedupe.add("graphql-endpoint\0" + url)) {
                     addSyntheticFinding("INFO", "graphql", "GraphQL endpoint", "response",
                             "GraphQL endpoint observed; use 'Introspect GraphQL' to map the schema", url);
+                    reporter.report("graphql-endpoint-issue\0" + url,
+                            "GraphQL endpoint exposed",
+                            "<b>GraphQL endpoint observed</b><br>URL: <code>" + escape(url) + "</code><br><br>"
+                                    + "GraphQL endpoints broaden attack surface (introspection, batching/aliasing abuse, "
+                                    + "injection through resolvers). Use 'Introspect GraphQL' to map the schema.",
+                            "Disable introspection in production, enforce authorization per field/resolver, and rate-limit queries.",
+                            url, AuditIssueSeverity.INFORMATION, AuditIssueConfidence.FIRM,
+                            "Recon Hound flags GraphQL endpoints discovered in in-scope traffic.",
+                            "Endpoint exposure is informational; assess introspection and authorization separately.",
+                            pair);
                 }
             }
             if (!ApiSurfaceEngine.looksLikeOpenApi(body)) return;
@@ -644,6 +664,19 @@ final class ReconController implements HttpHandler {
             api.logging().logToOutput("[Recon Hound] Ingested OpenAPI spec " + url + " (" + paths.size() + " path(s))");
             addSyntheticFinding("INFO", "openapi", "OpenAPI/Swagger spec", "response",
                     paths.size() + " documented endpoint(s) imported", url);
+            reporter.report("openapi-issue\0" + url,
+                    "OpenAPI/Swagger specification exposed",
+                    "<b>OpenAPI/Swagger specification is publicly accessible</b><br>"
+                            + "URL: <code>" + escape(url) + "</code><br>"
+                            + "Documented endpoints imported: " + paths.size() + "<br><br>"
+                            + "A public API spec enumerates endpoints, parameters and schemas, giving an attacker a "
+                            + "complete map of the API surface. Recon Hound imported the documented paths into the crawl.",
+                    "Restrict access to API specifications in production, or ensure every documented endpoint enforces "
+                            + "authentication and authorization.",
+                    url, AuditIssueSeverity.INFORMATION, AuditIssueConfidence.CERTAIN,
+                    "Recon Hound ingests exposed OpenAPI/Swagger specs and expands them into the crawl surface.",
+                    "Spec exposure is informational; the risk is the endpoints it reveals.",
+                    pair);
         } catch (Exception e) {
             api.logging().logToError("API spec ingestion failed for " + url, e);
         }
@@ -665,6 +698,127 @@ final class ReconController implements HttpHandler {
         });
     }
 
+    /**
+     * On-demand, budget-capped LLM review of every in-scope JavaScript response in the site map.
+     * Each parsed finding (bug + PoC + optional exploit chain) is filed as a native Burp audit issue
+     * via {@link IssueReporter} and mirrored to the Active-tests table. Runs off the EDT; JS files
+     * already analysed in a previous run are skipped, and no more than {@code maxFiles} fresh files
+     * are sent per run (any remainder is reported, never silently dropped).
+     */
+    void analyzeInScopeJavaScriptWithLlm(LlmProvider provider, String model, String uiKey,
+                                         int maxFiles, java.util.function.Consumer<String> onDone) {
+        activeWorker.submit(() -> {
+            if (provider == null) {
+                SwingUtilities.invokeLater(() -> onDone.accept("[error] No LLM provider selected."));
+                return;
+            }
+            String key = (uiKey != null && !uiKey.isBlank()) ? uiKey.trim() : System.getenv(provider.envVar());
+            if (key == null || key.isBlank()) {
+                SwingUtilities.invokeLater(() -> onDone.accept(
+                        "[error] No API key. Set it in the field or export $" + provider.envVar() + "."));
+                return;
+            }
+
+            List<HttpRequestResponse> jsPairs = api.siteMap().requestResponses().stream()
+                    .filter(rr -> rr.request() != null && rr.hasResponse() && rr.response() != null)
+                    .filter(rr -> rr.request().isInScope())
+                    .filter(this::looksLikeJavaScript)
+                    .collect(java.util.stream.Collectors.toMap(
+                            rr -> rr.request().url(), rr -> rr, (a, b) -> a, LinkedHashMap::new))
+                    .values().stream().toList();
+
+            int totalInScope = jsPairs.size();
+            int analyzed = 0, findings = 0, skippedBudget = 0, errors = 0;
+            api.logging().logToOutput("[Recon Hound][LLM] JS analysis: " + totalInScope
+                    + " in-scope JS file(s) in the site map, budget " + maxFiles + " per run.");
+
+            for (HttpRequestResponse rr : jsPairs) {
+                String url = rr.request().url();
+                if (llmJsAnalyzed.contains(url)) continue;   // analysed in an earlier run
+                if (analyzed >= maxFiles) { skippedBudget++; continue; }
+                llmJsAnalyzed.add(url);
+                analyzed++;
+
+                String body = rr.response().bodyToString();
+                api.logging().logToOutput("[Recon Hound][LLM] Reviewing " + url + " (" + body.length() + " chars)");
+                LlmClient.LlmAnalysis analysis = llmClient.analyzeJavaScript(provider, model, key, url, body);
+                if (analysis.findings().isEmpty() && analysis.error() != null) {
+                    if (analysis.error().startsWith("[error]") || analysis.error().startsWith("[HTTP")) errors++;
+                    api.logging().logToOutput("[Recon Hound][LLM] " + url + ": " + firstLine(analysis.error()));
+                }
+                for (LlmClient.LlmFinding finding : analysis.findings()) {
+                    findings++;
+                    fileLlmFinding(finding, url, rr);
+                }
+                publishStatus();
+            }
+
+            int fAnalyzed = analyzed, fFindings = findings, fSkipped = skippedBudget, fErrors = errors, fTotal = totalInScope;
+            StringBuilder summary = new StringBuilder();
+            summary.append("LLM JS analysis complete: ").append(fAnalyzed).append(" file(s) analysed, ")
+                    .append(fFindings).append(" finding(s) filed as native Burp issues");
+            if (fErrors > 0) summary.append(", ").append(fErrors).append(" file(s) errored");
+            if (fSkipped > 0) {
+                summary.append(". ").append(fSkipped).append(" file(s) left over the ").append(maxFiles)
+                        .append("-file budget (of ").append(fTotal)
+                        .append(" in-scope JS) — raise the budget and run again to continue.");
+            } else {
+                summary.append(". All ").append(fTotal).append(" in-scope JS file(s) covered.");
+            }
+            api.logging().logToOutput("[Recon Hound] " + summary);
+            SwingUtilities.invokeLater(() -> onDone.accept(summary.toString()));
+        });
+    }
+
+    private boolean looksLikeJavaScript(HttpRequestResponse rr) {
+        try {
+            String url = rr.request().url().toLowerCase(Locale.ROOT);
+            int q = url.indexOf('?');
+            String path = q >= 0 ? url.substring(0, q) : url;
+            if (path.endsWith(".js") || path.endsWith(".mjs") || path.endsWith(".jsx") || path.endsWith(".ts")) return true;
+            String contentType = rr.response().headerValue("Content-Type");
+            return contentType != null && contentType.toLowerCase(Locale.ROOT).contains("javascript");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void fileLlmFinding(LlmClient.LlmFinding finding, String url, HttpRequestResponse pair) {
+        String detail = "<b>LLM-identified issue: " + escape(finding.title()) + "</b><br>"
+                + (finding.vulnClass().isBlank() ? "" : "Class: " + escape(finding.vulnClass()) + "<br>")
+                + "Source: <code>" + escape(url) + "</code><br><br>"
+                + (finding.description().isBlank() ? "" : "<b>Description</b><br>" + escape(finding.description()) + "<br><br>")
+                + (finding.evidence().isBlank() ? "" : "<b>Evidence</b><br><code>" + escape(finding.evidence()) + "</code><br><br>")
+                + (finding.poc().isBlank() ? "" : "<b>Proof of concept</b><br><code>" + escape(finding.poc()) + "</code><br><br>")
+                + (finding.chain().isBlank() ? "" : "<b>Exploit chain (higher impact)</b><br>" + escape(finding.chain()) + "<br><br>")
+                + "<i>Generated by an LLM from client-side source. Verify the PoC against an authorised target "
+                + "before reporting — LLM output can be wrong or fabricated.</i>";
+        String remediation = finding.remediation().isBlank()
+                ? "Validate and encode untrusted input at the identified sink; review the cited code path."
+                : finding.remediation();
+
+        addActiveRow(finding.severity(), "LLM-JS",
+                finding.vulnClass().isBlank() ? finding.title() : finding.vulnClass(),
+                "reported", firstLine(finding.description().isBlank() ? finding.title() : finding.description()), url);
+
+        reporter.report(
+                "llm-js\0" + url + "\0" + finding.title(),
+                "LLM: " + finding.title(),
+                detail, remediation, url,
+                IssueReporter.severity(finding.severity()), IssueReporter.confidence(finding.confidence()),
+                "Recon Hound sent in-scope JavaScript to a user-configured LLM for on-demand vulnerability review.",
+                "LLM output can be inaccurate or fabricated; confirm the PoC before relying on this finding.",
+                pair);
+    }
+
+    private static String firstLine(String value) {
+        if (value == null) return "";
+        String line = value.strip();
+        int nl = line.indexOf('\n');
+        if (nl >= 0) line = line.substring(0, nl);
+        return line.length() > 200 ? line.substring(0, 197) + "..." : line;
+    }
+
     void introspectGraphql(String url) {
         activeWorker.submit(() -> {
             String target = url == null ? "" : url.trim();
@@ -682,15 +836,15 @@ final class ReconController implements HttpHandler {
                 addActiveRow(enabled ? "MEDIUM" : "INFO", "GraphQL", "introspection",
                         enabled ? "confirmed" : "checked", summary, target);
                 if (enabled && rr.hasResponse()) {
-                    AuditIssue issue = auditIssue(
-                            "Recon Hound: GraphQL introspection enabled",
+                    reporter.report(
+                            "graphql-introspection-issue\0" + target,
+                            "GraphQL introspection enabled",
                             "<b>GraphQL introspection is enabled</b><br>" + escape(summary),
                             "Disable introspection in production to reduce schema disclosure.",
                             target, AuditIssueSeverity.LOW, AuditIssueConfidence.FIRM,
                             "Recon Hound queried the GraphQL introspection endpoint on request.",
                             "Introspection disclosure is informational to low severity depending on exposure.",
-                            AuditIssueSeverity.LOW, rr);
-                    api.siteMap().add(issue);
+                            rr);
                 }
                 api.logging().logToOutput("[Recon Hound] GraphQL introspection on " + target + ": " + summary);
             } catch (Exception e) {
@@ -717,9 +871,7 @@ final class ReconController implements HttpHandler {
                     reflection.valuePreview(), reflection.url()
             )));
 
-            if (pair != null && ("HIGH".equals(reflection.severity()) || "MEDIUM".equals(reflection.severity()))) {
-                addReflectionIssue(reflection, vectors, pair);
-            }
+            addReflectionIssue(reflection, vectors, pair);
         }
         publishStatus();
     }
@@ -727,8 +879,7 @@ final class ReconController implements HttpHandler {
     private void addReflectionIssue(XssReflectionEngine.Reflection reflection,
                                     List<XssVectorLibrary.Vector> vectors,
                                     HttpRequestResponse pair) {
-        AuditIssueSeverity severity = "HIGH".equals(reflection.severity())
-                ? AuditIssueSeverity.HIGH : AuditIssueSeverity.MEDIUM;
+        AuditIssueSeverity severity = IssueReporter.severity(reflection.severity());
 
         StringBuilder vectorHtml = new StringBuilder();
         for (XssVectorLibrary.Vector vector : vectors) {
@@ -747,17 +898,18 @@ final class ReconController implements HttpHandler {
                 + "Context-appropriate vectors from the XSS cheat sheet to validate manually:<ul>"
                 + vectorHtml + "</ul>";
 
-        AuditIssue issue = auditIssue(
-                "Recon Hound: reflected parameter (" + reflection.context().label() + ")",
+        reporter.report(
+                "reflect-issue\0" + reflection.url() + "\0" + reflection.parameter()
+                        + "\0" + reflection.type() + "\0" + reflection.context().label(),
+                "reflected parameter (" + reflection.context().label() + ")",
                 detail,
                 "HTML-encode reflected values for their output context, apply a strict Content-Security-Policy, "
                         + "and avoid reflecting attacker-controlled input into scripts or URL attributes.",
                 reflection.url(), severity, AuditIssueConfidence.TENTATIVE,
                 "Recon Hound passively maps parameter values that are reflected into responses and classifies the sink context.",
                 "Reflection is necessary but not sufficient for XSS; confirm by injecting a context-appropriate vector against an authorised target.",
-                severity, pair
+                pair
         );
-        api.siteMap().add(issue);
     }
 
     private void scanMessage(String text, String location, String url, HttpRequestResponse pair) {
@@ -773,7 +925,7 @@ final class ReconController implements HttpHandler {
                     location, RegexHound.redact(finding.value()), url
             )));
 
-            if (pair != null && finding.rule().severity() != RegexHound.Severity.INFO) addAuditIssue(finding, pair);
+            addAuditIssue(finding, pair);
         }
 
         if (scanGfPatterns.get()) {
@@ -781,6 +933,18 @@ final class ReconController implements HttpHandler {
                 String dedupe = "gf\0" + match.pack() + "\0" + match.value() + "\0" + url;
                 if (!issueDedupe.add(dedupe)) continue;
                 addSyntheticFinding("INFO", "gf", "gf:" + match.pack(), location, match.value(), url);
+                reporter.report("gf-issue\0" + match.pack() + "\0" + match.value() + "\0" + url,
+                        "gf pattern match (" + match.pack() + ")",
+                        "<b>gf pattern <code>" + escape(match.pack()) + "</code> matched</b><br>"
+                                + "Location: " + escape(location) + "<br>"
+                                + "Matched value: <code>" + escape(match.value()) + "</code><br><br>"
+                                + "gf packs flag parameters/patterns commonly associated with a vulnerability class "
+                                + "(SSRF, LFI, redirect, SQLi, XSS, etc.). This is an attack-surface hint, not a confirmed issue.",
+                        "Manually assess the flagged parameter/pattern for the associated vulnerability class.",
+                        url, AuditIssueSeverity.INFORMATION, AuditIssueConfidence.TENTATIVE,
+                        "Recon Hound scans in-scope traffic against community gf pattern packs to surface likely-vulnerable inputs.",
+                        "gf matches are heuristic attack-surface hints; confirm exploitability manually.",
+                        pair);
             }
         }
         publishStatus();
@@ -803,15 +967,14 @@ final class ReconController implements HttpHandler {
             String detail = "<b>Active test: " + escape(finding.testClass()) + "</b><br>"
                     + "Parameter: <code>" + escape(finding.parameter()) + "</code><br>"
                     + "Evidence: " + escape(finding.evidence());
-            AuditIssue issue = auditIssue(
-                    "Recon Hound: " + finding.testClass() + " (" + finding.parameter() + ")",
+            reporter.report(
+                    "active-issue\0" + finding.testClass() + "\0" + finding.parameter() + "\0" + finding.url(),
+                    finding.testClass() + " (" + finding.parameter() + ")",
                     detail,
                     activeRemediation(finding.testClass()),
                     finding.url(), severity, AuditIssueConfidence.FIRM,
                     "Recon Hound actively probes parameters for SSRF, SSTI and XSS when active testing is enabled.",
-                    "Confirm the impact manually and only test targets you are authorised to assess.",
-                    severity);
-            api.siteMap().add(issue);
+                    "Confirm the impact manually and only test targets you are authorised to assess.");
         }
     }
 
@@ -848,8 +1011,9 @@ final class ReconController implements HttpHandler {
 
                 addActiveRow("HIGH", testClass + "-OOB", parameter, "OOB confirmed", evidence, url);
 
-                AuditIssue issue = auditIssue(
-                        "Recon Hound: out-of-band " + testClass + " interaction",
+                reporter.report(
+                        "oob-issue\0" + key,
+                        "out-of-band " + testClass + " interaction",
                         "<b>Confirmed OOB interaction</b><br>Class: " + escape(testClass) + "<br>"
                                 + "Parameter: <code>" + escape(parameter) + "</code><br>"
                                 + "Interaction: " + escape(evidence) + "<br>"
@@ -860,9 +1024,7 @@ final class ReconController implements HttpHandler {
                         "(unknown)".equals(url) ? "https://" + interaction.clientIp().getHostAddress() : url,
                         AuditIssueSeverity.HIGH, AuditIssueConfidence.FIRM,
                         "Recon Hound correlates Burp Collaborator interactions back to the injected parameter.",
-                        "OOB interactions are strong evidence; verify the affected functionality manually.",
-                        AuditIssueSeverity.HIGH);
-                api.siteMap().add(issue);
+                        "OOB interactions are strong evidence; verify the affected functionality manually.");
             }
             publishStatus();
         } catch (Exception e) {
@@ -871,15 +1033,7 @@ final class ReconController implements HttpHandler {
     }
 
     private void addSignalIssue(ResponseSignalEngine.Signal signal, String location, String url, HttpRequestResponse pair) {
-        if (pair == null) return;
-        String dedupe = "signal-issue\0" + signal.name() + "\0" + signal.value() + "\0" + url;
-        if (!issueDedupe.add(dedupe)) return;
-
-        AuditIssueSeverity severity = switch (signal.severity()) {
-            case "HIGH" -> AuditIssueSeverity.HIGH;
-            case "MEDIUM" -> AuditIssueSeverity.MEDIUM;
-            default -> AuditIssueSeverity.LOW;
-        };
+        AuditIssueSeverity severity = IssueReporter.severity(signal.severity());
 
         String detail = "<b>Response signal: " + escape(signal.name()) + "</b><br>"
                 + "Location: " + escape(location) + "<br>"
@@ -887,17 +1041,17 @@ final class ReconController implements HttpHandler {
                 + "Recon Hound flags disclosure signals (stack traces, debug/error output, source-map "
                 + "references, directory listings, internal-hostname hints) in in-scope responses.";
 
-        AuditIssue issue = auditIssue(
-                "Recon Hound: " + signal.name(),
+        reporter.report(
+                "signal-issue\0" + signal.name() + "\0" + signal.value() + "\0" + url,
+                signal.name(),
                 detail,
                 "Suppress verbose errors and stack traces in production, remove source-map references from "
                         + "public assets, disable directory listing, and avoid leaking internal hostnames.",
                 url, severity, AuditIssueConfidence.FIRM,
                 "Recon Hound passively inspects in-scope responses for information-disclosure signals.",
                 "Disclosure findings are heuristic; confirm the leaked content is sensitive before reporting.",
-                severity, pair
+                pair
         );
-        api.siteMap().add(issue);
     }
 
     private void recordAsset(String host, String source) {
@@ -952,16 +1106,16 @@ final class ReconController implements HttpHandler {
                 + "Entropy: " + String.format(Locale.ROOT, "%.2f", finding.entropy()) + "<br><br>"
                 + "Review the original request/response and validate whether the credential or token is live.";
 
-        AuditIssue issue = auditIssue(
-                "Recon Hound: " + finding.rule().name(),
+        reporter.report(
+                "hound-issue\0" + finding.rule().id() + "\0" + finding.value() + "\0" + finding.url(),
+                finding.rule().name(),
                 detail,
                 "Remove exposed credentials from client-visible content, rotate affected secrets, and constrain their privileges.",
                 finding.url(), severity, confidence,
                 "Recon Hound identifies credential, token, key, and security-relevant patterns in in-scope HTTP traffic.",
                 "Secret scanning is heuristic; verify context before remediation.",
-                severity, pair
+                pair
         );
-        api.siteMap().add(issue);
     }
 
     private void rememberTemplate(HttpRequest request) {
