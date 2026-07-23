@@ -187,7 +187,8 @@ Findings surface in three places:
   plugin tabs. This covers secrets, response-signal disclosures (stack traces, source-map/internal-host
   leaks), reflected-parameter/XSS candidates, web-hygiene (CORS/CSP/JWT) issues, exposed source maps
   and OpenAPI/GraphQL surface, gf-pattern hits, broken-access-control/IDOR, confirmed active findings
-  (SSRF/SSTI/XSS, including Collaborator OOB), and LLM-identified JavaScript bugs (with PoC and chain).
+  (SSRF/SSTI/XSS, including Collaborator OOB), **vulnerable JS dependencies (SCA)**, **JWT defects
+  including offline weak-secret cracks**, and LLM-identified JavaScript bugs (with PoC and chain).
   Informational results are filed at `INFORMATION` severity so nothing is dropped;
 - Burp's **native scan pipeline** — Recon Hound registers a **passive scan check**, so its detectors
   (secrets, CORS/CSP/JWT hygiene, disclosure signals, reflected parameters) also run when Burp audits

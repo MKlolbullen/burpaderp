@@ -3,6 +3,9 @@ package com.victor.reconloop;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.responses.HttpResponse;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -104,6 +107,15 @@ final class WebHygieneEngine {
         } else if (algLower.startsWith("hs")) {
             notes.add(new Note("LOW", "JWT HMAC algorithm (" + alg + ")",
                     "Symmetric HMAC token — vulnerable to offline secret cracking if a weak key is used."));
+            if (parts.length >= 3) {
+                String secret = crackHmac(parts[0] + "." + parts[1], parts[2], algLower);
+                if (secret != null) {
+                    notes.add(new Note("HIGH", "JWT signed with a weak/known secret",
+                            "The token's HMAC signature verifies with the well-known secret \"" + secret + "\". "
+                            + "Anyone with this secret can forge arbitrary tokens — full authentication bypass / "
+                            + "privilege escalation. Rotate to a long random key immediately."));
+                }
+            }
         } else {
             notes.add(new Note("INFO", "JWT observed (" + alg + ")",
                     "JSON Web Token present in traffic; review claims and validation."));
@@ -111,6 +123,36 @@ final class WebHygieneEngine {
         if (header.toLowerCase(Locale.ROOT).contains("\"kid\""))
             notes.add(new Note("INFO", "JWT kid header present",
                     "A 'kid' header can be an injection point (path traversal / SQLi) into key resolution."));
+    }
+
+    /** A small dictionary of secrets that ship in tutorials/boilerplate and get left in production. */
+    private static final List<String> WEAK_SECRETS = List.of(
+            "secret", "password", "123456", "changeme", "admin", "jwt", "token", "key", "test", "private",
+            "secretkey", "supersecret", "your-256-bit-secret", "your_jwt_secret", "jwtsecret", "mysecret",
+            "s3cr3t", "p@ssw0rd", "qwerty", "letmein", "default", "root", "password123", "1234567890",
+            "hmac", "signature", "access", "refresh", "api", "dev", "staging", "production", "shhhh");
+
+    /** Offline HS256/384/512 secret check: returns the matching weak secret, or null. No traffic is sent. */
+    static String crackHmac(String signingInput, String signature, String algLower) {
+        String macAlg = switch (algLower) {
+            case "hs256" -> "HmacSHA256";
+            case "hs384" -> "HmacSHA384";
+            case "hs512" -> "HmacSHA512";
+            default -> null;
+        };
+        if (macAlg == null || signature == null || signature.isBlank()) return null;
+        for (String secret : WEAK_SECRETS) {
+            try {
+                Mac mac = Mac.getInstance(macAlg);
+                mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), macAlg));
+                byte[] computed = mac.doFinal(signingInput.getBytes(StandardCharsets.US_ASCII));
+                String encoded = Base64.getUrlEncoder().withoutPadding().encodeToString(computed);
+                if (encoded.equals(signature)) return secret;
+            } catch (Exception ignored) {
+                // unavailable MAC algorithm -> skip
+            }
+        }
+        return null;
     }
 
     private static boolean containsSourceWildcard(String csp, String directive) {
