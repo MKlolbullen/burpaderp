@@ -120,10 +120,12 @@ Enable it only against targets you are authorised to test.
   and compares responses. An equivalent successful response for the lower-privileged identity is
   flagged as probable broken access control. Only **safe methods** (GET/HEAD/OPTIONS) are replayed by
   default to avoid state-changing side effects.
-- **JWT alg:none test** (`JwtAttackEngine`) — replays in-scope GET/HEAD/OPTIONS requests that carry a
-  JWT with an `alg:none` forgery (empty signature, case variants). If the forged token is accepted
-  (same success response as the valid token), the server isn't verifying signatures — a HIGH
-  authentication-bypass finding. Complements the passive offline weak-secret crack.
+- **JWT attacks** (`JwtAttackEngine`) — replays in-scope GET/HEAD/OPTIONS requests that carry a JWT
+  with two forgeries: an **`alg:none`** variant (empty signature, case variants), and — when the
+  passive offline crack recovers the HMAC secret — a token **re-signed with the cracked secret and a
+  tampered claim**. If either forged token is accepted (same success response as the valid token), the
+  server isn't verifying signatures / uses a guessable key — a HIGH authentication-bypass finding
+  proven end-to-end.
 - **Subdomain-takeover check** (`SubdomainTakeoverEngine`) — fetches each enumerated host and matches
   known "unclaimed resource" fingerprints (GitHub Pages, S3, Heroku, Fastly, Shopify, …). A match
   flags a likely dangling DNS record an attacker could claim.
@@ -199,8 +201,9 @@ Findings surface in three places:
   leaks), reflected-parameter/XSS candidates, web-hygiene (CORS/CSP/JWT) issues, exposed source maps
   and OpenAPI/GraphQL surface, gf-pattern hits, broken-access-control/IDOR, confirmed active findings
   (SSRF/SSTI/XSS, including Collaborator OOB), **vulnerable JS dependencies (SCA)**, **JWT defects
-  including offline weak-secret cracks**, and LLM-identified JavaScript bugs (with PoC and chain).
-  Informational results are filed at `INFORMATION` severity so nothing is dropped;
+  including offline weak-secret cracks**, **heuristic DOM-XSS (source→sink)**, and LLM-identified
+  JavaScript bugs (with PoC and chain). Informational results are filed at `INFORMATION` severity so
+  nothing is dropped;
 - Burp's **native scan pipeline** — Recon Hound registers a **passive scan check**, so its detectors
   (secrets, CORS/CSP/JWT hygiene, disclosure signals, reflected parameters) also run when Burp audits
   traffic (passive scan or an active scan), contributing issues Burp owns and consolidates. The crawl
@@ -212,6 +215,22 @@ dashboards / CI ingestion) or **Markdown** (a bug-bounty-ready writeup grouped b
 state — the issue-dedupe keys, the host/IP asset inventory, and the Findings/Hosts rows — is
 **persisted to the Burp project** (`api.persistence()`), so reopening the project or reloading the
 extension restores your results and avoids re-filing findings already reported.
+
+## CI-native scanning (no Burp required)
+
+The same jar is a standalone command-line scanner — its passive engines (secret detection, SCA,
+heuristic DOM-XSS, exposed source maps) are Burp-free, so they run anywhere with `java -jar`:
+
+```
+java -jar burp-recon-hound.jar --fail-on high -o recon-hound.sarif https://target.example/app.js
+java -jar burp-recon-hound.jar --file targets.txt --fail-on medium
+```
+
+It fetches each URL, writes a **SARIF 2.1.0** report, and exits non-zero when a finding meets
+`--fail-on` (`high` default / `medium` / `low` / `none`) so it can gate a pipeline. A ready
+**`Recon Scan`** GitHub Actions workflow (`.github/workflows/recon-scan.yml`, `workflow_dispatch`)
+builds the jar, scans the target URLs you pass, and uploads the SARIF artifact — using only the
+allowed GitHub-owned actions and the Gradle wrapper directly.
 
 ## Safety / scope controls
 

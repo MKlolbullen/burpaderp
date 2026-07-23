@@ -34,6 +34,7 @@ jar {
         attributes(
             'Implementation-Title': archiveBaseName,
             'Implementation-Version': version,
+            'Main-Class': 'com.victor.reconloop.ReconHoundCli',
             'Created-By': "${System.getProperty('java.version')} (${System.getProperty('java.vendor')})"
         )
     }
