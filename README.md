@@ -1,16 +1,52 @@
-# Recon Hound — Burp Suite Professional extension (Montoya)
+<div align="center">
+
+<img src="docs/img/hero.svg" alt="Recon Hound" width="880">
+
+### The recon-to-exploit toolkit for Burp Suite — passive intel, active testing, LLM analysis, and Nuclei, all filing **native Burp issues**.
 
 [![CI](https://github.com/MKlolbullen/burpaderp/actions/workflows/ci.yml/badge.svg)](https://github.com/MKlolbullen/burpaderp/actions/workflows/ci.yml)
 [![Release](https://github.com/MKlolbullen/burpaderp/actions/workflows/release.yml/badge.svg)](https://github.com/MKlolbullen/burpaderp/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/MKlolbullen/burpaderp?color=7e22ce&label=download)](https://github.com/MKlolbullen/burpaderp/releases/latest)
+![Java](https://img.shields.io/badge/Java-21-c2410c)
+![API](https://img.shields.io/badge/Burp-Montoya-db2777)
 
-Recon Hound is a scope-bounded asset, attack-surface, and content-intelligence extension for
-Burp Suite Professional, written against the **Montoya API** and Java 21.
+[**Install**](#install) · [**Capabilities**](#capability-map) · [**CLI / CI mode**](#ci-native-scanning-no-burp-required) · [**How it works**](#what-it-does)
 
-It is the successor to the original Recon Loop tooling. The earlier tooling was constrained by the
-legacy Burp Extender API on **Jython (Python 2)** — end-of-life, no modern language features, awkward
-threading, and no access to the current Montoya extension model. This version drops that constraint
-entirely: it is a native Java extension with no Python runtime, so it runs on Burp's own JVM with
-full access to the modern HTTP handler, site map, scope, scanner-issue, and UI APIs.
+</div>
+
+---
+
+## Capability map
+
+Recon Hound spans the full engagement — from mapping attack surface, through detecting weaknesses, to
+confirming and chaining them into impact — and everything it finds is filed as a **native Burp audit
+issue** (Dashboard / Target), not just a plugin tab.
+
+![Capability map](docs/img/capabilities.svg)
+
+|  | |
+| --- | --- |
+| 🔎 **Discover** | Crawl + redirect chains, **webpack-chunk reconstruction**, source-map mining, OpenAPI/GraphQL ingest, crt.sh subdomains, Arjun param discovery, host/IP inventory |
+| 🩻 **Detect** | Secrets (RegexHound + `gf`), **SCA** for vulnerable JS libs, reflected-XSS surface, **DOM-XSS** source→sink, CORS/CSP/JWT hygiene, disclosure signals, exposed source maps |
+| 💥 **Exploit** | Collaborator-backed **SSRF/SSTI/XSS**, access-control/**IDOR**, **JWT** `alg:none` + weak-secret **forgery**, **GraphQL fuzzing**, **subdomain takeover**, open-redirect/CRLF |
+| 🧠 **AI** | Multi-provider **LLM JS bug-hunt** (PoC), cross-finding **exploit-chaining engine**, **Nuclei** AI templates + **ProjectDiscovery cloud** scans |
+| 📤 **Operate** | Native Burp issues + a passive **ScanCheck**, **SARIF + Markdown** export, per-project **persistence**, and a **headless CI scanner** (`java -jar`) |
+
+## Install
+
+1. Grab the latest `burp-recon-hound-*.jar` from **[Releases](https://github.com/MKlolbullen/burpaderp/releases/latest)** (a new build is cut on every commit to `main`).
+2. Burp Suite → **Extensions → Installed → Add → Java** → select the jar.
+
+Or build it yourself:
+
+```bash
+./gradlew clean build      # -> build/libs/burp-recon-hound-<version>.jar
+```
+
+> Successor to the original Recon Loop tooling, which was stuck on the legacy Extender API under
+> **Jython (Python 2)** — EOL, awkward threading, no Montoya. This is a native Java 21 extension with no
+> Python runtime, running on Burp's own JVM with full access to the modern HTTP handler, site map,
+> scope, scanner, and UI APIs.
 
 ## What it does
 

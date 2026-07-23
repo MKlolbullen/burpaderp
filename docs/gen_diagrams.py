@@ -296,6 +296,69 @@ def reporting():
     write("reporting.svg", s)
 
 
+# ---------------------------------------------------------------- 9. hero banner
+def hero():
+    w, h = 960, 250
+    s = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" '
+         f'font-family="Segoe UI, Helvetica, Arial, sans-serif">'
+         f'<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">'
+         f'<stop offset="0" stop-color="#f97316"/><stop offset="0.5" stop-color="#db2777"/>'
+         f'<stop offset="1" stop-color="#7e22ce"/></linearGradient></defs>'
+         f'<rect x="0" y="0" width="{w}" height="{h}" rx="14" fill="#0b1220"/>'
+         f'<rect x="0" y="0" width="{w}" height="7" rx="3" fill="url(#g)"/>')
+    s += f'<text x="40" y="98" font-size="54" font-weight="800" fill="#f8fafc" letter-spacing="1.5">RECON HOUND</text>'
+    s += f'<text x="44" y="130" font-size="15.5" fill="#94a3b8">Offensive recon &amp; vulnerability toolkit for Burp Suite &#8212; Montoya &#183; Java 21</text>'
+    s += f'<text x="{w-40}" y="42" text-anchor="end" font-size="12" font-weight="600" fill="#f97316">every finding &#8594; native Burp issues</text>'
+    chips = [("Passive engine", PAS), ("Active opt-in", ACT), ("LLM bug-hunt", AI), ("Nuclei + PDCP", AI),
+             ("Exploit chaining", AI), ("SCA", PAS), ("JWT attacks", ACT), ("DOM-XSS", PAS),
+             ("Subdomain takeover", ACT), ("SARIF / CI", REP)]
+    cx, cy = 42, 162
+    for label, (_fill, stroke) in chips:
+        cw = len(label) * 7.0 + 26
+        if cx + cw > w - 40:
+            cx = 42
+            cy += 34
+        s += f'<rect x="{cx}" y="{cy}" width="{cw}" height="27" rx="13" fill="#111c30" stroke="{stroke}" stroke-width="1.5"/>'
+        s += f'<text x="{cx+cw/2}" y="{cy+18}" text-anchor="middle" font-size="12" font-weight="600" fill="#e2e8f0">{esc(label)}</text>'
+        cx += cw + 10
+    write("hero.svg", s)
+
+
+# ---------------------------------------------------------------- 10. capability map
+def capabilities():
+    w, h = 960, 452
+    s = header(w, h, "Capability map")
+    cols = [
+        ("DISCOVER", PAS, ["Crawl + redirect chains", "Webpack chunk rebuild", "Source-map mining",
+                           "OpenAPI / GraphQL ingest", "crt.sh subdomains", "Arjun param discovery",
+                           "Host / IP aggregation"]),
+        ("DETECT", PAS, ["Secrets (RegexHound + gf)", "SCA — vulnerable libs", "Reflected-XSS surface",
+                         "DOM-XSS source to sink", "CORS / CSP / JWT hygiene", "Disclosure signals",
+                         "Exposed source maps"]),
+        ("EXPLOIT", ACT, ["SSRF / SSTI / XSS (OOB)", "Access-control / IDOR", "JWT alg:none + forgery",
+                          "GraphQL fuzzing", "Subdomain takeover", "Open-redirect / CRLF",
+                          "LLM PoC + exploit chains"]),
+        ("OPERATE", REP, ["Native Burp issues", "Passive ScanCheck", "SARIF + Markdown export",
+                          "Project persistence", "Headless CI scanner", "Multi-LLM analysis",
+                          "Nuclei AI templates + PDCP"]),
+    ]
+    cw = 220
+    gap = (w - 40 - cw * 4) / 3
+    x = 20
+    top = 54
+    for title, (fill, stroke), items in cols:
+        s += f'<rect x="{x}" y="{top}" width="{cw}" height="34" rx="8" fill="{stroke}"/>'
+        s += f'<text x="{x+cw/2}" y="{top+22}" text-anchor="middle" font-size="14" font-weight="800" fill="#ffffff">{esc(title)}</text>'
+        iy = top + 44
+        for it in items:
+            s += f'<rect x="{x}" y="{iy}" width="{cw}" height="42" rx="7" fill="{fill}" stroke="{stroke}" stroke-width="1.2"/>'
+            s += f'<text x="{x+12}" y="{iy+25}" font-size="11.5" font-weight="600" fill="{INK}">{esc(it)}</text>'
+            iy += 48
+        x += cw + gap
+    s += note(20, h - 14, "Passive detection runs continuously and via a native ScanCheck; active exploitation is a per-target opt-in.")
+    write("capabilities.svg", s)
+
+
 architecture()
 ui_tabs()
 xss_reflection()
@@ -304,4 +367,6 @@ active_testing()
 access_control()
 ai_analysis()
 reporting()
+hero()
+capabilities()
 print("done")
