@@ -3,6 +3,7 @@ package com.victor.reconloop;
 import burp.api.montoya.MontoyaApi;
 import burp.api.montoya.collaborator.CollaboratorClient;
 import burp.api.montoya.collaborator.Interaction;
+import burp.api.montoya.http.HttpService;
 import burp.api.montoya.http.handler.*;
 import burp.api.montoya.http.message.HttpRequestResponse;
 import burp.api.montoya.http.message.requests.HttpRequest;
@@ -37,6 +38,7 @@ final class ReconController implements HttpHandler {
     private final ParameterDiscoveryEngine parameterDiscovery;
     private final ActiveTestEngine activeTestEngine;
     private final IssueReporter reporter;
+    private final PdcpClient pdcp = new PdcpClient();
 
     private final ReconModel.FindingTableModel findingModel;
     private final ReconModel.DiscoveryTableModel discoveryModel;
@@ -768,6 +770,131 @@ final class ReconController implements HttpHandler {
             api.logging().logToOutput("[Recon Hound] " + summary);
             SwingUtilities.invokeLater(() -> onDone.accept(summary.toString()));
         });
+    }
+
+    /** Distinct in-scope target hosts (as https URLs) for a cloud scan, from collected assets + the site map. */
+    List<String> collectInScopeTargets() {
+        java.util.LinkedHashSet<String> hosts = new java.util.LinkedHashSet<>(assetHosts);
+        api.siteMap().requestResponses().stream()
+                .map(HttpRequestResponse::request)
+                .filter(Objects::nonNull)
+                .filter(HttpRequest::isInScope)
+                .forEach(r -> {
+                    try {
+                        String host = URI.create(r.url()).getHost();
+                        if (host != null) hosts.add(host.toLowerCase(Locale.ROOT));
+                    } catch (Exception ignored) {}
+                });
+        List<String> out = new ArrayList<>();
+        for (String host : hosts) out.add(host.startsWith("http") ? host : "https://" + host);
+        return out;
+    }
+
+    /**
+     * Runs a ProjectDiscovery Cloud (PDCP) Nuclei scan against {@code targets}, polls to completion, and
+     * files each returned match as a native Burp audit issue via {@link IssueReporter}. Progress strings
+     * are delivered on the EDT via {@code onProgress}. The key resolves from the UI field or $PDCP_API_KEY.
+     */
+    void runPdcpScan(String uiKey, String teamId, List<String> targets, List<String> templates,
+                     boolean recommended, java.util.function.Consumer<String> onProgress) {
+        java.util.function.Consumer<String> ui = s -> SwingUtilities.invokeLater(() -> onProgress.accept(s));
+        activeWorker.submit(() -> {
+            String key = (uiKey != null && !uiKey.isBlank()) ? uiKey.trim() : System.getenv("PDCP_API_KEY");
+            if (key == null || key.isBlank()) {
+                ui.accept("[error] No PDCP API key. Enter it above or export $PDCP_API_KEY.");
+                return;
+            }
+            if (targets == null || targets.isEmpty()) {
+                ui.accept("[error] No targets. Add hosts (one per line) or click 'Fill from in-scope'.");
+                return;
+            }
+            boolean useRecommended = recommended || templates == null || templates.isEmpty();
+            ui.accept("Creating PDCP scan for " + targets.size() + " target(s)"
+                    + (useRecommended ? " (recommended templates)" : " (" + templates.size() + " template group(s))") + "...");
+
+            PdcpClient.ScanCreated created = pdcp.createScan(key, teamId, "Recon Hound scan", targets,
+                    templates == null ? List.of() : templates, useRecommended);
+            if (created.scanId() == null) {
+                ui.accept("Scan creation failed: " + created.error());
+                return;
+            }
+            String scanId = created.scanId();
+            api.logging().logToOutput("[Recon Hound][PDCP] scan " + scanId + " created for " + targets.size() + " target(s).");
+
+            String status = "";
+            for (int i = 0; i < 90 && running.get(); i++) {   // up to ~15 min at 10s cadence
+                PdcpClient.ScanStatus st = pdcp.getScan(key, teamId, scanId);
+                if (st.error() != null) { ui.accept("Status check: " + st.error()); }
+                status = st.status() == null ? "" : st.status();
+                ui.accept("Scan " + scanId + " — status: " + (status.isBlank() ? "?" : status)
+                        + ", results so far: " + st.totalResult()
+                        + (st.progress() > 0 ? ", progress: " + Math.round(st.progress()) + "%" : ""));
+                if (isTerminalStatus(status)) break;
+                try {
+                    Thread.sleep(10_000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+
+            List<PdcpClient.Result> results = pdcp.getResults(key, teamId, targets, scanId, 500);
+            int filed = 0;
+            for (PdcpClient.Result result : results) {
+                if (filePdcpResult(result)) filed++;
+            }
+            String summary = "PDCP scan " + scanId + " finished (status: " + (status.isBlank() ? "?" : status) + "). "
+                    + results.size() + " result(s) returned, " + filed + " filed as native Burp issues"
+                    + (filed < results.size() ? " (" + (results.size() - filed) + " duplicate/empty)" : "") + ".";
+            api.logging().logToOutput("[Recon Hound] " + summary);
+            ui.accept(summary);
+            publishStatus();
+        });
+    }
+
+    private static boolean isTerminalStatus(String status) {
+        String s = status == null ? "" : status.toLowerCase(Locale.ROOT);
+        return s.contains("done") || s.contains("finish") || s.contains("complete")
+                || s.contains("fail") || s.contains("error") || s.contains("stop") || s.contains("cancel");
+    }
+
+    private boolean filePdcpResult(PdcpClient.Result r) {
+        String url = r.target();
+        if (url.isBlank()) return false;
+
+        HttpRequestResponse pair = null;
+        try {
+            if (!r.request().isBlank() && !r.response().isBlank() && url.startsWith("http")) {
+                HttpService service = HttpService.httpService(url);
+                HttpRequest request = HttpRequest.httpRequest(service, r.request());
+                HttpResponse response = HttpResponse.httpResponse(r.response());
+                pair = httpRequestResponse(request, response);
+            }
+        } catch (Exception ignored) {
+            // fall back to a text-only issue if the raw request/response won't parse
+        }
+
+        String detail = "<b>Nuclei match (ProjectDiscovery cloud): " + escape(r.name()) + "</b><br>"
+                + "Template: <code>" + escape(r.templateId()) + "</code><br>"
+                + "Target: <code>" + escape(url) + "</code><br>"
+                + "Severity: " + escape(r.severity()) + "<br>"
+                + (r.vulnId().isBlank() ? "" : "PDCP vuln id: <code>" + escape(r.vulnId()) + "</code><br>")
+                + (r.vulnStatus().isBlank() ? "" : "PDCP status: " + escape(r.vulnStatus()) + "<br>")
+                + "<br>Reported by a ProjectDiscovery cloud Nuclei scan launched from Recon Hound.";
+
+        addActiveRow(r.severity().toUpperCase(Locale.ROOT), "Nuclei",
+                r.templateId().isBlank() ? r.name() : r.templateId(),
+                r.matched() ? "matched" : "reported", r.name(), url);
+
+        return reporter.report(
+                "pdcp\0" + r.templateId() + "\0" + url + "\0" + r.vulnId(),
+                "Nuclei: " + (r.name().isBlank() ? r.templateId() : r.name()),
+                detail,
+                "Review the matched Nuclei template and remediate the underlying issue it detects.",
+                url, IssueReporter.severity(r.severity()), AuditIssueConfidence.FIRM,
+                "Recon Hound launched a ProjectDiscovery cloud Nuclei scan and imported matches as native Burp issues.",
+                "Nuclei matches are generally reliable, but confirm exploitability in context.",
+                pair);
     }
 
     /** On-demand: turns a natural-language description into a Nuclei YAML template via the LLM. */

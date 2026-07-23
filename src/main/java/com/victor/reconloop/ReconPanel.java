@@ -317,6 +317,7 @@ final class ReconPanel extends JPanel {
 
         JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, top, new JScrollPane(out));
         split.setResizeWeight(0.35);
+        panel.add(buildPdcpScanPanel(controller), BorderLayout.NORTH);
         panel.add(split, BorderLayout.CENTER);
         panel.add(status, BorderLayout.SOUTH);
 
@@ -343,6 +344,72 @@ final class ReconPanel extends JPanel {
         copy.addActionListener(e -> { out.selectAll(); out.copy(); out.select(0, 0); });
         save.addActionListener(e -> saveTemplate(panel, out.getText()));
         return panel;
+    }
+
+    /** ProjectDiscovery cloud (PDCP) Nuclei scan controls; results are filed as native Burp issues. */
+    private JComponent buildPdcpScanPanel(ReconController controller) {
+        JPanel p = new JPanel();
+        p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
+        p.setBorder(BorderFactory.createTitledBorder(
+                "ProjectDiscovery cloud scan (Nuclei) — runs in the cloud, matches import as native Burp issues"));
+
+        JPasswordField pdKey = new JPasswordField(24);
+        pdKey.setToolTipText("ProjectDiscovery Cloud API key. Blank = $PDCP_API_KEY. Kept in memory only, never saved.");
+        JTextField teamId = new JTextField(8);
+        teamId.setToolTipText("Optional X-Team-Id for team-scoped scans.");
+        JTextField templates = new JTextField(22);
+        templates.setToolTipText("Comma-separated template groups, e.g. cves,exposures,misconfiguration. Blank = recommended.");
+        JCheckBox recommended = new JCheckBox("Recommended templates", true);
+        JTextArea targets = new JTextArea(3, 44);
+        targets.setToolTipText("One target host/URL per line.");
+        JButton fill = new JButton("Fill from in-scope");
+        JButton run = new JButton("Run cloud scan");
+        JLabel pdStatus = new JLabel("Needs a ProjectDiscovery Cloud API key (data is sent to ProjectDiscovery — authorized targets only).");
+
+        JPanel row1 = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        row1.add(new JLabel("PDCP key (blank = $PDCP_API_KEY):")); row1.add(pdKey);
+        row1.add(new JLabel("Team id:")); row1.add(teamId);
+        p.add(row1);
+
+        JPanel row2 = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        row2.add(new JLabel("Templates:")); row2.add(templates); row2.add(recommended);
+        row2.add(fill); row2.add(run);
+        p.add(row2);
+
+        JPanel row3 = new JPanel(new BorderLayout(4, 4));
+        row3.add(new JLabel("Targets (one per line):"), BorderLayout.NORTH);
+        row3.add(new JScrollPane(targets), BorderLayout.CENTER);
+        p.add(row3);
+        p.add(pdStatus);
+
+        fill.addActionListener(e -> {
+            List<String> t = controller.collectInScopeTargets();
+            targets.setText(String.join("\n", t));
+            pdStatus.setText("Filled " + t.size() + " in-scope target(s).");
+        });
+        run.addActionListener(e -> {
+            List<String> targetList = new ArrayList<>();
+            for (String line : targets.getText().split("\\R")) {
+                String v = line.trim();
+                if (!v.isEmpty()) targetList.add(v);
+            }
+            List<String> templateList = new ArrayList<>();
+            for (String s : templates.getText().split(",")) {
+                String v = s.trim();
+                if (!v.isEmpty()) templateList.add(v);
+            }
+            if (targetList.isEmpty()) { pdStatus.setText("Add at least one target (or click 'Fill from in-scope')."); return; }
+            run.setEnabled(false);
+            pdStatus.setText("Starting cloud scan…");
+            controller.runPdcpScan(new String(pdKey.getPassword()), teamId.getText(), targetList, templateList,
+                    recommended.isSelected(), msg -> {
+                        pdStatus.setText(msg);
+                        if (msg.startsWith("PDCP scan") || msg.startsWith("[error]") || msg.contains("failed")) {
+                            run.setEnabled(true);
+                        }
+                    });
+        });
+        return p;
     }
 
     private static void saveTemplate(Component parent, String yaml) {
