@@ -34,6 +34,7 @@ final class ReconController implements HttpHandler {
     private final ResponseSignalEngine responseSignals = new ResponseSignalEngine();
     private final XssReflectionEngine xssReflectionEngine = new XssReflectionEngine();
     private final WebHygieneEngine webHygiene = new WebHygieneEngine();
+    private final DependencyVulnEngine scaEngine = new DependencyVulnEngine();
     private final LlmClient llmClient = new LlmClient();
     private final CertificateTransparencyClient ctClient;
     private final ParameterDiscoveryEngine parameterDiscovery;
@@ -57,6 +58,7 @@ final class ReconController implements HttpHandler {
     private final Set<String> activeDedupe = ConcurrentHashMap.newKeySet();
     private final Set<String> oobDedupe = ConcurrentHashMap.newKeySet();
     private final Set<String> minedMaps = ConcurrentHashMap.newKeySet();
+    private final Set<String> minedWebpack = ConcurrentHashMap.newKeySet();
     private final Set<String> ingestedSpecs = ConcurrentHashMap.newKeySet();
     private final Set<String> llmJsAnalyzed = ConcurrentHashMap.newKeySet();
     private final Set<String> assetHosts = ConcurrentHashMap.newKeySet();
@@ -350,6 +352,7 @@ final class ReconController implements HttpHandler {
         reflectionDedupe.clear();
         activeDedupe.clear();
         minedMaps.clear();
+        minedWebpack.clear();
         ingestedSpecs.clear();
         llmJsAnalyzed.clear();
         assetHosts.clear();
@@ -556,6 +559,8 @@ final class ReconController implements HttpHandler {
 
         analyzeHygiene(request, response, pair);
         mineSourceMap(request.url(), response, pair);
+        mineWebpackChunks(request.url(), response);
+        scanDependencies(request.url(), response, pair);
         ingestApiSpec(request.url(), response, pair);
 
         short code = response.statusCode();
@@ -635,6 +640,71 @@ final class ReconController implements HttpHandler {
                     pair);
         } catch (Exception e) {
             api.logging().logToError("Source-map mining failed for " + url, e);
+        }
+    }
+
+    private void mineWebpackChunks(String url, HttpResponse response) {
+        try {
+            if (!isJavaScriptResponse(url, response)) return;
+            if (!minedWebpack.add(url)) return;
+            String body = response.bodyToString();
+            if (!WebpackMiner.looksLikeWebpack(body)) return;
+            URI base = URI.create(url);
+            Set<URI> chunks = WebpackMiner.reconstruct(base, body);
+            if (chunks.isEmpty()) return;
+            for (URI chunk : chunks) addDiscovered(chunk, base, "webpack chunk from " + url, false);
+            api.logging().logToOutput("[Recon Hound] Reconstructed " + chunks.size() + " webpack chunk URL(s) from " + url);
+            addSyntheticFinding("INFO", "webpack", "Webpack chunks reconstructed", "response",
+                    chunks.size() + " lazy-loaded chunk URL(s) queued from the bundle", url);
+        } catch (Exception e) {
+            api.logging().logToError("Webpack mining failed for " + url, e);
+        }
+    }
+
+    private void scanDependencies(String url, HttpResponse response, HttpRequestResponse pair) {
+        try {
+            String contentType = response.headerValue("Content-Type");
+            boolean html = contentType != null && contentType.toLowerCase(Locale.ROOT).contains("html");
+            if (!isJavaScriptResponse(url, response) && !html) return;
+            for (AuditIssue issue : scaIssues(url, response.bodyToString(), pair)) addToSiteMap(issue);
+        } catch (Exception e) {
+            api.logging().logToError("Dependency (SCA) scan failed for " + url, e);
+        }
+    }
+
+    /** Builds SCA issues for a response body; adds a UI row only when a finding is newly built. */
+    private List<AuditIssue> scaIssues(String url, String body, HttpRequestResponse pair) {
+        List<AuditIssue> out = new ArrayList<>();
+        for (DependencyVulnEngine.LibIssue lib : scaEngine.scan(url, body)) {
+            AuditIssue issue = reporter.buildIfNew(
+                    "sca\0" + lib.library() + "\0" + lib.version() + "\0" + url,
+                    "vulnerable dependency: " + lib.library() + " " + lib.version(),
+                    "<b>Known-vulnerable JavaScript library</b><br>"
+                            + "Library: <code>" + escape(lib.library()) + " " + escape(lib.version()) + "</code><br>"
+                            + "Advisory: " + escape(lib.reference()) + "<br><br>" + escape(lib.detail()),
+                    "Upgrade " + escape(lib.library()) + " to a fixed version, or replace it with a maintained alternative.",
+                    url, IssueReporter.severity(lib.severity()), AuditIssueConfidence.TENTATIVE,
+                    "Recon Hound matches client-side libraries against a curated database of known-vulnerable versions.",
+                    "Version detection in minified bundles is heuristic; confirm the library and version.",
+                    pair);
+            if (issue != null) {
+                addActiveRow(lib.severity(), "SCA", lib.library() + " " + lib.version(), "vulnerable", lib.reference(), url);
+                out.add(issue);
+            }
+        }
+        return out;
+    }
+
+    private static boolean isJavaScriptResponse(String url, HttpResponse response) {
+        try {
+            String contentType = response.headerValue("Content-Type");
+            if (contentType != null && contentType.toLowerCase(Locale.ROOT).contains("javascript")) return true;
+            String path = url.toLowerCase(Locale.ROOT);
+            int q = path.indexOf('?');
+            if (q >= 0) path = path.substring(0, q);
+            return path.endsWith(".js") || path.endsWith(".mjs");
+        } catch (Exception e) {
+            return false;
         }
     }
 
@@ -1424,6 +1494,7 @@ final class ReconController implements HttpHandler {
             for (XssReflectionEngine.Reflection reflection : xssReflectionEngine.analyze(request, response)) {
                 addIfPresent(issues, buildReflectionIssue(reflection, reflection.viableVectors(), rr));
             }
+            issues.addAll(scaIssues(url, response.bodyToString(), rr));
         } catch (Exception e) {
             api.logging().logToError("Passive audit failed for " + url, e);
         }

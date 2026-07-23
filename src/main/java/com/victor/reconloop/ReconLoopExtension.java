@@ -28,7 +28,8 @@ public final class ReconLoopExtension implements BurpExtension {
         api.extension().registerUnloadingHandler(() -> controller.shutdown());
 
         api.logging().logToOutput("Recon Hound loaded.");
-        api.logging().logToOutput("Features: asset/file discovery, redirect-chain scanning, parameter profiling, RegexHound, gf-json packs, payload corpus indexing.");
+        api.logging().logToOutput("Features: asset/file discovery, webpack-chunk reconstruction, source-map mining, redirect-chain scanning, parameter profiling, RegexHound, gf-json packs.");
+        api.logging().logToOutput("Passive vuln checks: SCA (known-vulnerable JS libraries), CORS/CSP hygiene, and JWT analysis incl. offline weak-secret cracking.");
         api.logging().logToOutput("Passive XSS surface mapping: reflection-context detection with cheat-sheet vector suggestions (no auto-firing).");
         api.logging().logToOutput("Optional active tests (opt-in, off by default): crt.sh subdomain enum, Arjun-style parameter discovery, and Collaborator-backed SSRF/SSTI/XSS probing.");
         api.logging().logToOutput("Registered a passive ScanCheck: Recon Hound's detectors also run inside Burp's native scan pipeline (secrets, CORS/CSP/JWT, disclosure signals, reflections).");
