@@ -87,6 +87,8 @@ final class ReconPanel extends JPanel {
         JTextField graphqlUrl = new JTextField(22);
         JButton graphqlButton = new JButton("Introspect GraphQL");
         JButton runActive = new JButton("Run active tests on in-scope site map");
+        JButton runJwt = new JButton("Run JWT alg:none test");
+        JButton runTakeover = new JButton("Subdomain takeover check");
 
         JPanel activePanel = new JPanel();
         activePanel.setLayout(new BoxLayout(activePanel, BoxLayout.Y_AXIS));
@@ -107,6 +109,12 @@ final class ReconPanel extends JPanel {
         JPanel activeRow3 = new JPanel(new FlowLayout(FlowLayout.LEFT));
         activeRow3.add(new JLabel("GraphQL URL:")); activeRow3.add(graphqlUrl); activeRow3.add(graphqlButton);
         activePanel.add(activeRow3);
+
+        JPanel activeRow4 = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        activeRow4.add(runJwt);
+        activeRow4.add(runTakeover);
+        activeRow4.add(new JLabel("(opt-in — JWT replays GET/HEAD/OPTIONS; takeover fetches enumerated hosts)"));
+        activePanel.add(activeRow4);
 
         // Access-control / IDOR (Autorize-style)
         JTextArea acHeaders = new JTextArea(2, 60);
@@ -165,6 +173,8 @@ final class ReconPanel extends JPanel {
         paramButton.addActionListener(e -> controller.discoverParameters(paramUrl.getText()));
         graphqlButton.addActionListener(e -> controller.introspectGraphql(graphqlUrl.getText()));
         runActive.addActionListener(e -> controller.runActiveTests());
+        runJwt.addActionListener(e -> controller.runJwtAttacks());
+        runTakeover.addActionListener(e -> controller.runSubdomainTakeoverCheck());
         acButton.addActionListener(e -> controller.runAccessControlTest(acHeaders.getText(), acUnauth.isSelected()));
         maxRequests.addChangeListener(e -> controller.setMaxRequests((Integer) maxRequests.getValue()));
         maxRedirects.addChangeListener(e -> controller.setMaxRedirects((Integer) maxRedirects.getValue()));

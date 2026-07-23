@@ -241,6 +241,151 @@ final class ReconController implements HttpHandler {
         });
     }
 
+    /**
+     * Opt-in active JWT test: replays in-scope requests that carry a JWT with an {@code alg:none}
+     * forgery (empty signature) and compares the response to the valid token's. If the forged token
+     * is accepted, the server is not verifying signatures — a full authentication bypass. Only
+     * GET/HEAD/OPTIONS requests are replayed to avoid side effects.
+     */
+    void runJwtAttacks() {
+        if (!activeTestsEnabled.get()) {
+            api.logging().logToOutput("[Recon Hound] Active tests are disabled; enable the opt-in checkbox first.");
+            return;
+        }
+        activeWorker.submit(() -> {
+            record JwtTarget(HttpRequest request, String token) {}
+            List<JwtTarget> targets = new ArrayList<>();
+            Set<String> seen = new HashSet<>();
+            for (HttpRequestResponse rr : api.siteMap().requestResponses()) {
+                HttpRequest req = rr.request();
+                if (req == null || !req.isInScope()) continue;
+                if (!SAFE_METHODS.contains(req.method().toUpperCase(Locale.ROOT))) continue;
+                for (String token : JwtAttackEngine.extractJwts(req)) {
+                    if (seen.add(req.url() + "\0" + token)) targets.add(new JwtTarget(req, token));
+                }
+            }
+            api.logging().logToOutput("[Recon Hound] JWT alg:none test on " + targets.size() + " JWT-bearing request(s).");
+
+            int budget = activeRequestBudget.get();
+            int sent = 0;
+            for (JwtTarget target : targets) {
+                if (!activeTestsEnabled.get() || sent >= budget) break;
+                try {
+                    HttpRequestResponse valid = api.http().sendRequest(target.request());
+                    sent++;
+                    if (valid == null || valid.response() == null) continue;
+                    int validStatus = valid.response().statusCode();
+                    if (validStatus >= 400) continue;   // token not granting access here; nothing to bypass
+                    int validLen = valid.response().bodyToString().length();
+
+                    boolean reported = false;
+                    for (String forgedToken : JwtAttackEngine.forgeNoneVariants(target.token())) {
+                        if (sent >= budget) break;
+                        HttpRequest forgedReq = httpRequestFromString(target.request(),
+                                target.request().toString().replace(target.token(), forgedToken));
+                        HttpRequestResponse forged = api.http().sendRequest(forgedReq);
+                        sent++;
+                        Thread.sleep(activeThrottleMillis.get());
+                        if (forged == null || forged.response() == null) continue;
+                        int forgedStatus = forged.response().statusCode();
+                        int forgedLen = forged.response().bodyToString().length();
+                        boolean accepted = forgedStatus < 400 && forgedStatus == validStatus
+                                && Math.abs(forgedLen - validLen) <= Math.max(64, validLen / 10);
+
+                        addActiveRow(accepted ? "HIGH" : "INFO", "JWT-none", "alg=none",
+                                accepted ? "accepted" : "rejected",
+                                "valid=" + validStatus + "/" + validLen + " forged=" + forgedStatus + "/" + forgedLen,
+                                target.request().url());
+
+                        if (accepted && !reported) {
+                            reported = true;
+                            reporter.report("jwt-none\0" + target.request().url(),
+                                    "JWT alg:none accepted (authentication bypass)",
+                                    "<b>Server accepts an unsigned alg:none JWT</b><br>"
+                                            + "URL: <code>" + escape(target.request().url()) + "</code><br><br>"
+                                            + "A token re-encoded with <code>alg:none</code> and an empty signature was accepted "
+                                            + "(status " + forgedStatus + ", matching the valid token's " + validStatus + "). "
+                                            + "Signatures are not verified, so an attacker can forge arbitrary claims "
+                                            + "(any user/role) — full authentication bypass.",
+                                    "Reject <code>alg:none</code> server-side; pin the expected algorithm and always verify the signature.",
+                                    target.request().url(), AuditIssueSeverity.HIGH, AuditIssueConfidence.FIRM,
+                                    "Recon Hound replays JWT-bearing requests with an alg:none forgery to test signature validation.",
+                                    "Confirm the forged token grants privileged access before reporting.",
+                                    forged);
+                        }
+                    }
+                    publishStatus();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                } catch (Exception e) {
+                    api.logging().logToError("JWT attack failed for " + target.request().url(), e);
+                }
+            }
+            api.logging().logToOutput("[Recon Hound] JWT alg:none test complete (" + sent + " request(s)).");
+            publishStatus();
+        });
+    }
+
+    /**
+     * Opt-in subdomain-takeover check: fetches each enumerated host and matches known
+     * "unclaimed resource" fingerprints (GitHub Pages, S3, Heroku, …). A match suggests a dangling
+     * DNS record whose backend could be claimed by an attacker. Authorised targets only.
+     */
+    void runSubdomainTakeoverCheck() {
+        if (!activeTestsEnabled.get()) {
+            api.logging().logToOutput("[Recon Hound] Active tests are disabled; enable the opt-in checkbox first.");
+            return;
+        }
+        activeWorker.submit(() -> {
+            List<String> hosts = new ArrayList<>(assetHosts);
+            api.logging().logToOutput("[Recon Hound] Subdomain-takeover check on " + hosts.size() + " enumerated host(s).");
+            int budget = activeRequestBudget.get() * 2;
+            int sent = 0;
+            for (String host : hosts) {
+                if (!activeTestsEnabled.get() || sent >= budget) break;
+                for (String scheme : List.of("https://", "http://")) {
+                    if (sent >= budget) break;
+                    try {
+                        HttpRequestResponse rr = api.http().sendRequest(httpRequestFromUrl(scheme + host + "/"));
+                        sent++;
+                        Thread.sleep(activeThrottleMillis.get());
+                        if (rr == null || rr.response() == null) continue;
+                        String service = SubdomainTakeoverEngine.match(rr.response().bodyToString());
+                        if (service == null) continue;
+
+                        String url = scheme + host + "/";
+                        addActiveRow("HIGH", "Takeover", host, "fingerprint", service, url);
+                        reporter.report("takeover\0" + host + "\0" + service,
+                                "Potential subdomain takeover (" + service + ")",
+                                "<b>Dangling " + escape(service) + " resource</b><br>"
+                                        + "Host: <code>" + escape(host) + "</code><br><br>"
+                                        + "The host serves " + escape(service) + "'s 'unclaimed resource' page, which suggests a "
+                                        + "dangling DNS record whose backend no longer exists. An attacker who claims that backend "
+                                        + "can serve arbitrary content on this subdomain (phishing, cookie/session theft, CSP bypass).",
+                                "Remove the dangling DNS record, or (re)claim the " + escape(service) + " resource it points to.",
+                                url, AuditIssueSeverity.HIGH, AuditIssueConfidence.TENTATIVE,
+                                "Recon Hound fetches enumerated hosts and matches known subdomain-takeover fingerprints.",
+                                "Confirm the DNS points to a genuinely unclaimed resource before attempting a takeover (authorised only).",
+                                rr);
+                        break;   // one scheme is enough for this host
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    } catch (Exception e) {
+                        api.logging().logToError("Takeover check failed for " + host, e);
+                    }
+                }
+            }
+            api.logging().logToOutput("[Recon Hound] Subdomain-takeover check complete (" + sent + " request(s)).");
+            publishStatus();
+        });
+    }
+
+    private static HttpRequest httpRequestFromString(HttpRequest template, String raw) {
+        return HttpRequest.httpRequest(template.httpService(), raw);
+    }
+
     private static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "OPTIONS");
 
     void runAccessControlTest(String sessionHeaders, boolean unauthenticated) {

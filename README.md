@@ -120,6 +120,13 @@ Enable it only against targets you are authorised to test.
   and compares responses. An equivalent successful response for the lower-privileged identity is
   flagged as probable broken access control. Only **safe methods** (GET/HEAD/OPTIONS) are replayed by
   default to avoid state-changing side effects.
+- **JWT alg:none test** (`JwtAttackEngine`) — replays in-scope GET/HEAD/OPTIONS requests that carry a
+  JWT with an `alg:none` forgery (empty signature, case variants). If the forged token is accepted
+  (same success response as the valid token), the server isn't verifying signatures — a HIGH
+  authentication-bypass finding. Complements the passive offline weak-secret crack.
+- **Subdomain-takeover check** (`SubdomainTakeoverEngine`) — fetches each enumerated host and matches
+  known "unclaimed resource" fingerprints (GitHub Pages, S3, Heroku, Fastly, Shopify, …). A match
+  flags a likely dangling DNS record an attacker could claim.
 
 Results appear in the **Active tests** tab and, when confirmed, as Burp audit issues. Out-of-band
 findings arrive asynchronously as the Collaborator poller correlates interactions.
