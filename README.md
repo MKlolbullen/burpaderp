@@ -150,6 +150,12 @@ and **Google Gemini**, each called over raw HTTPS (no vendor SDK is bundled).
   into a ready-to-run **Nuclei v3 YAML template**, using whichever LLM provider/key is selected in the
   AI tab — then save it and run with `nuclei -t`. This mirrors ProjectDiscovery's cloud
   `POST /v1/template/ai` capability but needs no PDCP account.
+- **ProjectDiscovery cloud scan.** The same tab can launch a **cloud Nuclei scan** via a
+  ProjectDiscovery Cloud (PDCP) API key: pick targets (one click fills them from your in-scope hosts),
+  optional template groups (or "recommended"), and Recon Hound creates the scan (`POST /v1/scans`),
+  polls it to completion, and imports every match as a **native Burp issue** (with the raw
+  request/response attached when it parses). The key stays in memory / `$PDCP_API_KEY` and calls go
+  direct — same model as the LLM providers.
 - **Right-click integration.** Any request/response in Proxy history, the site map, or Repeater has a
   **Recon Hound: AI analysis** submenu with three presets — *Explain request/response & attack
   surface*, *Find vulnerabilities*, and *Suggest exploitation & chaining* — which load the message
@@ -177,6 +183,10 @@ Findings surface in three places:
   and OpenAPI/GraphQL surface, gf-pattern hits, broken-access-control/IDOR, confirmed active findings
   (SSRF/SSTI/XSS, including Collaborator OOB), and LLM-identified JavaScript bugs (with PoC and chain).
   Informational results are filed at `INFORMATION` severity so nothing is dropped;
+- Burp's **native scan pipeline** — Recon Hound registers a **passive scan check**, so its detectors
+  (secrets, CORS/CSP/JWT hygiene, disclosure signals, reflected parameters) also run when Burp audits
+  traffic (passive scan or an active scan), contributing issues Burp owns and consolidates. The crawl
+  and scan-check paths share one deduplicated reporter, so a finding is never filed twice;
 - the extension **output/error log**.
 
 ## Safety / scope controls

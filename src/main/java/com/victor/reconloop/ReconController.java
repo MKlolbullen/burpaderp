@@ -8,6 +8,7 @@ import burp.api.montoya.http.handler.*;
 import burp.api.montoya.http.message.HttpRequestResponse;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.responses.HttpResponse;
+import burp.api.montoya.scanner.audit.issues.AuditIssue;
 import burp.api.montoya.scanner.audit.issues.AuditIssueConfidence;
 import burp.api.montoya.scanner.audit.issues.AuditIssueSeverity;
 
@@ -583,16 +584,20 @@ final class ReconController implements HttpHandler {
             if (!issueDedupe.add(dedupe)) continue;
             SwingUtilities.invokeLater(() -> findingModel.add(new ReconModel.FindingRow(
                     note.severity(), "hygiene", note.name(), "response", note.detail(), url)));
-            reporter.report(
-                    "hygiene-issue\0" + note.name() + "\0" + url,
-                    note.name(),
-                    "<b>" + escape(note.name()) + "</b><br>" + escape(note.detail()),
-                    "Review the affected security header / token handling and harden per OWASP guidance.",
-                    url, IssueReporter.severity(note.severity()), AuditIssueConfidence.FIRM,
-                    "Recon Hound passively inspects CORS, CSP and JWT hygiene in in-scope responses.",
-                    "Header-based findings are heuristic; confirm exploitability in context.",
-                    pair);
+            addToSiteMap(buildHygieneIssue(note, url, pair));
         }
+    }
+
+    private AuditIssue buildHygieneIssue(WebHygieneEngine.Note note, String url, HttpRequestResponse pair) {
+        return reporter.buildIfNew(
+                "hygiene-issue\0" + note.name() + "\0" + url,
+                note.name(),
+                "<b>" + escape(note.name()) + "</b><br>" + escape(note.detail()),
+                "Review the affected security header / token handling and harden per OWASP guidance.",
+                url, IssueReporter.severity(note.severity()), AuditIssueConfidence.FIRM,
+                "Recon Hound passively inspects CORS, CSP and JWT hygiene in in-scope responses.",
+                "Header-based findings are heuristic; confirm exploitability in context.",
+                pair);
     }
 
     private void mineSourceMap(String url, HttpResponse response, HttpRequestResponse pair) {
@@ -1022,6 +1027,12 @@ final class ReconController implements HttpHandler {
     private void addReflectionIssue(XssReflectionEngine.Reflection reflection,
                                     List<XssVectorLibrary.Vector> vectors,
                                     HttpRequestResponse pair) {
+        addToSiteMap(buildReflectionIssue(reflection, vectors, pair));
+    }
+
+    private AuditIssue buildReflectionIssue(XssReflectionEngine.Reflection reflection,
+                                            List<XssVectorLibrary.Vector> vectors,
+                                            HttpRequestResponse pair) {
         AuditIssueSeverity severity = IssueReporter.severity(reflection.severity());
 
         StringBuilder vectorHtml = new StringBuilder();
@@ -1041,7 +1052,7 @@ final class ReconController implements HttpHandler {
                 + "Context-appropriate vectors from the XSS cheat sheet to validate manually:<ul>"
                 + vectorHtml + "</ul>";
 
-        reporter.report(
+        return reporter.buildIfNew(
                 "reflect-issue\0" + reflection.url() + "\0" + reflection.parameter()
                         + "\0" + reflection.type() + "\0" + reflection.context().label(),
                 "reflected parameter (" + reflection.context().label() + ")",
@@ -1176,6 +1187,10 @@ final class ReconController implements HttpHandler {
     }
 
     private void addSignalIssue(ResponseSignalEngine.Signal signal, String location, String url, HttpRequestResponse pair) {
+        addToSiteMap(buildSignalIssue(signal, location, url, pair));
+    }
+
+    private AuditIssue buildSignalIssue(ResponseSignalEngine.Signal signal, String location, String url, HttpRequestResponse pair) {
         AuditIssueSeverity severity = IssueReporter.severity(signal.severity());
 
         String detail = "<b>Response signal: " + escape(signal.name()) + "</b><br>"
@@ -1184,7 +1199,7 @@ final class ReconController implements HttpHandler {
                 + "Recon Hound flags disclosure signals (stack traces, debug/error output, source-map "
                 + "references, directory listings, internal-hostname hints) in in-scope responses.";
 
-        reporter.report(
+        return reporter.buildIfNew(
                 "signal-issue\0" + signal.name() + "\0" + signal.value() + "\0" + url,
                 signal.name(),
                 detail,
@@ -1230,6 +1245,10 @@ final class ReconController implements HttpHandler {
     }
 
     private void addAuditIssue(RegexHound.Finding finding, HttpRequestResponse pair) {
+        addToSiteMap(buildRegexIssue(finding, pair));
+    }
+
+    private AuditIssue buildRegexIssue(RegexHound.Finding finding, HttpRequestResponse pair) {
         AuditIssueSeverity severity = switch (finding.rule().severity()) {
             case CRITICAL, HIGH -> AuditIssueSeverity.HIGH;
             case MEDIUM -> AuditIssueSeverity.MEDIUM;
@@ -1249,7 +1268,7 @@ final class ReconController implements HttpHandler {
                 + "Entropy: " + String.format(Locale.ROOT, "%.2f", finding.entropy()) + "<br><br>"
                 + "Review the original request/response and validate whether the credential or token is live.";
 
-        reporter.report(
+        return reporter.buildIfNew(
                 "hound-issue\0" + finding.rule().id() + "\0" + finding.value() + "\0" + finding.url(),
                 finding.rule().name(),
                 detail,
@@ -1259,6 +1278,48 @@ final class ReconController implements HttpHandler {
                 "Secret scanning is heuristic; verify context before remediation.",
                 pair
         );
+    }
+
+    private void addToSiteMap(AuditIssue issue) {
+        if (issue != null) api.siteMap().add(issue);
+    }
+
+    /**
+     * Passive detection entry point for Burp's scan pipeline. Runs Recon Hound's passive engines
+     * against a base request/response and returns freshly-built audit issues, deduplicated against
+     * everything the extension has already filed (shared {@link IssueReporter} dedupe). Does not add
+     * to the site map — Burp's scanner registers the returned issues. Called from {@link ReconScanCheck}.
+     */
+    List<AuditIssue> passiveAuditIssues(HttpRequestResponse rr) {
+        List<AuditIssue> issues = new ArrayList<>();
+        if (rr == null || rr.request() == null || !rr.hasResponse() || rr.response() == null) return issues;
+        HttpRequest request = rr.request();
+        HttpResponse response = rr.response();
+        String url = request.url();
+        try {
+            for (RegexHound.Finding f : regexHound.scan(response.toString(), "scan-response", url, includeInfoFindings.get())) {
+                addIfPresent(issues, buildRegexIssue(f, rr));
+            }
+            for (RegexHound.Finding f : regexHound.scan(request.toString(), "scan-request", url, includeInfoFindings.get())) {
+                addIfPresent(issues, buildRegexIssue(f, rr));
+            }
+            for (WebHygieneEngine.Note note : webHygiene.analyze(request, response)) {
+                addIfPresent(issues, buildHygieneIssue(note, url, rr));
+            }
+            for (ResponseSignalEngine.Signal signal : responseSignals.analyze(response)) {
+                addIfPresent(issues, buildSignalIssue(signal, "scan-response", url, rr));
+            }
+            for (XssReflectionEngine.Reflection reflection : xssReflectionEngine.analyze(request, response)) {
+                addIfPresent(issues, buildReflectionIssue(reflection, reflection.viableVectors(), rr));
+            }
+        } catch (Exception e) {
+            api.logging().logToError("Passive audit failed for " + url, e);
+        }
+        return issues;
+    }
+
+    private static void addIfPresent(List<AuditIssue> list, AuditIssue issue) {
+        if (issue != null) list.add(issue);
     }
 
     private void rememberTemplate(HttpRequest request) {
