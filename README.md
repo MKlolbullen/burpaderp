@@ -145,6 +145,12 @@ and **Google Gemini**, each called over raw HTTPS (no vendor SDK is bundled).
   where the model sees it, an **exploit chain** for higher impact. The budget caps how many files are
   sent per run; any remainder is reported (never silently dropped) so you can raise the budget and
   continue. Runs off the UI thread; results also mirror to the *Active tests* tab.
+- **Cross-finding chaining engine.** The **Chain findings → exploit chains** button sends the whole
+  in-scope *finding inventory* (every audit issue on the site map, deduplicated and ranked) to the LLM
+  and asks how the primitives combine into higher-impact attacks. Each ranked chain is filed as its own
+  native Burp issue with a **bug-bounty-ready writeup**, the primitives it combines, ordered
+  reproducible steps, and the end impact — turning a pile of individual findings into the account
+  takeover / RCE / data-exfil story that actually pays.
 - **AI Nuclei templates.** A **Nuclei templates (AI)** tab turns a natural-language description
   ("detect an exposed Spring Boot actuator", "blind SSRF via the `url` parameter using interactsh")
   into a ready-to-run **Nuclei v3 YAML template**, using whichever LLM provider/key is selected in the

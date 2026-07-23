@@ -97,6 +97,31 @@ final class LlmClient {
             + "- Keep it safe and non-destructive; do not include payloads that damage the target.\n"
             + "Output only the YAML document.";
 
+    /**
+     * Cross-finding chaining prompt: operates over the WHOLE inventory of findings (not one message)
+     * and returns ranked, reproducible exploit chains as strict JSON, each with a bug-bounty-ready
+     * writeup, so every chain can be filed as its own native Burp issue.
+     */
+    static final String CHAIN_INVENTORY_SYSTEM_PROMPT =
+            "You are a senior offensive-security engineer assisting an AUTHORISED bug-bounty tester. You are "
+            + "given an INVENTORY of individual findings discovered on one target. Your job is to identify how "
+            + "these primitives can be COMBINED into higher-impact exploit chains (account takeover, RCE, data "
+            + "exfiltration, privilege escalation) that are worth more than the sum of the parts.\n\n"
+            + "Return STRICT JSON ONLY — no prose, no markdown, no code fences. Schema:\n"
+            + "{\"chains\":[{"
+            + "\"title\":\"short name for the chain\","
+            + "\"severity\":\"HIGH|MEDIUM|LOW|INFO\","
+            + "\"confidence\":\"CERTAIN|FIRM|TENTATIVE\","
+            + "\"primitives\":[\"which inventory findings it combines, each referencing the finding and its URL\"],"
+            + "\"steps\":[\"ordered, reproducible steps with the exact requests/payloads\"],"
+            + "\"impact\":\"the concrete end impact\","
+            + "\"writeup\":\"a concise bug-bounty-ready narrative a triager can follow\","
+            + "\"involved_urls\":[\"the URLs/endpoints involved\"]"
+            + "}]}\n\n"
+            + "Rank chains by impact (most severe first). Only propose chains supported by the inventory; clearly "
+            + "keep speculative links TENTATIVE. If nothing chains, return {\"chains\":[]}. Do not fabricate "
+            + "findings or evidence, and never suggest testing systems the tester is not authorised to assess.";
+
     private static final int MAX_OUTPUT_TOKENS = 4096;
     private static final int MAX_INPUT_CHARS = 200_000;
 
@@ -169,6 +194,66 @@ final class LlmClient {
 
     /** Result of a structured analysis: parsed findings plus an optional error/raw fallback message. */
     record LlmAnalysis(List<LlmFinding> findings, String error) {}
+
+    /** A ranked exploit chain combining several primitives into higher impact. */
+    record LlmChain(String title, String severity, String confidence, String primitives,
+                    String steps, String impact, String writeup, String involvedUrls) {}
+
+    /** Result of a chaining analysis over the finding inventory. */
+    record ChainAnalysis(List<LlmChain> chains, String error) {}
+
+    /**
+     * Sends an inventory of findings to the LLM and parses the ranked exploit chains it proposes.
+     * On transport/HTTP error or unparseable output, returns an empty list with an {@code error}.
+     */
+    ChainAnalysis analyzeChains(LlmProvider provider, String model, String apiKey, String inventory) {
+        String raw = complete(provider, model, apiKey, CHAIN_INVENTORY_SYSTEM_PROMPT, inventory);
+        if (raw == null || raw.startsWith("[error]") || raw.startsWith("[HTTP") || raw.startsWith("[warning]")) {
+            return new ChainAnalysis(List.of(), raw == null ? "[error] no response" : raw);
+        }
+        List<LlmChain> chains = parseChains(raw);
+        return new ChainAnalysis(chains, chains.isEmpty() ? "[no chains parsed] " + snippet(raw) : null);
+    }
+
+    static List<LlmChain> parseChains(String raw) {
+        List<LlmChain> out = new ArrayList<>();
+        String json = isolateJson(raw);
+        if (json == null) return out;
+        try {
+            Object root = Json.parse(json);
+            Map<String, Object> obj = Json.asObject(root);
+            List<Object> arr = obj != null ? Json.asArray(obj.get("chains")) : Json.asArray(root);
+            if (arr == null) return out;
+            for (Object item : arr) {
+                Map<String, Object> c = Json.asObject(item);
+                if (c == null) continue;
+                out.add(new LlmChain(
+                        nz(Json.str(c, "title"), "Exploit chain"),
+                        nz(Json.str(c, "severity"), "MEDIUM"),
+                        nz(Json.str(c, "confidence"), "TENTATIVE"),
+                        joinField(c, "primitives", "; "),
+                        joinField(c, "steps", "\n"),
+                        nz(Json.str(c, "impact"), ""),
+                        nz(Json.str(c, "writeup"), ""),
+                        joinField(c, "involved_urls", ", ")));
+            }
+        } catch (Exception ignored) {
+            // malformed JSON -> caller falls back to the raw error message
+        }
+        return out;
+    }
+
+    /** Reads a field that may be a JSON string or a JSON array of strings, joined with {@code sep}. */
+    private static String joinField(Map<String, Object> obj, String key, String sep) {
+        Object v = obj.get(key);
+        List<Object> arr = Json.asArray(v);
+        if (arr != null) {
+            List<String> parts = new ArrayList<>();
+            for (Object e : arr) if (e != null) parts.add(String.valueOf(e).strip());
+            return String.join(sep, parts);
+        }
+        return v == null ? "" : String.valueOf(v).strip();
+    }
 
     /**
      * Sends one JavaScript resource to the LLM for structured vulnerability review and parses the

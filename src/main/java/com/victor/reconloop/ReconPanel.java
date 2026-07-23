@@ -207,6 +207,9 @@ final class ReconPanel extends JPanel {
         JButton analyzeJs = new JButton("Analyze in-scope JS → Burp issues");
         analyzeJs.setToolTipText("Sends in-scope JavaScript from the site map to the selected LLM, "
                 + "up to the file budget, and files each structured finding (bug + PoC + chain) as a native Burp issue.");
+        JButton analyzeChains = new JButton("Chain findings → exploit chains");
+        analyzeChains.setToolTipText("Sends the in-scope finding inventory (all audit issues) to the selected LLM "
+                + "and files ranked exploit chains (writeup + reproducible steps) as native Burp issues.");
         this.aiProvider = provider;
         this.aiModel = model;
         this.aiKey = apiKey;
@@ -227,7 +230,8 @@ final class ReconPanel extends JPanel {
         jsBar.add(new JLabel("Automated JS bug-hunt — files/run:"));
         jsBar.add(jsBudget);
         jsBar.add(analyzeJs);
-        jsBar.add(new JLabel("(on-demand, budget-capped; results become native Burp issues)"));
+        jsBar.add(analyzeChains);
+        jsBar.add(new JLabel("(on-demand; results become native Burp issues)"));
 
         JTextArea system = new JTextArea(LlmClient.DEFAULT_JS_SYSTEM_PROMPT, 3, 80);
         system.setLineWrap(true); system.setWrapStyleWord(true);
@@ -271,6 +275,20 @@ final class ReconPanel extends JPanel {
                         output.setText(summary);
                         output.setCaretPosition(0);
                         analyzeJs.setEnabled(true);
+                        analyze.setEnabled(true);
+                    });
+        });
+        analyzeChains.addActionListener(e -> {
+            LlmProvider p = (LlmProvider) provider.getSelectedItem();
+            output.setText("Correlating the in-scope finding inventory into exploit chains with "
+                    + (p == null ? "?" : p.label()) + "... chains will appear as native Burp issues.");
+            analyzeChains.setEnabled(false);
+            analyze.setEnabled(false);
+            controller.analyzeFindingChainsWithLlm(p, model.getText(), new String(apiKey.getPassword()),
+                    80, summary -> {
+                        output.setText(summary);
+                        output.setCaretPosition(0);
+                        analyzeChains.setEnabled(true);
                         analyze.setEnabled(true);
                     });
         });
