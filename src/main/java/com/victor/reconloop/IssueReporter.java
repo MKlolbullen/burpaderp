@@ -76,21 +76,41 @@ final class IssueReporter {
                    String background,
                    String remediationBackground,
                    HttpRequestResponse... evidence) {
-        if (dedupeKey != null && !filed.add(dedupeKey)) return false;
+        AuditIssue issue = buildIfNew(dedupeKey, title, detailHtml, remediationHtml, url,
+                severity, confidence, background, remediationBackground, evidence);
+        if (issue == null) return false;
+        api.siteMap().add(issue);
+        return true;
+    }
+
+    /**
+     * Builds a deduplicated audit issue but does NOT add it to the site map — for use inside a
+     * {@code ScanCheck.passiveAudit}, where Burp's scanner owns issue registration and consolidation.
+     * Returns {@code null} if a matching issue was already filed/built or construction failed.
+     */
+    AuditIssue buildIfNew(String dedupeKey,
+                          String title,
+                          String detailHtml,
+                          String remediationHtml,
+                          String url,
+                          AuditIssueSeverity severity,
+                          AuditIssueConfidence confidence,
+                          String background,
+                          String remediationBackground,
+                          HttpRequestResponse... evidence) {
+        if (dedupeKey != null && !filed.add(dedupeKey)) return null;
         try {
             HttpRequestResponse[] cleaned = java.util.Arrays.stream(evidence == null ? new HttpRequestResponse[0] : evidence)
                     .filter(Objects::nonNull)
                     .toArray(HttpRequestResponse[]::new);
             String name = title.startsWith("Recon Hound") ? title : "Recon Hound: " + title;
-            AuditIssue issue = auditIssue(
+            return auditIssue(
                     name, detailHtml, remediationHtml, url,
                     severity, confidence, background, remediationBackground,
                     severity, cleaned);
-            api.siteMap().add(issue);
-            return true;
         } catch (Exception e) {
-            api.logging().logToError("Failed to file audit issue: " + title, e);
-            return false;
+            api.logging().logToError("Failed to build audit issue: " + title, e);
+            return null;
         }
     }
 

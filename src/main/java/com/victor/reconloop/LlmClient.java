@@ -75,6 +75,28 @@ final class LlmClient {
             + "issues, return {\"findings\":[]}. Do not fabricate evidence. Never suggest testing systems the "
             + "tester is not authorised to assess.";
 
+    /**
+     * Nuclei template author prompt. The reply must be a single valid Nuclei (v3) YAML template and
+     * nothing else, so it can be saved straight to disk and run with {@code nuclei -t}. This mirrors
+     * ProjectDiscovery's cloud {@code POST /v1/template/ai} capability but works with any configured
+     * LLM provider and no PDCP account.
+     */
+    static final String NUCLEI_TEMPLATE_SYSTEM_PROMPT =
+            "You are an expert detection engineer who writes Nuclei templates for ProjectDiscovery's scanner. "
+            + "Given a description of a vulnerability, misconfiguration or check, output ONE complete, valid "
+            + "Nuclei v3 YAML template and NOTHING else — no prose, no explanation, no markdown code fences.\n\n"
+            + "Requirements:\n"
+            + "- Top-level `id` (lowercase, hyphenated, unique-ish).\n"
+            + "- `info:` with `name`, `author: recon-hound`, `severity` (info|low|medium|high|critical), a concise "
+            + "`description`, `reference` (if applicable) and relevant `tags`.\n"
+            + "- An `http:` block (or `dns:`/`ssl:`/`file:`/`headless:`/`code:` if more appropriate) using Nuclei "
+            + "primitives: `{{BaseURL}}`, `{{Hostname}}`, path lists, `matchers` (word/regex/status/dsl), "
+            + "`matchers-condition`, and `extractors` where useful. Prefer precise matchers to minimise false positives.\n"
+            + "- Use interactsh (`{{interactsh-url}}` + an `interactsh_protocol`/`interactsh_request` matcher) for "
+            + "blind/OOB checks such as SSRF or blind injection.\n"
+            + "- Keep it safe and non-destructive; do not include payloads that damage the target.\n"
+            + "Output only the YAML document.";
+
     private static final int MAX_OUTPUT_TOKENS = 4096;
     private static final int MAX_INPUT_CHARS = 200_000;
 
@@ -112,6 +134,33 @@ final class LlmClient {
         } catch (Exception e) {
             return "[error] Request failed: " + e.getMessage();
         }
+    }
+
+    /**
+     * Generates a Nuclei YAML template from a natural-language description using the configured LLM.
+     * Returns the raw template text, or a {@code [error]/[HTTP]} string on failure.
+     */
+    String generateNucleiTemplate(LlmProvider provider, String model, String apiKey, String description) {
+        String raw = complete(provider, model, apiKey, NUCLEI_TEMPLATE_SYSTEM_PROMPT,
+                description == null ? "" : description);
+        if (raw == null || raw.startsWith("[error]") || raw.startsWith("[HTTP") || raw.startsWith("[warning]")) {
+            return raw == null ? "[error] no response" : raw;
+        }
+        return stripCodeFences(raw);
+    }
+
+    /** Removes a leading ```lang fence and trailing ``` so the reply is a clean document. */
+    static String stripCodeFences(String raw) {
+        if (raw == null) return "";
+        String t = raw.strip();
+        if (t.startsWith("```")) {
+            int nl = t.indexOf('\n');
+            if (nl >= 0) t = t.substring(nl + 1);
+            int fence = t.lastIndexOf("```");
+            if (fence >= 0) t = t.substring(0, fence);
+            t = t.strip();
+        }
+        return t;
     }
 
     /** A single structured vulnerability finding returned by the LLM. */

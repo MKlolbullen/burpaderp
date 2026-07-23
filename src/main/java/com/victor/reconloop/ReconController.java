@@ -3,10 +3,12 @@ package com.victor.reconloop;
 import burp.api.montoya.MontoyaApi;
 import burp.api.montoya.collaborator.CollaboratorClient;
 import burp.api.montoya.collaborator.Interaction;
+import burp.api.montoya.http.HttpService;
 import burp.api.montoya.http.handler.*;
 import burp.api.montoya.http.message.HttpRequestResponse;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.responses.HttpResponse;
+import burp.api.montoya.scanner.audit.issues.AuditIssue;
 import burp.api.montoya.scanner.audit.issues.AuditIssueConfidence;
 import burp.api.montoya.scanner.audit.issues.AuditIssueSeverity;
 
@@ -37,6 +39,7 @@ final class ReconController implements HttpHandler {
     private final ParameterDiscoveryEngine parameterDiscovery;
     private final ActiveTestEngine activeTestEngine;
     private final IssueReporter reporter;
+    private final PdcpClient pdcp = new PdcpClient();
 
     private final ReconModel.FindingTableModel findingModel;
     private final ReconModel.DiscoveryTableModel discoveryModel;
@@ -581,16 +584,20 @@ final class ReconController implements HttpHandler {
             if (!issueDedupe.add(dedupe)) continue;
             SwingUtilities.invokeLater(() -> findingModel.add(new ReconModel.FindingRow(
                     note.severity(), "hygiene", note.name(), "response", note.detail(), url)));
-            reporter.report(
-                    "hygiene-issue\0" + note.name() + "\0" + url,
-                    note.name(),
-                    "<b>" + escape(note.name()) + "</b><br>" + escape(note.detail()),
-                    "Review the affected security header / token handling and harden per OWASP guidance.",
-                    url, IssueReporter.severity(note.severity()), AuditIssueConfidence.FIRM,
-                    "Recon Hound passively inspects CORS, CSP and JWT hygiene in in-scope responses.",
-                    "Header-based findings are heuristic; confirm exploitability in context.",
-                    pair);
+            addToSiteMap(buildHygieneIssue(note, url, pair));
         }
+    }
+
+    private AuditIssue buildHygieneIssue(WebHygieneEngine.Note note, String url, HttpRequestResponse pair) {
+        return reporter.buildIfNew(
+                "hygiene-issue\0" + note.name() + "\0" + url,
+                note.name(),
+                "<b>" + escape(note.name()) + "</b><br>" + escape(note.detail()),
+                "Review the affected security header / token handling and harden per OWASP guidance.",
+                url, IssueReporter.severity(note.severity()), AuditIssueConfidence.FIRM,
+                "Recon Hound passively inspects CORS, CSP and JWT hygiene in in-scope responses.",
+                "Header-based findings are heuristic; confirm exploitability in context.",
+                pair);
     }
 
     private void mineSourceMap(String url, HttpResponse response, HttpRequestResponse pair) {
@@ -770,6 +777,147 @@ final class ReconController implements HttpHandler {
         });
     }
 
+    /** Distinct in-scope target hosts (as https URLs) for a cloud scan, from collected assets + the site map. */
+    List<String> collectInScopeTargets() {
+        java.util.LinkedHashSet<String> hosts = new java.util.LinkedHashSet<>(assetHosts);
+        api.siteMap().requestResponses().stream()
+                .map(HttpRequestResponse::request)
+                .filter(Objects::nonNull)
+                .filter(HttpRequest::isInScope)
+                .forEach(r -> {
+                    try {
+                        String host = URI.create(r.url()).getHost();
+                        if (host != null) hosts.add(host.toLowerCase(Locale.ROOT));
+                    } catch (Exception ignored) {}
+                });
+        List<String> out = new ArrayList<>();
+        for (String host : hosts) out.add(host.startsWith("http") ? host : "https://" + host);
+        return out;
+    }
+
+    /**
+     * Runs a ProjectDiscovery Cloud (PDCP) Nuclei scan against {@code targets}, polls to completion, and
+     * files each returned match as a native Burp audit issue via {@link IssueReporter}. Progress strings
+     * are delivered on the EDT via {@code onProgress}. The key resolves from the UI field or $PDCP_API_KEY.
+     */
+    void runPdcpScan(String uiKey, String teamId, List<String> targets, List<String> templates,
+                     boolean recommended, java.util.function.Consumer<String> onProgress) {
+        java.util.function.Consumer<String> ui = s -> SwingUtilities.invokeLater(() -> onProgress.accept(s));
+        activeWorker.submit(() -> {
+            String key = (uiKey != null && !uiKey.isBlank()) ? uiKey.trim() : System.getenv("PDCP_API_KEY");
+            if (key == null || key.isBlank()) {
+                ui.accept("[error] No PDCP API key. Enter it above or export $PDCP_API_KEY.");
+                return;
+            }
+            if (targets == null || targets.isEmpty()) {
+                ui.accept("[error] No targets. Add hosts (one per line) or click 'Fill from in-scope'.");
+                return;
+            }
+            boolean useRecommended = recommended || templates == null || templates.isEmpty();
+            ui.accept("Creating PDCP scan for " + targets.size() + " target(s)"
+                    + (useRecommended ? " (recommended templates)" : " (" + templates.size() + " template group(s))") + "...");
+
+            PdcpClient.ScanCreated created = pdcp.createScan(key, teamId, "Recon Hound scan", targets,
+                    templates == null ? List.of() : templates, useRecommended);
+            if (created.scanId() == null) {
+                ui.accept("Scan creation failed: " + created.error());
+                return;
+            }
+            String scanId = created.scanId();
+            api.logging().logToOutput("[Recon Hound][PDCP] scan " + scanId + " created for " + targets.size() + " target(s).");
+
+            String status = "";
+            for (int i = 0; i < 90 && running.get(); i++) {   // up to ~15 min at 10s cadence
+                PdcpClient.ScanStatus st = pdcp.getScan(key, teamId, scanId);
+                if (st.error() != null) { ui.accept("Status check: " + st.error()); }
+                status = st.status() == null ? "" : st.status();
+                ui.accept("Scan " + scanId + " — status: " + (status.isBlank() ? "?" : status)
+                        + ", results so far: " + st.totalResult()
+                        + (st.progress() > 0 ? ", progress: " + Math.round(st.progress()) + "%" : ""));
+                if (isTerminalStatus(status)) break;
+                try {
+                    Thread.sleep(10_000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+
+            List<PdcpClient.Result> results = pdcp.getResults(key, teamId, targets, scanId, 500);
+            int filed = 0;
+            for (PdcpClient.Result result : results) {
+                if (filePdcpResult(result)) filed++;
+            }
+            String summary = "PDCP scan " + scanId + " finished (status: " + (status.isBlank() ? "?" : status) + "). "
+                    + results.size() + " result(s) returned, " + filed + " filed as native Burp issues"
+                    + (filed < results.size() ? " (" + (results.size() - filed) + " duplicate/empty)" : "") + ".";
+            api.logging().logToOutput("[Recon Hound] " + summary);
+            ui.accept(summary);
+            publishStatus();
+        });
+    }
+
+    private static boolean isTerminalStatus(String status) {
+        String s = status == null ? "" : status.toLowerCase(Locale.ROOT);
+        return s.contains("done") || s.contains("finish") || s.contains("complete")
+                || s.contains("fail") || s.contains("error") || s.contains("stop") || s.contains("cancel");
+    }
+
+    private boolean filePdcpResult(PdcpClient.Result r) {
+        String url = r.target();
+        if (url.isBlank()) return false;
+
+        HttpRequestResponse pair = null;
+        try {
+            if (!r.request().isBlank() && !r.response().isBlank() && url.startsWith("http")) {
+                HttpService service = HttpService.httpService(url);
+                HttpRequest request = HttpRequest.httpRequest(service, r.request());
+                HttpResponse response = HttpResponse.httpResponse(r.response());
+                pair = httpRequestResponse(request, response);
+            }
+        } catch (Exception ignored) {
+            // fall back to a text-only issue if the raw request/response won't parse
+        }
+
+        String detail = "<b>Nuclei match (ProjectDiscovery cloud): " + escape(r.name()) + "</b><br>"
+                + "Template: <code>" + escape(r.templateId()) + "</code><br>"
+                + "Target: <code>" + escape(url) + "</code><br>"
+                + "Severity: " + escape(r.severity()) + "<br>"
+                + (r.vulnId().isBlank() ? "" : "PDCP vuln id: <code>" + escape(r.vulnId()) + "</code><br>")
+                + (r.vulnStatus().isBlank() ? "" : "PDCP status: " + escape(r.vulnStatus()) + "<br>")
+                + "<br>Reported by a ProjectDiscovery cloud Nuclei scan launched from Recon Hound.";
+
+        addActiveRow(r.severity().toUpperCase(Locale.ROOT), "Nuclei",
+                r.templateId().isBlank() ? r.name() : r.templateId(),
+                r.matched() ? "matched" : "reported", r.name(), url);
+
+        return reporter.report(
+                "pdcp\0" + r.templateId() + "\0" + url + "\0" + r.vulnId(),
+                "Nuclei: " + (r.name().isBlank() ? r.templateId() : r.name()),
+                detail,
+                "Review the matched Nuclei template and remediate the underlying issue it detects.",
+                url, IssueReporter.severity(r.severity()), AuditIssueConfidence.FIRM,
+                "Recon Hound launched a ProjectDiscovery cloud Nuclei scan and imported matches as native Burp issues.",
+                "Nuclei matches are generally reliable, but confirm exploitability in context.",
+                pair);
+    }
+
+    /** On-demand: turns a natural-language description into a Nuclei YAML template via the LLM. */
+    void generateNucleiTemplate(LlmProvider provider, String model, String uiKey, String description,
+                                java.util.function.Consumer<String> onResult) {
+        activeWorker.submit(() -> {
+            String key = (uiKey != null && !uiKey.isBlank()) ? uiKey.trim() : System.getenv(provider == null ? "" : provider.envVar());
+            String result;
+            try {
+                result = llmClient.generateNucleiTemplate(provider, model, key, description);
+            } catch (Exception e) {
+                result = "[error] " + e.getMessage();
+            }
+            String finalResult = result;
+            SwingUtilities.invokeLater(() -> onResult.accept(finalResult));
+        });
+    }
+
     private boolean looksLikeJavaScript(HttpRequestResponse rr) {
         try {
             String url = rr.request().url().toLowerCase(Locale.ROOT);
@@ -879,6 +1027,12 @@ final class ReconController implements HttpHandler {
     private void addReflectionIssue(XssReflectionEngine.Reflection reflection,
                                     List<XssVectorLibrary.Vector> vectors,
                                     HttpRequestResponse pair) {
+        addToSiteMap(buildReflectionIssue(reflection, vectors, pair));
+    }
+
+    private AuditIssue buildReflectionIssue(XssReflectionEngine.Reflection reflection,
+                                            List<XssVectorLibrary.Vector> vectors,
+                                            HttpRequestResponse pair) {
         AuditIssueSeverity severity = IssueReporter.severity(reflection.severity());
 
         StringBuilder vectorHtml = new StringBuilder();
@@ -898,7 +1052,7 @@ final class ReconController implements HttpHandler {
                 + "Context-appropriate vectors from the XSS cheat sheet to validate manually:<ul>"
                 + vectorHtml + "</ul>";
 
-        reporter.report(
+        return reporter.buildIfNew(
                 "reflect-issue\0" + reflection.url() + "\0" + reflection.parameter()
                         + "\0" + reflection.type() + "\0" + reflection.context().label(),
                 "reflected parameter (" + reflection.context().label() + ")",
@@ -1033,6 +1187,10 @@ final class ReconController implements HttpHandler {
     }
 
     private void addSignalIssue(ResponseSignalEngine.Signal signal, String location, String url, HttpRequestResponse pair) {
+        addToSiteMap(buildSignalIssue(signal, location, url, pair));
+    }
+
+    private AuditIssue buildSignalIssue(ResponseSignalEngine.Signal signal, String location, String url, HttpRequestResponse pair) {
         AuditIssueSeverity severity = IssueReporter.severity(signal.severity());
 
         String detail = "<b>Response signal: " + escape(signal.name()) + "</b><br>"
@@ -1041,7 +1199,7 @@ final class ReconController implements HttpHandler {
                 + "Recon Hound flags disclosure signals (stack traces, debug/error output, source-map "
                 + "references, directory listings, internal-hostname hints) in in-scope responses.";
 
-        reporter.report(
+        return reporter.buildIfNew(
                 "signal-issue\0" + signal.name() + "\0" + signal.value() + "\0" + url,
                 signal.name(),
                 detail,
@@ -1087,6 +1245,10 @@ final class ReconController implements HttpHandler {
     }
 
     private void addAuditIssue(RegexHound.Finding finding, HttpRequestResponse pair) {
+        addToSiteMap(buildRegexIssue(finding, pair));
+    }
+
+    private AuditIssue buildRegexIssue(RegexHound.Finding finding, HttpRequestResponse pair) {
         AuditIssueSeverity severity = switch (finding.rule().severity()) {
             case CRITICAL, HIGH -> AuditIssueSeverity.HIGH;
             case MEDIUM -> AuditIssueSeverity.MEDIUM;
@@ -1106,7 +1268,7 @@ final class ReconController implements HttpHandler {
                 + "Entropy: " + String.format(Locale.ROOT, "%.2f", finding.entropy()) + "<br><br>"
                 + "Review the original request/response and validate whether the credential or token is live.";
 
-        reporter.report(
+        return reporter.buildIfNew(
                 "hound-issue\0" + finding.rule().id() + "\0" + finding.value() + "\0" + finding.url(),
                 finding.rule().name(),
                 detail,
@@ -1116,6 +1278,48 @@ final class ReconController implements HttpHandler {
                 "Secret scanning is heuristic; verify context before remediation.",
                 pair
         );
+    }
+
+    private void addToSiteMap(AuditIssue issue) {
+        if (issue != null) api.siteMap().add(issue);
+    }
+
+    /**
+     * Passive detection entry point for Burp's scan pipeline. Runs Recon Hound's passive engines
+     * against a base request/response and returns freshly-built audit issues, deduplicated against
+     * everything the extension has already filed (shared {@link IssueReporter} dedupe). Does not add
+     * to the site map — Burp's scanner registers the returned issues. Called from {@link ReconScanCheck}.
+     */
+    List<AuditIssue> passiveAuditIssues(HttpRequestResponse rr) {
+        List<AuditIssue> issues = new ArrayList<>();
+        if (rr == null || rr.request() == null || !rr.hasResponse() || rr.response() == null) return issues;
+        HttpRequest request = rr.request();
+        HttpResponse response = rr.response();
+        String url = request.url();
+        try {
+            for (RegexHound.Finding f : regexHound.scan(response.toString(), "scan-response", url, includeInfoFindings.get())) {
+                addIfPresent(issues, buildRegexIssue(f, rr));
+            }
+            for (RegexHound.Finding f : regexHound.scan(request.toString(), "scan-request", url, includeInfoFindings.get())) {
+                addIfPresent(issues, buildRegexIssue(f, rr));
+            }
+            for (WebHygieneEngine.Note note : webHygiene.analyze(request, response)) {
+                addIfPresent(issues, buildHygieneIssue(note, url, rr));
+            }
+            for (ResponseSignalEngine.Signal signal : responseSignals.analyze(response)) {
+                addIfPresent(issues, buildSignalIssue(signal, "scan-response", url, rr));
+            }
+            for (XssReflectionEngine.Reflection reflection : xssReflectionEngine.analyze(request, response)) {
+                addIfPresent(issues, buildReflectionIssue(reflection, reflection.viableVectors(), rr));
+            }
+        } catch (Exception e) {
+            api.logging().logToError("Passive audit failed for " + url, e);
+        }
+        return issues;
+    }
+
+    private static void addIfPresent(List<AuditIssue> list, AuditIssue issue) {
+        if (issue != null) list.add(issue);
     }
 
     private void rememberTemplate(HttpRequest request) {
