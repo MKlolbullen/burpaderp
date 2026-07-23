@@ -770,6 +770,22 @@ final class ReconController implements HttpHandler {
         });
     }
 
+    /** On-demand: turns a natural-language description into a Nuclei YAML template via the LLM. */
+    void generateNucleiTemplate(LlmProvider provider, String model, String uiKey, String description,
+                                java.util.function.Consumer<String> onResult) {
+        activeWorker.submit(() -> {
+            String key = (uiKey != null && !uiKey.isBlank()) ? uiKey.trim() : System.getenv(provider == null ? "" : provider.envVar());
+            String result;
+            try {
+                result = llmClient.generateNucleiTemplate(provider, model, key, description);
+            } catch (Exception e) {
+                result = "[error] " + e.getMessage();
+            }
+            String finalResult = result;
+            SwingUtilities.invokeLater(() -> onResult.accept(finalResult));
+        });
+    }
+
     private boolean looksLikeJavaScript(HttpRequestResponse rr) {
         try {
             String url = rr.request().url().toLowerCase(Locale.ROOT);

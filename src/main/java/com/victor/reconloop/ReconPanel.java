@@ -149,6 +149,7 @@ final class ReconPanel extends JPanel {
         tabs.addTab("XSS vector library", new JScrollPane(vectorTable));
         aiTab = buildAiPanel(controller);
         tabs.addTab("AI analysis", aiTab);
+        tabs.addTab("Nuclei templates (AI)", buildNucleiPanel(controller));
         add(tabs, BorderLayout.CENTER);
 
         autoLoop.addActionListener(e -> controller.setCrawlEnabled(autoLoop.isSelected()));
@@ -287,6 +288,79 @@ final class ReconPanel extends JPanel {
                     });
         });
         return panel;
+    }
+
+    /** AI Nuclei-template authoring tab. Reuses the provider/model/key selected in the AI analysis tab. */
+    private JComponent buildNucleiPanel(ReconController controller) {
+        JPanel panel = new JPanel(new BorderLayout(6, 6));
+
+        JTextArea prompt = new JTextArea(6, 80);
+        prompt.setLineWrap(true);
+        prompt.setWrapStyleWord(true);
+        prompt.setToolTipText("Describe the vulnerability / check to turn into a Nuclei template, e.g. "
+                + "'detect an exposed Spring Boot actuator /env endpoint' or 'blind SSRF via the url parameter using interactsh'.");
+        JTextArea out = new JTextArea(18, 80);
+        out.setEditable(false);
+        out.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+
+        JButton generate = new JButton("Generate Nuclei template");
+        JButton save = new JButton("Save .yaml…");
+        JButton copy = new JButton("Copy");
+        JLabel status = new JLabel("Uses the provider / model / API key from the AI analysis tab. Output is a Nuclei v3 YAML template — review before running with 'nuclei -t'.");
+
+        JPanel top = new JPanel(new BorderLayout(4, 4));
+        top.add(new JLabel("Describe the check / vulnerability:"), BorderLayout.NORTH);
+        top.add(new JScrollPane(prompt), BorderLayout.CENTER);
+        JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        bar.add(generate); bar.add(save); bar.add(copy);
+        top.add(bar, BorderLayout.SOUTH);
+
+        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, top, new JScrollPane(out));
+        split.setResizeWeight(0.35);
+        panel.add(split, BorderLayout.CENTER);
+        panel.add(status, BorderLayout.SOUTH);
+
+        generate.addActionListener(e -> {
+            String desc = prompt.getText();
+            if (desc == null || desc.isBlank()) { out.setText("[describe a check first]"); return; }
+            LlmProvider p = aiProvider == null ? null : (LlmProvider) aiProvider.getSelectedItem();
+            if (p == null) { out.setText("[select a provider in the AI analysis tab]"); return; }
+            out.setText("Generating a Nuclei template with " + p.label() + "...");
+            generate.setEnabled(false);
+            controller.generateNucleiTemplate(p, aiModel.getText(), new String(aiKey.getPassword()), desc, result -> {
+                out.setText(result);
+                out.setCaretPosition(0);
+                boolean looksValid = result != null && result.contains("id:") && result.contains("info:")
+                        && (result.contains("http:") || result.contains("dns:") || result.contains("ssl:")
+                            || result.contains("requests:") || result.contains("code:"));
+                status.setText(result != null && result.startsWith("[")
+                        ? "Generation failed — check the provider/key in the AI analysis tab."
+                        : (looksValid ? "Template generated. Review it, then Save .yaml and run with 'nuclei -t <file>'."
+                                      : "Generated, but it may not be a complete Nuclei template — review carefully."));
+                generate.setEnabled(true);
+            });
+        });
+        copy.addActionListener(e -> { out.selectAll(); out.copy(); out.select(0, 0); });
+        save.addActionListener(e -> saveTemplate(panel, out.getText()));
+        return panel;
+    }
+
+    private static void saveTemplate(Component parent, String yaml) {
+        if (yaml == null || yaml.isBlank() || yaml.startsWith("[")) {
+            JOptionPane.showMessageDialog(parent, "Nothing to save yet — generate a template first.");
+            return;
+        }
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Save Nuclei template");
+        chooser.setSelectedFile(new java.io.File("recon-hound-template.yaml"));
+        if (chooser.showSaveDialog(parent) != JFileChooser.APPROVE_OPTION) return;
+        try {
+            Files.writeString(chooser.getSelectedFile().toPath(), yaml);
+            JOptionPane.showMessageDialog(parent, "Saved template to\n" + chooser.getSelectedFile());
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(parent, "Save failed: " + ex.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
+        }
     }
 
     private static JPanel buildAssetPanel(ReconController controller, JTable table, ReconModel.AssetTableModel model) {

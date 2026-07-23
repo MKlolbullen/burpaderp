@@ -145,6 +145,11 @@ and **Google Gemini**, each called over raw HTTPS (no vendor SDK is bundled).
   where the model sees it, an **exploit chain** for higher impact. The budget caps how many files are
   sent per run; any remainder is reported (never silently dropped) so you can raise the budget and
   continue. Runs off the UI thread; results also mirror to the *Active tests* tab.
+- **AI Nuclei templates.** A **Nuclei templates (AI)** tab turns a natural-language description
+  ("detect an exposed Spring Boot actuator", "blind SSRF via the `url` parameter using interactsh")
+  into a ready-to-run **Nuclei v3 YAML template**, using whichever LLM provider/key is selected in the
+  AI tab — then save it and run with `nuclei -t`. This mirrors ProjectDiscovery's cloud
+  `POST /v1/template/ai` capability but needs no PDCP account.
 - **Right-click integration.** Any request/response in Proxy history, the site map, or Repeater has a
   **Recon Hound: AI analysis** submenu with three presets — *Explain request/response & attack
   surface*, *Find vulnerabilities*, and *Suggest exploitation & chaining* — which load the message
