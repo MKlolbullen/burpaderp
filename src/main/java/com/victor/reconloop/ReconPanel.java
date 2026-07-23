@@ -86,6 +86,7 @@ final class ReconPanel extends JPanel {
         JButton paramButton = new JButton("Discover params (Arjun)");
         JTextField graphqlUrl = new JTextField(22);
         JButton graphqlButton = new JButton("Introspect GraphQL");
+        JButton graphqlFuzzButton = new JButton("Fuzz GraphQL");
         JButton runActive = new JButton("Run active tests on in-scope site map");
         JButton runJwt = new JButton("Run JWT alg:none test");
         JButton runTakeover = new JButton("Subdomain takeover check");
@@ -108,6 +109,7 @@ final class ReconPanel extends JPanel {
 
         JPanel activeRow3 = new JPanel(new FlowLayout(FlowLayout.LEFT));
         activeRow3.add(new JLabel("GraphQL URL:")); activeRow3.add(graphqlUrl); activeRow3.add(graphqlButton);
+        activeRow3.add(graphqlFuzzButton);
         activePanel.add(activeRow3);
 
         JPanel activeRow4 = new JPanel(new FlowLayout(FlowLayout.LEFT));
@@ -148,7 +150,7 @@ final class ReconPanel extends JPanel {
         JTable vectorTable = buildVectorReferenceTable();
 
         tabs = new JTabbedPane();
-        tabs.addTab("Findings", new JScrollPane(findings));
+        tabs.addTab("Findings", buildFindingsPanel(controller, findings));
         tabs.addTab("Discovered resources", new JScrollPane(discoveries));
         tabs.addTab("Insertion points", new JScrollPane(parameters));
         tabs.addTab("XSS reflections", new JScrollPane(reflectionTable));
@@ -172,6 +174,7 @@ final class ReconPanel extends JPanel {
         ctButton.addActionListener(e -> controller.enumerateSubdomains(ctDomain.getText()));
         paramButton.addActionListener(e -> controller.discoverParameters(paramUrl.getText()));
         graphqlButton.addActionListener(e -> controller.introspectGraphql(graphqlUrl.getText()));
+        graphqlFuzzButton.addActionListener(e -> controller.fuzzGraphql(graphqlUrl.getText()));
         runActive.addActionListener(e -> controller.runActiveTests());
         runJwt.addActionListener(e -> controller.runJwtAttacks());
         runTakeover.addActionListener(e -> controller.runSubdomainTakeoverCheck());
@@ -455,6 +458,44 @@ final class ReconPanel extends JPanel {
         } catch (IOException ex) {
             JOptionPane.showMessageDialog(parent, "Save failed: " + ex.getMessage(),
                     "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    /** Findings tab with SARIF / Markdown export of Recon Hound's audit issues. */
+    private static JComponent buildFindingsPanel(ReconController controller, JTable table) {
+        JPanel panel = new JPanel(new BorderLayout(4, 4));
+        panel.add(new JScrollPane(table), BorderLayout.CENTER);
+
+        JButton exportSarif = new JButton("Export SARIF…");
+        JButton exportMarkdown = new JButton("Export Markdown…");
+        JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        bar.add(exportSarif);
+        bar.add(exportMarkdown);
+        bar.add(new JLabel("Exports Recon Hound's audit issues for CI ingestion / a bug-bounty writeup."));
+        panel.add(bar, BorderLayout.SOUTH);
+
+        exportSarif.addActionListener(e -> exportReport(panel, controller, true));
+        exportMarkdown.addActionListener(e -> exportReport(panel, controller, false));
+        return panel;
+    }
+
+    private static void exportReport(Component parent, ReconController controller, boolean sarif) {
+        java.util.List<burp.api.montoya.scanner.audit.issues.AuditIssue> issues = controller.reconIssues();
+        if (issues.isEmpty()) {
+            JOptionPane.showMessageDialog(parent, "No Recon Hound issues to export yet.");
+            return;
+        }
+        String content = sarif ? ReportExporter.toSarif(issues) : ReportExporter.toMarkdown(issues);
+        String defaultName = sarif ? "recon-hound.sarif" : "recon-hound-findings.md";
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle(sarif ? "Save SARIF report" : "Save Markdown report");
+        chooser.setSelectedFile(new java.io.File(defaultName));
+        if (chooser.showSaveDialog(parent) != JFileChooser.APPROVE_OPTION) return;
+        try {
+            Files.writeString(chooser.getSelectedFile().toPath(), content);
+            JOptionPane.showMessageDialog(parent, "Exported " + issues.size() + " issue(s) to\n" + chooser.getSelectedFile());
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(parent, "Export failed: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 

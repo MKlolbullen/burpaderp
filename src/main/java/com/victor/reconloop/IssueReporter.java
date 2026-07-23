@@ -58,6 +58,16 @@ final class IssueReporter {
         return dedupeKey != null && filed.contains(dedupeKey);
     }
 
+    /** Snapshot of the dedupe keys filed so far (for persistence across sessions). */
+    Set<String> filedSnapshot() {
+        return new java.util.HashSet<>(filed);
+    }
+
+    /** Re-seeds the dedupe set from persisted keys so a reloaded session won't re-file old findings. */
+    void restore(java.util.Collection<String> keys) {
+        if (keys != null) filed.addAll(keys);
+    }
+
     /**
      * Files a finding as a native Burp audit issue, deduplicated on
      * {@code dedupeKey}. Any {@code null} evidence entries are dropped so a

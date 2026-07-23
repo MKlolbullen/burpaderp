@@ -29,6 +29,7 @@ final class ReconModel {
         }
         void add(FindingRow row) { rows.add(0, row); fireTableRowsInserted(0, 0); }
         void clear() { int n = rows.size(); rows.clear(); if (n > 0) fireTableDataChanged(); }
+        List<FindingRow> snapshot() { return new ArrayList<>(rows); }
     }
 
     static final class DiscoveryTableModel extends AbstractTableModel {
