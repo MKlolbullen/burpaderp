@@ -967,6 +967,118 @@ final class ReconController implements HttpHandler {
         return line.length() > 200 ? line.substring(0, 197) + "..." : line;
     }
 
+    /**
+     * On-demand: correlates the whole in-scope finding inventory (every audit issue on the site map)
+     * into ranked exploit chains via the LLM, and files each chain as its own native Burp issue with a
+     * bug-bounty-ready writeup. Runs off the EDT. The key resolves from the UI field or the provider $ENV.
+     */
+    void analyzeFindingChainsWithLlm(LlmProvider provider, String model, String uiKey, int maxFindings,
+                                     java.util.function.Consumer<String> onDone) {
+        java.util.function.Consumer<String> ui = s -> SwingUtilities.invokeLater(() -> onDone.accept(s));
+        activeWorker.submit(() -> {
+            if (provider == null) { ui.accept("[error] No LLM provider selected."); return; }
+            String key = (uiKey != null && !uiKey.isBlank()) ? uiKey.trim() : System.getenv(provider.envVar());
+            if (key == null || key.isBlank()) {
+                ui.accept("[error] No API key. Set it in the field or export $" + provider.envVar() + ".");
+                return;
+            }
+
+            List<AuditIssue> issues = api.siteMap().issues().stream()
+                    .filter(Objects::nonNull)
+                    .filter(i -> { try { return api.scope().isInScope(i.baseUrl()); } catch (Exception e) { return false; } })
+                    .filter(i -> !i.name().startsWith("Recon Hound: Chain:"))   // don't feed chains back in
+                    .collect(java.util.stream.Collectors.toMap(
+                            i -> i.name() + "\0" + i.baseUrl(), i -> i, (a, b) -> a, LinkedHashMap::new))
+                    .values().stream()
+                    .sorted(java.util.Comparator.comparingInt(ReconController::severityRank))
+                    .limit(Math.max(1, maxFindings))
+                    .toList();
+
+            if (issues.isEmpty()) {
+                ui.accept("[no in-scope findings to chain — run a crawl/scan first]");
+                return;
+            }
+
+            StringBuilder inv = new StringBuilder("FINDINGS INVENTORY (" + issues.size() + "):\n");
+            int n = 1;
+            for (AuditIssue i : issues) {
+                inv.append(n++).append(". [").append(i.severity()).append("] ").append(i.name())
+                        .append(" — ").append(i.baseUrl()).append("\n");
+                String d = htmlToText(i.detail());
+                if (!d.isBlank()) inv.append("   ").append(d.length() > 300 ? d.substring(0, 297) + "..." : d).append("\n");
+            }
+
+            ui.accept("Analyzing " + issues.size() + " finding(s) for exploit chains with " + provider.label() + "...");
+            LlmClient.ChainAnalysis analysis = llmClient.analyzeChains(provider, model, key, inv.toString());
+            if (analysis.chains().isEmpty()) {
+                ui.accept(analysis.error() != null && analysis.error().startsWith("[error")
+                        ? "Chaining failed: " + firstLine(analysis.error())
+                        : "No exploit chains identified across " + issues.size() + " finding(s).");
+                return;
+            }
+            int filed = 0;
+            for (LlmClient.LlmChain chain : analysis.chains()) {
+                if (fileChainIssue(chain, issues)) filed++;
+            }
+            String summary = "Chaining complete: " + filed + " exploit chain(s) filed as native Burp issues from "
+                    + issues.size() + " finding(s). See Burp Issues / the Active tab.";
+            api.logging().logToOutput("[Recon Hound] " + summary);
+            ui.accept(summary);
+            publishStatus();
+        });
+    }
+
+    private static int severityRank(AuditIssue issue) {
+        return switch (issue.severity()) {
+            case HIGH -> 0;
+            case MEDIUM -> 1;
+            case LOW -> 2;
+            case INFORMATION -> 3;
+            default -> 4;
+        };
+    }
+
+    private boolean fileChainIssue(LlmClient.LlmChain chain, List<AuditIssue> issues) {
+        String url = firstUrl(chain.involvedUrls());
+        if (url == null) url = issues.isEmpty() ? "https://chained.local/" : issues.get(0).baseUrl();
+        String detail = "<b>Exploit chain: " + escape(chain.title()) + "</b><br>"
+                + (chain.impact().isBlank() ? "" : "Impact: " + escape(chain.impact()) + "<br>")
+                + "<br>"
+                + (chain.writeup().isBlank() ? "" : "<b>Writeup</b><br>" + escape(chain.writeup()) + "<br><br>")
+                + (chain.primitives().isBlank() ? "" : "<b>Primitives combined</b><br>" + escape(chain.primitives()) + "<br><br>")
+                + (chain.steps().isBlank() ? "" : "<b>Steps</b><br><code>" + escape(chain.steps()).replace("\n", "<br>") + "</code><br><br>")
+                + (chain.involvedUrls().isBlank() ? "" : "Involved URLs: " + escape(chain.involvedUrls()) + "<br><br>")
+                + "<i>Proposed by an LLM from the finding inventory. Confirm each step against an authorised target before reporting.</i>";
+
+        addActiveRow(chain.severity().toUpperCase(Locale.ROOT), "LLM-CHAIN", chain.title(), "proposed",
+                firstLine(chain.impact().isBlank() ? chain.title() : chain.impact()), url);
+
+        return reporter.report(
+                "chain\0" + chain.title(),
+                "Chain: " + chain.title(),
+                detail,
+                "Break the chain by remediating any one primitive; prioritise the highest-impact link.",
+                url, IssueReporter.severity(chain.severity()), IssueReporter.confidence(chain.confidence()),
+                "Recon Hound asked an LLM to correlate the finding inventory into higher-impact exploit chains.",
+                "LLM-proposed chains can be wrong; validate each step before relying on it.");
+    }
+
+    private static String firstUrl(String urls) {
+        if (urls == null) return null;
+        for (String token : urls.split("[,\\s]+")) {
+            String t = token.trim();
+            if (t.startsWith("http://") || t.startsWith("https://")) return t;
+        }
+        return null;
+    }
+
+    private static String htmlToText(String html) {
+        if (html == null) return "";
+        return html.replaceAll("<[^>]+>", " ")
+                .replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&amp;", "&")
+                .replaceAll("\\s+", " ").strip();
+    }
+
     void introspectGraphql(String url) {
         activeWorker.submit(() -> {
             String target = url == null ? "" : url.trim();
