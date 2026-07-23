@@ -356,6 +356,44 @@ final class ReconController implements HttpHandler {
                                     forged);
                         }
                     }
+
+                    // Weak-secret forgery: if the HMAC secret is a known weak value, mint a tampered token
+                    // signed with it and confirm the server accepts a token it never issued.
+                    String alg = JwtAttackEngine.headerAlg(target.token());
+                    String[] parts = target.token().split("\\.");
+                    if (alg != null && alg.startsWith("hs") && parts.length >= 3 && sent < budget) {
+                        String secret = WebHygieneEngine.crackHmac(parts[0] + "." + parts[1], parts[2], alg);
+                        String forgedToken = secret == null ? null : JwtAttackEngine.forgeWithSecret(target.token(), secret, alg);
+                        if (forgedToken != null) {
+                            HttpRequest forgedReq = httpRequestFromString(target.request(),
+                                    target.request().toString().replace(target.token(), forgedToken));
+                            HttpRequestResponse forged = api.http().sendRequest(forgedReq);
+                            sent++;
+                            Thread.sleep(activeThrottleMillis.get());
+                            if (forged != null && forged.response() != null) {
+                                int forgedStatus = forged.response().statusCode();
+                                boolean accepted = forgedStatus < 400 && forgedStatus == validStatus;
+                                addActiveRow(accepted ? "HIGH" : "INFO", "JWT-forge", "weak-secret",
+                                        accepted ? "accepted" : "rejected",
+                                        "secret=\"" + secret + "\" status=" + forgedStatus, target.request().url());
+                                if (accepted) {
+                                    reporter.report("jwt-forge\0" + target.request().url(),
+                                            "JWT weak-secret forgery confirmed (authentication bypass)",
+                                            "<b>Server accepts a token forged with a cracked secret</b><br>"
+                                                    + "URL: <code>" + escape(target.request().url()) + "</code><br><br>"
+                                                    + "The token's HMAC secret is the well-known value \"" + escape(secret) + "\". "
+                                                    + "A token re-signed with it (and a tampered claim) was accepted (status "
+                                                    + forgedStatus + "). An attacker can mint tokens with arbitrary claims "
+                                                    + "(any user/role) — full authentication bypass / privilege escalation.",
+                                            "Rotate to a long, random signing key; never use guessable or boilerplate secrets.",
+                                            target.request().url(), AuditIssueSeverity.HIGH, AuditIssueConfidence.CERTAIN,
+                                            "Recon Hound cracks the HMAC secret offline, then replays a token re-signed with it to confirm forgery.",
+                                            "This is a confirmed authentication bypass; validate scope before exploiting.",
+                                            forged);
+                                }
+                            }
+                        }
+                    }
                     publishStatus();
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -769,6 +807,7 @@ final class ReconController implements HttpHandler {
         mineSourceMap(request.url(), response, pair);
         mineWebpackChunks(request.url(), response);
         scanDependencies(request.url(), response, pair);
+        scanDomXss(request.url(), response, pair);
         ingestApiSpec(request.url(), response, pair);
 
         short code = response.statusCode();
@@ -878,6 +917,45 @@ final class ReconController implements HttpHandler {
         } catch (Exception e) {
             api.logging().logToError("Dependency (SCA) scan failed for " + url, e);
         }
+    }
+
+    private void scanDomXss(String url, HttpResponse response, HttpRequestResponse pair) {
+        try {
+            String contentType = response.headerValue("Content-Type");
+            boolean html = contentType != null && contentType.toLowerCase(Locale.ROOT).contains("html");
+            if (!isJavaScriptResponse(url, response) && !html) return;
+            for (AuditIssue issue : domXssIssues(url, response.bodyToString(), pair)) addToSiteMap(issue);
+        } catch (Exception e) {
+            api.logging().logToError("DOM-XSS scan failed for " + url, e);
+        }
+    }
+
+    /** Builds DOM-XSS issues; adds a UI row only when a finding is newly built. */
+    private List<AuditIssue> domXssIssues(String url, String body, HttpRequestResponse pair) {
+        List<AuditIssue> out = new ArrayList<>();
+        for (DomXssEngine.DomFinding finding : DomXssEngine.analyze(body)) {
+            AuditIssue issue = reporter.buildIfNew(
+                    "domxss\0" + url + "\0" + finding.sink() + "\0" + finding.source(),
+                    "potential DOM XSS (" + finding.source() + " -> " + finding.sink() + ")",
+                    "<b>Potential DOM-based XSS: a tainted source flows to a dangerous sink</b><br>"
+                            + "Source: <code>" + escape(finding.source()) + "</code><br>"
+                            + "Sink: <code>" + escape(finding.sink()) + "</code><br>"
+                            + "Statement: <code>" + escape(finding.snippet()) + "</code><br><br>"
+                            + "A user-controllable value reaches an HTML/script sink in the same statement. If it is not "
+                            + "sanitised/encoded, an attacker can execute script in the victim's browser.",
+                    "Encode/sanitise the value for its sink (use textContent instead of innerHTML, DOMPurify for HTML) "
+                            + "and never pass untrusted input to eval/Function/document.write.",
+                    url, AuditIssueSeverity.MEDIUM, AuditIssueConfidence.TENTATIVE,
+                    "Recon Hound flags JS statements where a known DOM XSS source co-occurs with a dangerous sink.",
+                    "Heuristic co-occurrence, not proven dataflow; confirm the source actually reaches the sink.",
+                    pair);
+            if (issue != null) {
+                addActiveRow("MEDIUM", "DOM-XSS", finding.sink(), "source->sink",
+                        finding.source() + " -> " + finding.sink(), url);
+                out.add(issue);
+            }
+        }
+        return out;
     }
 
     /** Builds SCA issues for a response body; adds a UI row only when a finding is newly built. */
@@ -1776,6 +1854,7 @@ final class ReconController implements HttpHandler {
                 addIfPresent(issues, buildReflectionIssue(reflection, reflection.viableVectors(), rr));
             }
             issues.addAll(scaIssues(url, response.bodyToString(), rr));
+            issues.addAll(domXssIssues(url, response.bodyToString(), rr));
         } catch (Exception e) {
             api.logging().logToError("Passive audit failed for " + url, e);
         }

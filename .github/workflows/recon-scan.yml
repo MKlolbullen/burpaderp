@@ -1,0 +1,63 @@
+name: Recon Scan
+
+# On-demand CI-native scan: builds the jar and runs the Burp-free Recon Hound CLI
+# (secrets, SCA, DOM-XSS, exposed source maps) against target URLs, uploading the
+# SARIF report. Uses only GitHub-owned actions (repo policy blocks others) and the
+# Gradle wrapper directly.
+
+on:
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: 'Space-separated target URLs to scan (authorized targets only)'
+        required: true
+      fail_on:
+        description: 'Fail the run if a finding is at/above this severity'
+        required: false
+        default: 'high'
+        type: choice
+        options: [high, medium, low, none]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recon-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Scan targets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Build jar
+        run: ./gradlew clean build --no-daemon
+
+      - name: Write target list
+        env:
+          TARGETS: ${{ inputs.targets }}
+        run: printf '%s\n' "$TARGETS" | tr ' ' '\n' | sed '/^$/d' > targets.txt
+
+      - name: Run Recon Hound CLI
+        env:
+          FAIL_ON: ${{ inputs.fail_on }}
+        run: |
+          JAR="$(ls build/libs/*.jar | head -1)"
+          java -jar "$JAR" --file targets.txt --fail-on "$FAIL_ON" --output recon-hound.sarif
+
+      - name: Upload SARIF report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: recon-hound-sarif
+          path: recon-hound.sarif
+          if-no-files-found: warn
