@@ -79,6 +79,15 @@ final class ReconController implements HttpHandler {
         return t;
     });
 
+    // Dedicated pool for LLM API calls only (never target-directed traffic), sized to the number of
+    // providers so enabling all of them runs genuinely in parallel. Kept separate from activeWorker,
+    // whose single-thread serialization deliberately paces requests fired at the target itself.
+    private final ExecutorService llmWorker = Executors.newFixedThreadPool(LlmProvider.values().length, r -> {
+        Thread t = new Thread(r, "Burp-Recon-Hound-LLM");
+        t.setDaemon(true);
+        return t;
+    });
+
     private final ScheduledExecutorService oobPoller = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "Burp-Recon-Hound-Collaborator");
         t.setDaemon(true);
@@ -604,6 +613,7 @@ final class ReconController implements HttpHandler {
         saveStateBlocking();
         worker.shutdownNow();
         activeWorker.shutdownNow();
+        llmWorker.shutdownNow();
     }
 
     /** Synchronous save for extension unload, when the async EDT task might not run in time. */
@@ -1064,14 +1074,13 @@ final class ReconController implements HttpHandler {
         }
     }
 
-    /** On-demand, manual LLM analysis. Runs off the EDT; the key resolves from the UI field or $ENV. */
-    void analyzeWithLlm(LlmProvider provider, String model, String uiKey, String system, String input,
+    /** On-demand, manual LLM analysis. Runs off the EDT against the already-resolved credential. */
+    void analyzeWithLlm(LlmClient.LlmCredential credential, String system, String input,
                         java.util.function.Consumer<String> onResult) {
-        activeWorker.submit(() -> {
-            String key = (uiKey != null && !uiKey.isBlank()) ? uiKey.trim() : System.getenv(provider.envVar());
+        llmWorker.submit(() -> {
             String result;
             try {
-                result = llmClient.complete(provider, model, key, system, input);
+                result = llmClient.complete(credential.provider(), credential.model(), credential.apiKey(), system, input);
             } catch (Exception e) {
                 result = "[error] " + e.getMessage();
             }
@@ -1086,18 +1095,17 @@ final class ReconController implements HttpHandler {
      * via {@link IssueReporter} and mirrored to the Active-tests table. Runs off the EDT; JS files
      * already analysed in a previous run are skipped, and no more than {@code maxFiles} fresh files
      * are sent per run (any remainder is reported, never silently dropped).
+     *
+     * <p>Files are round-robined across every enabled {@code credentials} entry and analysed
+     * concurrently on {@link #llmWorker} — enabling more providers scales throughput, since each
+     * provider's rate limit is independent.
      */
-    void analyzeInScopeJavaScriptWithLlm(LlmProvider provider, String model, String uiKey,
+    void analyzeInScopeJavaScriptWithLlm(List<LlmClient.LlmCredential> credentials,
                                          int maxFiles, java.util.function.Consumer<String> onDone) {
         activeWorker.submit(() -> {
-            if (provider == null) {
-                SwingUtilities.invokeLater(() -> onDone.accept("[error] No LLM provider selected."));
-                return;
-            }
-            String key = (uiKey != null && !uiKey.isBlank()) ? uiKey.trim() : System.getenv(provider.envVar());
-            if (key == null || key.isBlank()) {
+            if (credentials == null || credentials.isEmpty()) {
                 SwingUtilities.invokeLater(() -> onDone.accept(
-                        "[error] No API key. Set it in the field or export $" + provider.envVar() + "."));
+                        "[error] No LLM provider enabled — check a provider's box and set its key."));
                 return;
             }
 
@@ -1110,39 +1118,66 @@ final class ReconController implements HttpHandler {
                     .values().stream().toList();
 
             int totalInScope = jsPairs.size();
-            int analyzed = 0, findings = 0, skippedBudget = 0, errors = 0;
-            api.logging().logToOutput("[Recon Hound][LLM] JS analysis: " + totalInScope
-                    + " in-scope JS file(s) in the site map, budget " + maxFiles + " per run.");
+            List<HttpRequestResponse> fresh = jsPairs.stream()
+                    .filter(rr -> !llmJsAnalyzed.contains(rr.request().url()))
+                    .toList();
+            List<HttpRequestResponse> toAnalyze = fresh.size() <= maxFiles ? fresh : fresh.subList(0, maxFiles);
+            int skippedBudget = fresh.size() - toAnalyze.size();
 
-            for (HttpRequestResponse rr : jsPairs) {
-                String url = rr.request().url();
-                if (llmJsAnalyzed.contains(url)) continue;   // analysed in an earlier run
-                if (analyzed >= maxFiles) { skippedBudget++; continue; }
-                analyzed++;
+            api.logging().logToOutput("[Recon Hound][LLM] JS analysis: " + totalInScope + " in-scope JS file(s), "
+                    + toAnalyze.size() + " to analyse across " + credentials.size() + " provider(s), budget "
+                    + maxFiles + " per run.");
 
-                String body = rr.response().bodyToString();
-                api.logging().logToOutput("[Recon Hound][LLM] Reviewing " + url + " (" + body.length() + " chars)");
-                LlmClient.LlmAnalysis analysis = llmClient.analyzeJavaScript(provider, model, key, url, body);
+            AtomicInteger findings = new AtomicInteger();
+            AtomicInteger errors = new AtomicInteger();
+            CountDownLatch latch = new CountDownLatch(toAnalyze.size());
 
-                boolean transportError = analysis.findings().isEmpty() && analysis.error() != null
-                        && (analysis.error().startsWith("[error]") || analysis.error().startsWith("[HTTP"));
-                if (transportError) {
-                    // Don't record the URL as analysed — a transient 429/timeout must be retryable next run.
-                    errors++;
-                    api.logging().logToOutput("[Recon Hound][LLM] " + url + ": " + firstLine(analysis.error()));
-                } else {
-                    llmJsAnalyzed.add(url);
-                    for (LlmClient.LlmFinding finding : analysis.findings()) {
-                        findings++;
-                        fileLlmFinding(finding, url, rr);
+            for (int i = 0; i < toAnalyze.size(); i++) {
+                HttpRequestResponse rr = toAnalyze.get(i);
+                LlmClient.LlmCredential credential = credentials.get(i % credentials.size());
+                llmWorker.submit(() -> {
+                    try {
+                        String url = rr.request().url();
+                        String body = rr.response().bodyToString();
+                        api.logging().logToOutput("[Recon Hound][LLM] " + credential.provider().label()
+                                + ": reviewing " + url + " (" + body.length() + " chars)");
+                        LlmClient.LlmAnalysis analysis = llmClient.analyzeJavaScript(
+                                credential.provider(), credential.model(), credential.apiKey(), url, body);
+
+                        boolean transportError = analysis.findings().isEmpty() && analysis.error() != null
+                                && (analysis.error().startsWith("[error]") || analysis.error().startsWith("[HTTP"));
+                        if (transportError) {
+                            // Don't record the URL as analysed — a transient 429/timeout must be retryable next run.
+                            errors.incrementAndGet();
+                            api.logging().logToOutput("[Recon Hound][LLM] " + url + ": " + firstLine(analysis.error()));
+                        } else {
+                            llmJsAnalyzed.add(url);
+                            for (LlmClient.LlmFinding finding : analysis.findings()) {
+                                findings.incrementAndGet();
+                                fileLlmFinding(finding, url, rr);
+                            }
+                        }
+                        publishStatus();
+                    } catch (Exception e) {
+                        errors.incrementAndGet();
+                        api.logging().logToError("LLM JS analysis task failed", e);
+                    } finally {
+                        latch.countDown();
                     }
-                }
-                publishStatus();
+                });
             }
 
-            int fAnalyzed = analyzed, fFindings = findings, fSkipped = skippedBudget, fErrors = errors, fTotal = totalInScope;
+            try {
+                latch.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+
+            int fAnalyzed = toAnalyze.size(), fFindings = findings.get(), fSkipped = skippedBudget,
+                    fErrors = errors.get(), fTotal = totalInScope;
             StringBuilder summary = new StringBuilder();
-            summary.append("LLM JS analysis complete: ").append(fAnalyzed).append(" file(s) analysed, ")
+            summary.append("LLM JS analysis complete: ").append(fAnalyzed).append(" file(s) analysed across ")
+                    .append(credentials.size()).append(" provider(s), ")
                     .append(fFindings).append(" finding(s) filed as native Burp issues");
             if (fErrors > 0) summary.append(", ").append(fErrors).append(" file(s) errored");
             if (fSkipped > 0) {
@@ -1283,13 +1318,12 @@ final class ReconController implements HttpHandler {
     }
 
     /** On-demand: turns a natural-language description into a Nuclei YAML template via the LLM. */
-    void generateNucleiTemplate(LlmProvider provider, String model, String uiKey, String description,
+    void generateNucleiTemplate(LlmClient.LlmCredential credential, String description,
                                 java.util.function.Consumer<String> onResult) {
-        activeWorker.submit(() -> {
-            String key = (uiKey != null && !uiKey.isBlank()) ? uiKey.trim() : System.getenv(provider == null ? "" : provider.envVar());
+        llmWorker.submit(() -> {
             String result;
             try {
-                result = llmClient.generateNucleiTemplate(provider, model, key, description);
+                result = llmClient.generateNucleiTemplate(credential.provider(), credential.model(), credential.apiKey(), description);
             } catch (Exception e) {
                 result = "[error] " + e.getMessage();
             }
@@ -1352,16 +1386,11 @@ final class ReconController implements HttpHandler {
      * into ranked exploit chains via the LLM, and files each chain as its own native Burp issue with a
      * bug-bounty-ready writeup. Runs off the EDT. The key resolves from the UI field or the provider $ENV.
      */
-    void analyzeFindingChainsWithLlm(LlmProvider provider, String model, String uiKey, int maxFindings,
+    void analyzeFindingChainsWithLlm(LlmClient.LlmCredential credential, int maxFindings,
                                      java.util.function.Consumer<String> onDone) {
         java.util.function.Consumer<String> ui = s -> SwingUtilities.invokeLater(() -> onDone.accept(s));
-        activeWorker.submit(() -> {
-            if (provider == null) { ui.accept("[error] No LLM provider selected."); return; }
-            String key = (uiKey != null && !uiKey.isBlank()) ? uiKey.trim() : System.getenv(provider.envVar());
-            if (key == null || key.isBlank()) {
-                ui.accept("[error] No API key. Set it in the field or export $" + provider.envVar() + ".");
-                return;
-            }
+        llmWorker.submit(() -> {
+            if (credential == null) { ui.accept("[error] No LLM provider enabled — check a provider's box and set its key."); return; }
 
             List<AuditIssue> issues = api.siteMap().issues().stream()
                     .filter(Objects::nonNull)
@@ -1388,8 +1417,9 @@ final class ReconController implements HttpHandler {
                 if (!d.isBlank()) inv.append("   ").append(d.length() > 300 ? d.substring(0, 297) + "..." : d).append("\n");
             }
 
-            ui.accept("Analyzing " + issues.size() + " finding(s) for exploit chains with " + provider.label() + "...");
-            LlmClient.ChainAnalysis analysis = llmClient.analyzeChains(provider, model, key, inv.toString());
+            ui.accept("Analyzing " + issues.size() + " finding(s) for exploit chains with " + credential.provider().label() + "...");
+            LlmClient.ChainAnalysis analysis = llmClient.analyzeChains(
+                    credential.provider(), credential.model(), credential.apiKey(), inv.toString());
             if (analysis.chains().isEmpty()) {
                 ui.accept(analysis.error() != null && analysis.error().startsWith("[error")
                         ? "Chaining failed: " + firstLine(analysis.error())
@@ -1416,6 +1446,155 @@ final class ReconController implements HttpHandler {
             case INFORMATION -> 3;
             default -> 4;
         };
+    }
+
+    /**
+     * On-demand LLM false-positive triage of the Findings table. Reviews up to {@code maxFindings}
+     * not-yet-triaged rows, sending the SAME numbered batch prompt to every enabled credential
+     * concurrently; with more than one provider enabled, each finding's verdict is a majority vote
+     * across providers rather than a single model's opinion. Verdicts are written into the Findings
+     * table's "AI Triage" column in place (matched by finding content, not row index, since new
+     * findings can be prepended while the LLM call is in flight) — {@link AuditIssue} itself is
+     * immutable once filed, so nothing here can or does retouch the original native Burp issue.
+     */
+    void triageFindings(List<LlmClient.LlmCredential> credentials, int maxFindings,
+                        java.util.function.Consumer<String> onDone) {
+        java.util.function.Consumer<String> ui = s -> SwingUtilities.invokeLater(() -> onDone.accept(s));
+        if (credentials == null || credentials.isEmpty()) {
+            ui.accept("[error] No LLM provider enabled — check a provider's box and set its key.");
+            return;
+        }
+        llmWorker.submit(() -> {
+            java.util.concurrent.atomic.AtomicReference<List<ReconModel.FindingRow>> untriagedRef =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            Runnable snapshot = () -> untriagedRef.set(findingModel.untriagedSnapshot());
+            try {
+                if (SwingUtilities.isEventDispatchThread()) snapshot.run();
+                else SwingUtilities.invokeAndWait(snapshot);
+            } catch (Exception e) {
+                ui.accept("[error] Could not read the Findings table: " + e.getMessage());
+                return;
+            }
+            List<ReconModel.FindingRow> untriaged = untriagedRef.get();
+            if (untriaged == null || untriaged.isEmpty()) {
+                ui.accept("Nothing to triage — every current finding already has an AI Triage verdict.");
+                return;
+            }
+            List<ReconModel.FindingRow> batch = untriaged.size() <= maxFindings ? untriaged : untriaged.subList(0, maxFindings);
+            int leftover = untriaged.size() - batch.size();
+
+            StringBuilder prompt = new StringBuilder("FINDINGS BATCH (" + batch.size() + "):\n");
+            for (int i = 0; i < batch.size(); i++) {
+                ReconModel.FindingRow r = batch.get(i);
+                prompt.append(i + 1).append(". [").append(r.severity()).append("] ").append(r.provider())
+                        .append(" / ").append(r.rule()).append(" @ ").append(r.location()).append("\n")
+                        .append("   URL: ").append(r.url()).append("\n")
+                        .append("   Evidence: ").append(truncate(r.value(), 300)).append("\n");
+            }
+            String batchPrompt = prompt.toString();
+
+            ui.accept("Triaging " + batch.size() + " finding(s) across " + credentials.size() + " provider(s)...");
+
+            List<LlmClient.TriageBatchResult> results = Collections.synchronizedList(new ArrayList<>());
+            CountDownLatch latch = new CountDownLatch(credentials.size());
+            for (LlmClient.LlmCredential credential : credentials) {
+                llmWorker.submit(() -> {
+                    try {
+                        results.add(llmClient.triage(credential, batchPrompt));
+                    } catch (Exception e) {
+                        results.add(new LlmClient.TriageBatchResult(List.of(), "[error] " + e.getMessage()));
+                    } finally {
+                        latch.countDown();
+                    }
+                });
+            }
+            try {
+                latch.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+
+            int erroredProviders = 0;
+            Map<Integer, List<String>> votes = new HashMap<>();
+            for (LlmClient.TriageBatchResult result : results) {
+                if (result.verdicts().isEmpty()) { erroredProviders++; continue; }
+                for (LlmClient.TriageVerdict v : result.verdicts()) {
+                    votes.computeIfAbsent(v.index(), k -> new ArrayList<>()).add(normalizeVerdict(v.verdict()));
+                }
+            }
+
+            Map<String, String> verdictsByKey = new HashMap<>();
+            int fp = 0, tp = 0, uncertain = 0;
+            for (int i = 0; i < batch.size(); i++) {
+                String consensus = consensusVerdict(votes.get(i + 1));
+                if (consensus.startsWith("LIKELY_FP")) fp++;
+                else if (consensus.startsWith("LIKELY_TP")) tp++;
+                else uncertain++;
+                verdictsByKey.put(ReconModel.FindingTableModel.correlationKey(batch.get(i)), consensus);
+            }
+
+            SwingUtilities.invokeLater(() -> findingModel.applyTriage(verdictsByKey));
+
+            int ftp = tp, ffp = fp, funcertain = uncertain, fLeftover = leftover, fErrored = erroredProviders;
+            StringBuilder summary = new StringBuilder("Triage complete: ").append(batch.size())
+                    .append(" finding(s) reviewed across ").append(credentials.size()).append(" provider(s) — ")
+                    .append(ftp).append(" likely true positive, ").append(ffp).append(" likely false positive, ")
+                    .append(funcertain).append(" uncertain.");
+            if (fErrored > 0) summary.append(" (").append(fErrored).append(" provider(s) failed to respond.)");
+            if (fLeftover > 0) {
+                summary.append(" ").append(fLeftover).append(" finding(s) left over the ").append(maxFindings)
+                        .append("-batch — run again to continue.");
+            }
+
+            if (ffp > 0 || ftp > 0) {
+                reporter.report(
+                        "triage-summary\0" + System.currentTimeMillis(),
+                        "LLM triage summary",
+                        "<b>LLM false-positive triage results</b><br>"
+                                + "Reviewed: " + batch.size() + " finding(s) across " + credentials.size() + " provider(s)<br>"
+                                + "Likely true positive: " + ftp + "<br>"
+                                + "Likely false positive: " + ffp + "<br>"
+                                + "Uncertain: " + funcertain + "<br><br>"
+                                + "See the \"AI Triage\" column in the Findings tab for the per-finding verdict.",
+                        "Review findings marked likely false positive before spending time on them; confirm likely-true-positive findings manually.",
+                        "https://recon-hound.local/triage-summary",
+                        AuditIssueSeverity.INFORMATION, AuditIssueConfidence.TENTATIVE,
+                        "Recon Hound optionally sends filed findings to one or more configured LLMs to triage false-positive likelihood.",
+                        "LLM triage is itself heuristic and can be wrong in either direction; it is an efficiency aid, not a substitute for manual review.");
+            }
+            api.logging().logToOutput("[Recon Hound] " + summary);
+            ui.accept(summary.toString());
+        });
+    }
+
+    private static String normalizeVerdict(String v) {
+        if (v == null) return "UNCERTAIN";
+        String upper = v.trim().toUpperCase(Locale.ROOT);
+        if (upper.contains("FP") || upper.contains("FALSE")) return "LIKELY_FP";
+        if (upper.contains("TP") || upper.contains("TRUE")) return "LIKELY_TP";
+        return "UNCERTAIN";
+    }
+
+    /** Majority vote across every provider that answered for one finding; ties/no-answer fall back to UNCERTAIN. */
+    private static String consensusVerdict(List<String> providerVotes) {
+        if (providerVotes == null || providerVotes.isEmpty()) return "UNCERTAIN (no provider responded)";
+        int fp = 0, tp = 0, uncertain = 0;
+        for (String v : providerVotes) {
+            switch (v) {
+                case "LIKELY_FP" -> fp++;
+                case "LIKELY_TP" -> tp++;
+                default -> uncertain++;
+            }
+        }
+        String label = (fp > tp && fp > uncertain) ? "LIKELY_FP"
+                : (tp > fp && tp > uncertain) ? "LIKELY_TP"
+                : "UNCERTAIN";
+        return providerVotes.size() > 1 ? label + " (tp:" + tp + " fp:" + fp + " unc:" + uncertain + ")" : label;
+    }
+
+    private static String truncate(String value, int max) {
+        if (value == null) return "";
+        return value.length() <= max ? value : value.substring(0, max - 3) + "...";
     }
 
     private boolean fileChainIssue(LlmClient.LlmChain chain, List<AuditIssue> issues) {
