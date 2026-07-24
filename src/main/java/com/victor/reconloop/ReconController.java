@@ -823,6 +823,7 @@ final class ReconController implements HttpHandler {
         scanDependencies(request.url(), response, pair);
         scanDomXss(request.url(), response, pair);
         scanDataExposure(request.url(), request, response, pair);
+        scanSensitivePaths(request.url(), response, pair);
         ingestApiSpec(request.url(), response, pair);
 
         short code = response.statusCode();
@@ -1063,6 +1064,62 @@ final class ReconController implements HttpHandler {
         if (method == null) return false;
         String upper = method.toUpperCase(Locale.ROOT);
         return upper.equals("POST") || upper.equals("PUT") || upper.equals("PATCH");
+    }
+
+    /**
+     * Flags two path-based leads on a successful (2xx) response: a known debug/administration tool
+     * path being reachable at all (Actuator, phpinfo, .git metadata, server-status, …), and a
+     * privileged-looking path (admin/internal/backend/manage/console) as a BFLA candidate worth
+     * confirming with the access-control replay feature. {@link AccessControlEngine} already
+     * actively replays every safe-method endpoint under an alternate identity; this is the passive,
+     * always-on discovery-time counterpart that surfaces which endpoints are worth that replay.
+     */
+    private void scanSensitivePaths(String url, HttpResponse response, HttpRequestResponse pair) {
+        try {
+            short code = response.statusCode();
+            if (code < 200 || code >= 300) return;
+            URI uri = safeUri(url);
+            if (uri == null) return;
+
+            if (InterestingResourceCatalog.looksLikeDebugTool(uri) && issueDedupe.add("debugpath\0" + url)) {
+                addSyntheticFinding("MEDIUM", "exposure", "Debug/ops endpoint exposed", "response",
+                        "Reachable debug/administration tooling path", url);
+                reporter.report("debugpath-issue\0" + url,
+                        "debug/ops endpoint exposed",
+                        "<b>A known debug/administration tool path responded successfully</b><br>"
+                                + "URL: <code>" + escape(url) + "</code><br><br>"
+                                + "Framework debug endpoints, admin consoles, and management tooling (Actuator, "
+                                + "phpinfo, .git metadata, server-status, etc.) commonly leak configuration, "
+                                + "internal paths, credentials, or allow further compromise if left reachable.",
+                        "Disable or restrict access to debug/administration tooling in production (network-level "
+                                + "allow-listing, authentication, or removing it entirely).",
+                        url, AuditIssueSeverity.MEDIUM, AuditIssueConfidence.FIRM,
+                        "Recon Hound flags well-known debug/administration tool paths that returned a successful response.",
+                        "Confirm the endpoint actually discloses sensitive information/functionality before reporting.",
+                        pair);
+            }
+
+            if (InterestingResourceCatalog.looksLikePrivilegedPath(uri) && issueDedupe.add("bfla\0" + url)) {
+                addSyntheticFinding("LOW", "authorization", "BFLA candidate", "response",
+                        "Privileged-looking endpoint path", url);
+                reporter.report("bfla-issue\0" + url,
+                        "possible broken function-level authorization (BFLA) candidate",
+                        "<b>Privileged-looking endpoint responded successfully</b><br>"
+                                + "URL: <code>" + escape(url) + "</code><br><br>"
+                                + "The path suggests admin/internal/management functionality. Verify that access "
+                                + "control is actually enforced server-side for this endpoint and every HTTP method "
+                                + "it accepts — the access-control replay feature (alternate-identity testing) can "
+                                + "confirm this directly.",
+                        "Enforce server-side authorization for every privileged endpoint and method; never rely on "
+                                + "a path being \"hidden\" or unlinked from the UI.",
+                        url, AuditIssueSeverity.LOW, AuditIssueConfidence.TENTATIVE,
+                        "Recon Hound flags discovered paths whose names suggest admin/internal-only functionality.",
+                        "A path name alone doesn't confirm broken access control; use the access-control replay feature to test it.",
+                        pair);
+            }
+        } catch (Exception e) {
+            api.logging().logToError("Sensitive-path scan failed for " + url, e);
+        }
     }
 
     /** Builds SCA issues for a response body; adds a UI row only when a finding is newly built. */

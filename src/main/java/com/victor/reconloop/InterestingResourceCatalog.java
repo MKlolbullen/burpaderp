@@ -47,4 +47,33 @@ final class InterestingResourceCatalog {
         values.sort(Comparator.comparingInt(String::length).reversed());
         return String.join("|", values);
     }
+
+    /** Distinctive path fragments for known debug/administration tooling (framework consoles, ops
+     *  endpoints, VCS metadata) — reachability alone is worth flagging regardless of response content. */
+    private static final Set<String> DEBUG_TOOL_PATH_HINTS = Set.of(
+            "actuator", "heapdump", "jolokia", "phpinfo.php", "_profiler", "server-status", "server-info",
+            "jmx-console", "manager/html", "adminer", "phpmyadmin", "wp-login.php", "xmlrpc.php",
+            "/.git/head", "/.git/config");
+
+    /** Path *segments* (matched whole, not substring) that suggest admin/internal-only functionality —
+     *  a BFLA lead, not a confirmed exposure, so kept separate from {@link #DEBUG_TOOL_PATH_HINTS}. */
+    private static final Set<String> PRIVILEGED_PATH_SEGMENTS = Set.of(
+            "admin", "administrator", "internal", "backend", "manage", "management", "console",
+            "superuser", "sysadmin", "wp-admin");
+
+    static boolean looksLikeDebugTool(URI uri) {
+        if (uri == null || uri.getPath() == null) return false;
+        String path = uri.getPath().toLowerCase(Locale.ROOT);
+        for (String hint : DEBUG_TOOL_PATH_HINTS) if (path.contains(hint)) return true;
+        return false;
+    }
+
+    static boolean looksLikePrivilegedPath(URI uri) {
+        if (uri == null || uri.getPath() == null) return false;
+        String path = uri.getPath().toLowerCase(Locale.ROOT);
+        for (String segment : path.split("/")) {
+            if (PRIVILEGED_PATH_SEGMENTS.contains(segment)) return true;
+        }
+        return false;
+    }
 }
