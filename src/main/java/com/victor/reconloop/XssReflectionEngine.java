@@ -60,7 +60,9 @@ final class XssReflectionEngine {
             String severity,
             int occurrences,
             List<XssVectorLibrary.Vector> viableVectors,
-            String url) {}
+            String url,
+            int start,
+            int end) {}
 
     /** XSS-relevant metacharacters whose survival we track at the reflection point. */
     private static final char[] DANGEROUS = {'<', '>', '"', '\'', '`', '(', ')', '{', '}', ';', '=', '/', '\\'};
@@ -82,6 +84,7 @@ final class XssReflectionEngine {
         String body = response.bodyToString();
         if (body == null || body.isEmpty()) return List.of();
         if (body.length() > MAX_BODY) body = body.substring(0, MAX_BODY);
+        int bodyOffset = response.bodyOffset();
 
         List<HttpParameter> parameters;
         try {
@@ -116,9 +119,11 @@ final class XssReflectionEngine {
                 String dedupe = name + "\0" + type + "\0" + context;
                 if (!seen.add(dedupe)) continue;
 
+                int start = bodyOffset + positions.get(0);
+                int end = start + candidate.length();
                 out.add(new Reflection(
                         name, type, preview(candidate), context, surviving,
-                        severity, positions.size(), vectors, request.url()));
+                        severity, positions.size(), vectors, request.url(), start, end));
             }
         }
         return out;

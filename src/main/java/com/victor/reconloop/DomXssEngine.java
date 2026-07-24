@@ -16,7 +16,7 @@ import java.util.regex.Pattern;
  */
 final class DomXssEngine {
 
-    record DomFinding(String sink, String source, String snippet) {}
+    record DomFinding(String sink, String source, String snippet, int start, int end) {}
 
     // User-controllable inputs that commonly reach a sink unsanitised.
     private static final Pattern SOURCE = Pattern.compile(
@@ -52,7 +52,8 @@ final class DomXssEngine {
                 String snippet = (sinkName + " ⇐ " + region).strip();
                 if (snippet.length() > 180) snippet = snippet.substring(0, 177) + "...";
                 if (seen.add(sinkName + "\0" + source.group() + "\0" + snippet)) {
-                    out.add(new DomFinding(sinkName.replaceFirst("^\\.", ""), source.group(), snippet));
+                    out.add(new DomFinding(sinkName.replaceFirst("^\\.", ""), source.group(), snippet,
+                            matcher.start(), matcher.end()));
                 }
             }
         }
