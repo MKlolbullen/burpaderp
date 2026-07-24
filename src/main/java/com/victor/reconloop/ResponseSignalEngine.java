@@ -5,7 +5,7 @@ import java.util.*;
 import java.util.regex.*;
 
 final class ResponseSignalEngine {
-    record Signal(String severity, String name, String value) {}
+    record Signal(String severity, String name, String value, int start, int end) {}
     private record Rule(String severity, String name, Pattern pattern) {}
 
     private static final List<Rule> RULES = List.of(
@@ -28,7 +28,9 @@ final class ResponseSignalEngine {
         for (Rule rule : RULES) {
             Matcher m = rule.pattern().matcher(text);
             int n = 0;
-            while (m.find() && n++ < 20) out.add(new Signal(rule.severity(), rule.name(), trim(m.group())));
+            while (m.find() && n++ < 20) {
+                out.add(new Signal(rule.severity(), rule.name(), trim(m.group()), m.start(), m.end()));
+            }
         }
         return out;
     }

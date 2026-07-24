@@ -576,6 +576,8 @@ final class ReconController implements HttpHandler {
         parameterDedupe.clear();
         reflectionDedupe.clear();
         activeDedupe.clear();
+        oobDedupe.clear();
+        reporter.clearFiled();   // else the site map never re-files after the tables are cleared
         minedMaps.clear();
         minedWebpack.clear();
         ingestedSpecs.clear();
@@ -597,10 +599,11 @@ final class ReconController implements HttpHandler {
 
     void shutdown() {
         running.set(false);
+        // Stop the periodic saver first so it can't race the final blocking save on the PersistedObject.
+        oobPoller.shutdownNow();
         saveStateBlocking();
         worker.shutdownNow();
         activeWorker.shutdownNow();
-        oobPoller.shutdownNow();
     }
 
     /** Synchronous save for extension unload, when the async EDT task might not run in time. */
@@ -792,7 +795,8 @@ final class ReconController implements HttpHandler {
         if (request == null || response == null) return;
 
         scanMessage(response.toString(), location, request.url(), pair);
-        discoverFrom(URI.create(request.url()), response.toString(), location);
+        URI requestUri = safeUri(request.url());
+        if (requestUri != null) discoverFrom(requestUri, response.toString(), location);
 
         for (ResponseSignalEngine.Signal signal : responseSignals.analyze(response)) {
             addSyntheticFinding(signal.severity(), "response", signal.name(), location, signal.value(), request.url());
@@ -811,10 +815,19 @@ final class ReconController implements HttpHandler {
         ingestApiSpec(request.url(), response, pair);
 
         short code = response.statusCode();
-        if (code >= 300 && code < 400) {
+        if (code >= 300 && code < 400 && requestUri != null) {
             String target = response.headerValue("Location");
-            URI next = discovery.redirectTarget(URI.create(request.url()), target);
-            if (next != null) addDiscovered(next, URI.create(request.url()), "redirect " + code + " from " + request.url(), false);
+            URI next = discovery.redirectTarget(requestUri, target);
+            if (next != null) addDiscovered(next, requestUri, "redirect " + code + " from " + request.url(), false);
+        }
+    }
+
+    /** Parses a URL string, returning null instead of throwing on malformed input. */
+    private static URI safeUri(String url) {
+        try {
+            return URI.create(url);
+        } catch (Exception e) {
+            return null;
         }
     }
 
@@ -1099,19 +1112,24 @@ final class ReconController implements HttpHandler {
                 String url = rr.request().url();
                 if (llmJsAnalyzed.contains(url)) continue;   // analysed in an earlier run
                 if (analyzed >= maxFiles) { skippedBudget++; continue; }
-                llmJsAnalyzed.add(url);
                 analyzed++;
 
                 String body = rr.response().bodyToString();
                 api.logging().logToOutput("[Recon Hound][LLM] Reviewing " + url + " (" + body.length() + " chars)");
                 LlmClient.LlmAnalysis analysis = llmClient.analyzeJavaScript(provider, model, key, url, body);
-                if (analysis.findings().isEmpty() && analysis.error() != null) {
-                    if (analysis.error().startsWith("[error]") || analysis.error().startsWith("[HTTP")) errors++;
+
+                boolean transportError = analysis.findings().isEmpty() && analysis.error() != null
+                        && (analysis.error().startsWith("[error]") || analysis.error().startsWith("[HTTP"));
+                if (transportError) {
+                    // Don't record the URL as analysed — a transient 429/timeout must be retryable next run.
+                    errors++;
                     api.logging().logToOutput("[Recon Hound][LLM] " + url + ": " + firstLine(analysis.error()));
-                }
-                for (LlmClient.LlmFinding finding : analysis.findings()) {
-                    findings++;
-                    fileLlmFinding(finding, url, rr);
+                } else {
+                    llmJsAnalyzed.add(url);
+                    for (LlmClient.LlmFinding finding : analysis.findings()) {
+                        findings++;
+                        fileLlmFinding(finding, url, rr);
+                    }
                 }
                 publishStatus();
             }
@@ -1734,12 +1752,15 @@ final class ReconController implements HttpHandler {
     private AuditIssue buildSignalIssue(ResponseSignalEngine.Signal signal, String location, String url, HttpRequestResponse pair) {
         AuditIssueSeverity severity = IssueReporter.severity(signal.severity());
 
+        String located = (pair != null && pair.hasResponse())
+                ? locatedEvidence(pair.response().toString(), signal.start(), signal.end(), false) : "";
         String detail = "<b>Response signal: " + escape(signal.name()) + "</b><br>"
                 + "Location: " + escape(location) + "<br>"
-                + "Evidence: <code>" + escape(signal.value()) + "</code><br><br>"
+                + "Evidence: <code>" + escape(signal.value()) + "</code>" + located + "<br><br>"
                 + "Recon Hound flags disclosure signals (stack traces, debug/error output, source-map "
                 + "references, directory listings, internal-hostname hints) in in-scope responses.";
 
+        HttpRequestResponse evidence = IssueReporter.withResponseEvidence(pair, signal.start(), signal.end());
         return reporter.buildIfNew(
                 "signal-issue\0" + signal.name() + "\0" + signal.value() + "\0" + url,
                 signal.name(),
@@ -1749,7 +1770,7 @@ final class ReconController implements HttpHandler {
                 url, severity, AuditIssueConfidence.FIRM,
                 "Recon Hound passively inspects in-scope responses for information-disclosure signals.",
                 "Disclosure findings are heuristic; confirm the leaked content is sensitive before reporting.",
-                pair
+                evidence
         );
     }
 
@@ -1802,11 +1823,29 @@ final class ReconController implements HttpHandler {
             case LOW -> AuditIssueConfidence.TENTATIVE;
         };
 
+        // Mark the matched bytes on the correct side; the offsets are message-relative (scanMessage
+        // scans request.toString()/response.toString()). Skip reconstructed source-map text — its
+        // offsets don't map to any live message.
+        String loc = finding.location() == null ? "" : finding.location();
+        boolean sourceMap = loc.startsWith("source-map");
+        boolean requestSide = loc.contains("request");
+        HttpRequestResponse evidence = pair;
+        String located = "";
+        if (!sourceMap && pair != null) {
+            if (requestSide && pair.request() != null) {
+                evidence = IssueReporter.withRequestEvidence(pair, finding.start(), finding.end());
+                located = locatedEvidence(pair.request().toString(), finding.start(), finding.end(), true);
+            } else if (!requestSide && pair.hasResponse()) {
+                evidence = IssueReporter.withResponseEvidence(pair, finding.start(), finding.end());
+                located = locatedEvidence(pair.response().toString(), finding.start(), finding.end(), true);
+            }
+        }
+
         String detail = "<b>Regex Hound match</b><br>"
                 + "Provider: " + escape(finding.rule().provider()) + "<br>"
                 + "Location: " + escape(finding.location()) + "<br>"
                 + "Matched value: <code>" + escape(RegexHound.redact(finding.value())) + "</code><br>"
-                + "Entropy: " + String.format(Locale.ROOT, "%.2f", finding.entropy()) + "<br><br>"
+                + "Entropy: " + String.format(Locale.ROOT, "%.2f", finding.entropy()) + located + "<br><br>"
                 + "Review the original request/response and validate whether the credential or token is live.";
 
         return reporter.buildIfNew(
@@ -1817,8 +1856,30 @@ final class ReconController implements HttpHandler {
                 finding.url(), severity, confidence,
                 "Recon Hound identifies credential, token, key, and security-relevant patterns in in-scope HTTP traffic.",
                 "Secret scanning is heuristic; verify context before remediation.",
-                pair
+                evidence
         );
+    }
+
+    /**
+     * Renders a located-evidence HTML block: line number, byte range, and a &plusmn;40-char context
+     * window with the matched span delimited. Returns "" when the offsets are unusable. The span is
+     * redacted for secrets so it stays masked in text while the marker still points Burp at the bytes.
+     */
+    private static String locatedEvidence(String message, int start, int end, boolean redact) {
+        if (message == null || start < 0 || end <= start || start >= message.length()) return "";
+        int e = Math.min(end, message.length());
+        if (e <= start) return "";
+        int line = 1;
+        for (int i = 0; i < start; i++) if (message.charAt(i) == '\n') line++;
+        int ctxStart = Math.max(0, start - 40);
+        int ctxEnd = Math.min(message.length(), e + 40);
+        String span = message.substring(start, e);
+        if (redact) span = RegexHound.redact(span);
+        return "<br><b>Location:</b> line " + line + ", bytes " + start + "&ndash;" + e
+                + " (highlighted in the message viewer above)<br><code>"
+                + escape(message.substring(ctxStart, start))
+                + "&#187;<b>" + escape(span) + "</b>&#171;"
+                + escape(message.substring(e, ctxEnd)) + "</code>";
     }
 
     private void addToSiteMap(AuditIssue issue) {
