@@ -1,6 +1,7 @@
 package com.victor.reconloop;
 
 import burp.api.montoya.MontoyaApi;
+import burp.api.montoya.core.Marker;
 import burp.api.montoya.http.message.HttpRequestResponse;
 import burp.api.montoya.scanner.audit.issues.AuditIssue;
 import burp.api.montoya.scanner.audit.issues.AuditIssueConfidence;
@@ -68,6 +69,41 @@ final class IssueReporter {
         if (keys != null) filed.addAll(keys);
     }
 
+    /** Clears the dedupe set (used on Reset so findings can be re-filed after the site map is cleared). */
+    void clearFiled() {
+        filed.clear();
+    }
+
+    /**
+     * Returns {@code rr} with a response marker highlighting bytes {@code [start, end)}, or unchanged
+     * when the bounds are invalid / there is no response. Bounds are clamped to the message length so
+     * an out-of-range offset can never produce an invalid marker at runtime.
+     */
+    static HttpRequestResponse withResponseEvidence(HttpRequestResponse rr, int start, int end) {
+        if (rr == null || !rr.hasResponse() || start < 0 || end <= start) return rr;
+        try {
+            int len = rr.response().toString().length();
+            int e = Math.min(end, len);
+            if (start >= len || e <= start) return rr;
+            return rr.withResponseMarkers(Marker.marker(start, e));
+        } catch (Exception ex) {
+            return rr;
+        }
+    }
+
+    /** Request-side twin of {@link #withResponseEvidence}. */
+    static HttpRequestResponse withRequestEvidence(HttpRequestResponse rr, int start, int end) {
+        if (rr == null || rr.request() == null || start < 0 || end <= start) return rr;
+        try {
+            int len = rr.request().toString().length();
+            int e = Math.min(end, len);
+            if (start >= len || e <= start) return rr;
+            return rr.withRequestMarkers(Marker.marker(start, e));
+        } catch (Exception ex) {
+            return rr;
+        }
+    }
+
     /**
      * Files a finding as a native Burp audit issue, deduplicated on
      * {@code dedupeKey}. Any {@code null} evidence entries are dropped so a
@@ -108,6 +144,8 @@ final class IssueReporter {
                           String background,
                           String remediationBackground,
                           HttpRequestResponse... evidence) {
+        // Normalise CR/LF so keys survive the newline-delimited persisted store (PersistedState).
+        if (dedupeKey != null) dedupeKey = dedupeKey.replace('\n', ' ').replace('\r', ' ');
         if (dedupeKey != null && !filed.add(dedupeKey)) return null;
         try {
             HttpRequestResponse[] cleaned = java.util.Arrays.stream(evidence == null ? new HttpRequestResponse[0] : evidence)
