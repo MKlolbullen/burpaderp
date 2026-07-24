@@ -11,8 +11,12 @@ final class ResponseSignalEngine {
     private static final List<Rule> RULES = List.of(
             r("HIGH", "Possible stack trace", "(?i)(?:Traceback \\(most recent call last\\)|Exception in thread|at [a-zA-Z0-9_.$]+\\([A-Za-z0-9_.$]+\\.java:\\d+\\)|System\\.Data\\.SqlClient|Laravel\\\\Framework|Symfony\\\\Component)"),
             r("MEDIUM", "Debug/error disclosure", "(?i)(?:debug\\s*=\\s*true|display_errors\\s*=\\s*on|SQLSTATE\\[|You have an error in your SQL syntax|Warning: .* on line \\d+|Fatal error:|Notice: Undefined)"),
+            r("HIGH", "Framework stack trace", "(?i)(?:at Object\\.<anonymous>|\\bnode:internal/|goroutine \\d+ \\[running\\]|\\bpanic:\\s|thread '[^']+' panicked at|[\\w./-]+\\.rb:\\d+:in\\s|Werkzeug Debugger|Whitelabel Error Page|Cannot (?:GET|POST|PUT|DELETE|PATCH) /|ActiveRecord::\\w+|NoMethodError)"),
+            r("MEDIUM", "Database engine error", "(?i)(?:ORA-\\d{5}|PSQLException|PG::\\w+Error|Incorrect syntax near|Unclosed quotation mark after the character string|SQLite3?::\\w+|MongoError|E11000 duplicate key|MySqlException|Npgsql\\.)"),
+            r("HIGH", "Cloud metadata / SSRF echo", "(?:169\\.254\\.169\\.254|metadata\\.google\\.internal|computeMetadata/v1|/latest/meta-data/)"),
+            r("MEDIUM", "Server path disclosure", "(?:\\b/var/www/[\\w./-]{2,}|[A-Za-z]:\\\\inetpub\\\\[\\w.\\\\-]{2,})"),
             r("MEDIUM", "Source map reference", "(?i)(?:sourceMappingURL|X-SourceMap|SourceMap)\\s*[:=]\\s*([^\\s]+)"),
-            r("MEDIUM", "Internal hostname hint", "(?i)\\b(?:localhost|[a-z0-9-]+\\.(?:internal|local|corp|lan))\\b"),
+            r("MEDIUM", "Internal hostname hint", "(?i)(?:\\b[a-z0-9-]+\\.(?:internal|local|corp|lan)\\b|(?:https?://|@|host[=:]\\s*|Host:\\s*)localhost\\b)"),
             r("LOW", "Directory listing", "(?i)<title>Index of /|<h1>Index of /|Directory listing for"),
             r("LOW", "Interesting technology header/body", "(?i)(?:X-Powered-By|Server:|X-AspNet-Version|X-Generator|X-Drupal-Cache)[: ]+[^\\r\\n<]{1,160}")
     );
