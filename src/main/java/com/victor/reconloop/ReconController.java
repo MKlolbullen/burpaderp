@@ -870,7 +870,7 @@ final class ReconController implements HttpHandler {
                 "<b>" + escape(note.name()) + "</b><br>" + escape(note.detail()),
                 "Review the affected security header / token handling and harden per OWASP guidance.",
                 url, IssueReporter.severity(note.severity()), AuditIssueConfidence.FIRM,
-                "Recon Hound passively inspects CORS, CSP and JWT hygiene in in-scope responses.",
+                "Recon Hound passively inspects CORS, CSP, JWT, session-cookie attribute, and CSRF hygiene in in-scope traffic.",
                 "Header-based findings are heuristic; confirm exploitability in context.",
                 pair);
     }

@@ -1,5 +1,7 @@
 package com.victor.reconloop;
 
+import burp.api.montoya.http.message.HttpHeader;
+import burp.api.montoya.http.message.params.HttpParameter;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.responses.HttpResponse;
 
@@ -11,8 +13,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Passive web-hygiene analysis: CORS misconfiguration, Content-Security-Policy weaknesses, and
- * JSON Web Token defects. All inputs come from observed traffic; nothing is sent.
+ * Passive web-hygiene analysis: CORS misconfiguration, Content-Security-Policy weaknesses, JSON Web
+ * Token defects, session-cookie attribute hygiene, and a CSRF-protection heuristic. All inputs come
+ * from observed traffic; nothing is sent.
  *
  * <p>The analysis cores are pure static methods so they can be unit-tested without Burp.
  */
@@ -33,6 +36,20 @@ final class WebHygieneEngine {
 
         analyzeCsp(response.headerValue("Content-Security-Policy"),
                 isHtml(response.headerValue("Content-Type")), notes);
+
+        for (HttpHeader header : response.headers()) {
+            if (header.name().equalsIgnoreCase("Set-Cookie")) analyzeCookie(header.value(), notes);
+        }
+
+        if (request != null) {
+            List<String> headerNames = new ArrayList<>();
+            for (HttpHeader header : request.headers()) headerNames.add(header.name());
+            List<String> paramNames = new ArrayList<>();
+            try {
+                for (HttpParameter parameter : request.parameters()) paramNames.add(parameter.name());
+            } catch (Exception ignored) {}
+            analyzeCsrf(request.method(), request.headerValue("Cookie"), headerNames, paramNames, notes);
+        }
 
         Set<String> seen = new HashSet<>();
         String haystack = (request == null ? "" : request.toString()) + "\n" + response.toString();
@@ -89,6 +106,91 @@ final class WebHygieneEngine {
         if (!lower.contains("base-uri"))
             notes.add(new Note("LOW", "CSP missing base-uri",
                     "No base-uri directive; <base> injection can redirect relative script loads."));
+    }
+
+    /** Cookie names that suggest session/authentication state, not general preferences. */
+    private static final Set<String> SESSION_COOKIE_HINTS = Set.of(
+            "session", "sess", "sid", "auth", "token", "jwt", "login", "remember", "csrftoken");
+
+    private static final Set<String> STATE_CHANGING_METHODS = Set.of("POST", "PUT", "DELETE", "PATCH");
+
+    private static final Set<String> CSRF_TOKEN_HINTS = Set.of(
+            "csrf", "xsrf", "authenticitytoken", "requestverificationtoken");
+
+    /** Parses one raw {@code Set-Cookie} header value and flags missing attributes on session-like cookies. */
+    static void analyzeCookie(String setCookieValue, List<Note> notes) {
+        if (setCookieValue == null || setCookieValue.isBlank()) return;
+        String[] parts = setCookieValue.split(";");
+        String nameValue = parts[0].trim();
+        int eq = nameValue.indexOf('=');
+        String name = (eq >= 0 ? nameValue.substring(0, eq) : nameValue).trim();
+        if (name.isEmpty() || !looksLikeSessionCookie(name)) return;
+
+        boolean secure = false, httpOnly = false;
+        String sameSite = null;
+        for (int i = 1; i < parts.length; i++) {
+            String attr = parts[i].trim();
+            String attrLower = attr.toLowerCase(Locale.ROOT);
+            if (attrLower.equals("secure")) secure = true;
+            else if (attrLower.equals("httponly")) httpOnly = true;
+            else if (attrLower.startsWith("samesite")) {
+                int eq2 = attr.indexOf('=');
+                sameSite = eq2 >= 0 ? attr.substring(eq2 + 1).trim() : "";
+            }
+        }
+
+        if (!httpOnly) {
+            notes.add(new Note("MEDIUM", "Session cookie missing HttpOnly",
+                    "Cookie \"" + name + "\" has no HttpOnly flag; a script-readable session cookie can be "
+                            + "stolen via any XSS on the same origin."));
+        }
+        if (!secure) {
+            notes.add(new Note("MEDIUM", "Session cookie missing Secure",
+                    "Cookie \"" + name + "\" has no Secure flag; it can be sent over plain HTTP and intercepted "
+                            + "on the network."));
+        }
+        if (sameSite == null || sameSite.isBlank()) {
+            notes.add(new Note("LOW", "Session cookie missing SameSite",
+                    "Cookie \"" + name + "\" sets no SameSite attribute; the browser default varies, so set "
+                            + "SameSite=Strict or Lax explicitly to mitigate CSRF."));
+        } else if (sameSite.equalsIgnoreCase("none")) {
+            notes.add(new Note("LOW", "Session cookie uses SameSite=None",
+                    "Cookie \"" + name + "\" explicitly disables same-site protection (SameSite=None)"
+                            + (secure ? "." : ", and is also missing the Secure flag SameSite=None requires — modern browsers will reject this cookie entirely.")));
+        }
+    }
+
+    private static boolean looksLikeSessionCookie(String name) {
+        String lower = name.toLowerCase(Locale.ROOT);
+        for (String hint : SESSION_COOKIE_HINTS) if (lower.contains(hint)) return true;
+        return false;
+    }
+
+    /**
+     * Flags a state-changing request that relies on a session-like cookie with no anti-CSRF
+     * token/header evidence anywhere in the same request. A heuristic lead, not a confirmed bypass —
+     * the app may enforce CSRF protection some other way this can't see (Origin/Referer checks, a
+     * token name outside {@link #CSRF_TOKEN_HINTS}, etc.).
+     */
+    static void analyzeCsrf(String method, String cookieHeader, List<String> headerNames, List<String> paramNames, List<Note> notes) {
+        if (method == null || !STATE_CHANGING_METHODS.contains(method.toUpperCase(Locale.ROOT))) return;
+        if (cookieHeader == null || cookieHeader.isBlank() || !looksLikeSessionCookie(cookieHeader)) return;
+
+        boolean hasCsrfHeader = headerNames != null && headerNames.stream().anyMatch(WebHygieneEngine::looksLikeCsrfName);
+        boolean hasCsrfParam = paramNames != null && paramNames.stream().anyMatch(WebHygieneEngine::looksLikeCsrfName);
+        if (hasCsrfHeader || hasCsrfParam) return;
+
+        notes.add(new Note("LOW", "Possible missing CSRF protection",
+                "A " + method.toUpperCase(Locale.ROOT) + " request carries a session-like cookie with no "
+                        + "anti-CSRF token/header observed (no csrf/xsrf-named header or parameter). Verify "
+                        + "SameSite cookie attributes and server-side CSRF-token validation for this endpoint."));
+    }
+
+    private static boolean looksLikeCsrfName(String name) {
+        if (name == null) return false;
+        String normalized = name.toLowerCase(Locale.ROOT).replace("-", "").replace("_", "");
+        for (String hint : CSRF_TOKEN_HINTS) if (normalized.contains(hint)) return true;
+        return false;
     }
 
     static void analyzeJwt(String token, List<Note> notes) {
