@@ -5,7 +5,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 final class ReconModel {
-    record FindingRow(String severity, String provider, String rule, String location, String value, String url) {}
+    record FindingRow(String severity, String provider, String rule, String location, String value, String url,
+                      String triage) {
+        FindingRow(String severity, String provider, String rule, String location, String value, String url) {
+            this(severity, provider, rule, location, value, url, "");
+        }
+    }
     record DiscoveryRow(String kind, String url, String source) {}
     record ParameterRow(int score, String type, String name, String classes, String value, String url) {}
     record ReflectionRow(String severity, String parameter, String type, String context,
@@ -15,7 +20,7 @@ final class ReconModel {
     record AssetRow(String type, String value, String source) {}
 
     static final class FindingTableModel extends AbstractTableModel {
-        private final String[] columns = {"Severity", "Provider", "Rule", "Location", "Value", "URL"};
+        private final String[] columns = {"Severity", "Provider", "Rule", "Location", "Value", "URL", "AI Triage"};
         private final List<FindingRow> rows = new ArrayList<>();
         @Override public int getRowCount() { return rows.size(); }
         @Override public int getColumnCount() { return columns.length; }
@@ -24,12 +29,46 @@ final class ReconModel {
             FindingRow r = rows.get(row);
             return switch (col) {
                 case 0 -> r.severity(); case 1 -> r.provider(); case 2 -> r.rule();
-                case 3 -> r.location(); case 4 -> r.value(); default -> r.url();
+                case 3 -> r.location(); case 4 -> r.value(); case 5 -> r.url();
+                default -> r.triage().isBlank() ? "(not triaged)" : r.triage();
             };
         }
         void add(FindingRow row) { rows.add(0, row); fireTableRowsInserted(0, 0); }
         void clear() { int n = rows.size(); rows.clear(); if (n > 0) fireTableDataChanged(); }
         List<FindingRow> snapshot() { return new ArrayList<>(rows); }
+
+        /** Rows not yet triaged, oldest-added first (stable order for building a numbered batch prompt). */
+        List<FindingRow> untriagedSnapshot() {
+            List<FindingRow> out = new ArrayList<>();
+            for (int i = rows.size() - 1; i >= 0; i--) {
+                FindingRow r = rows.get(i);
+                if (r.triage().isBlank()) out.add(r);
+            }
+            return out;
+        }
+
+        /**
+         * Applies triage verdicts keyed by {@link #correlationKey}, replacing each matching row in place
+         * (rows are immutable records, so a match is rebuilt with the new verdict). Rows are matched by
+         * content rather than index since new findings can be prepended between snapshotting a batch for
+         * the LLM and its (asynchronous, possibly slow) response coming back.
+         */
+        void applyTriage(java.util.Map<String, String> verdictsByKey) {
+            boolean changed = false;
+            for (int i = 0; i < rows.size(); i++) {
+                FindingRow r = rows.get(i);
+                String verdict = verdictsByKey.get(correlationKey(r));
+                if (verdict != null && !verdict.equals(r.triage())) {
+                    rows.set(i, new FindingRow(r.severity(), r.provider(), r.rule(), r.location(), r.value(), r.url(), verdict));
+                    changed = true;
+                }
+            }
+            if (changed) fireTableDataChanged();
+        }
+
+        static String correlationKey(FindingRow r) {
+            return r.rule() + "\0" + r.value() + "\0" + r.url();
+        }
     }
 
     static final class DiscoveryTableModel extends AbstractTableModel {

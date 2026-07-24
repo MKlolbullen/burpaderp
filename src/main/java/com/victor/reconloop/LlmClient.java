@@ -21,6 +21,9 @@ import java.util.Map;
  */
 final class LlmClient {
 
+    /** A configured, ready-to-use provider + model + resolved API key (UI field or $ENV already applied). */
+    record LlmCredential(LlmProvider provider, String model, String apiKey) {}
+
     static final String DEFAULT_JS_SYSTEM_PROMPT =
             "You are a senior application-security reviewer assisting an authorised bug-bounty tester. "
             + "Analyse the provided client-side code or HTTP content. Identify: API endpoints and their "
@@ -121,6 +124,73 @@ final class LlmClient {
             + "Rank chains by impact (most severe first). Only propose chains supported by the inventory; clearly "
             + "keep speculative links TENTATIVE. If nothing chains, return {\"chains\":[]}. Do not fabricate "
             + "findings or evidence, and never suggest testing systems the tester is not authorised to assess.";
+
+    /**
+     * False-positive triage prompt: reviews a numbered batch of already-filed findings and judges
+     * each on its own merits, purely from the evidence given — it must not assume prior findings in
+     * the batch are correct just because they were flagged by a heuristic.
+     */
+    static final String TRIAGE_SYSTEM_PROMPT =
+            "You are a senior application-security triager reviewing a batch of findings raised by an "
+            + "automated scanner (regex/heuristic secret detection, response-disclosure signals, header "
+            + "hygiene checks, endpoint-exposure detection, etc.) for an AUTHORISED security assessment. "
+            + "Heuristic scanners over-report: judge each finding independently on the evidence given, not "
+            + "on the fact that a rule fired.\n\n"
+            + "For each numbered finding, decide whether it is a real, actionable issue or a false/noise "
+            + "positive (a placeholder value, a non-sensitive default, a benign coincidental pattern match, "
+            + "informational noise with no real risk, etc.).\n\n"
+            + "Return STRICT JSON ONLY — no prose, no markdown, no code fences. Use exactly this schema:\n"
+            + "{\"verdicts\":[{"
+            + "\"index\":1,"
+            + "\"verdict\":\"LIKELY_TP|UNCERTAIN|LIKELY_FP\","
+            + "\"reasoning\":\"one concise sentence citing the specific evidence\""
+            + "}]}\n\n"
+            + "Include exactly one entry per finding number given, in any order. LIKELY_TP means a real "
+            + "practitioner should act on it; LIKELY_FP means it is very unlikely to be a genuine issue; "
+            + "UNCERTAIN means the evidence given isn't enough to tell either way. Do not fabricate reasoning "
+            + "not supported by the given evidence.";
+
+    /** One finding's ensemble-independent verdict from a single LLM call. */
+    record TriageVerdict(int index, String verdict, String reasoning) {}
+
+    /** Result of triaging one batch with one provider. */
+    record TriageBatchResult(List<TriageVerdict> verdicts, String error) {}
+
+    /**
+     * Sends a numbered batch-of-findings prompt to one provider and parses its per-finding verdicts.
+     * Callers fan this out across every enabled credential themselves for ensemble/majority-vote triage.
+     */
+    TriageBatchResult triage(LlmCredential credential, String batchPrompt) {
+        String raw = complete(credential.provider(), credential.model(), credential.apiKey(), TRIAGE_SYSTEM_PROMPT, batchPrompt);
+        if (raw == null || raw.startsWith("[error]") || raw.startsWith("[HTTP") || raw.startsWith("[warning]")) {
+            return new TriageBatchResult(List.of(), raw == null ? "[error] no response" : raw);
+        }
+        List<TriageVerdict> verdicts = parseTriageVerdicts(raw);
+        return new TriageBatchResult(verdicts, verdicts.isEmpty() ? "[no verdicts parsed] " + snippet(raw) : null);
+    }
+
+    static List<TriageVerdict> parseTriageVerdicts(String raw) {
+        List<TriageVerdict> out = new ArrayList<>();
+        String json = isolateJson(raw);
+        if (json == null) return out;
+        try {
+            Object root = Json.parse(json);
+            Map<String, Object> obj = Json.asObject(root);
+            List<Object> arr = obj != null ? Json.asArray(obj.get("verdicts")) : Json.asArray(root);
+            if (arr == null) return out;
+            for (Object item : arr) {
+                Map<String, Object> v = Json.asObject(item);
+                if (v == null) continue;
+                Object idxRaw = v.get("index");
+                int index = idxRaw instanceof Number n ? n.intValue() : -1;
+                if (index < 0) continue;
+                out.add(new TriageVerdict(index, nz(Json.str(v, "verdict"), "UNCERTAIN"), nz(Json.str(v, "reasoning"), "")));
+            }
+        } catch (Exception ignored) {
+            // malformed JSON -> caller falls back to the raw error message
+        }
+        return out;
+    }
 
     private static final int MAX_OUTPUT_TOKENS = 4096;
     private static final int MAX_INPUT_CHARS = 200_000;
