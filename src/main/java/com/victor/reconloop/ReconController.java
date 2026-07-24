@@ -822,6 +822,7 @@ final class ReconController implements HttpHandler {
         mineWebpackChunks(request.url(), response);
         scanDependencies(request.url(), response, pair);
         scanDomXss(request.url(), response, pair);
+        scanDataExposure(request.url(), request, response, pair);
         ingestApiSpec(request.url(), response, pair);
 
         short code = response.statusCode();
@@ -985,6 +986,83 @@ final class ReconController implements HttpHandler {
             }
         }
         return out;
+    }
+
+    private void scanDataExposure(String url, HttpRequest request, HttpResponse response, HttpRequestResponse pair) {
+        try {
+            for (AuditIssue issue : dataExposureIssues(url, request, response, pair)) addToSiteMap(issue);
+        } catch (Exception e) {
+            api.logging().logToError("Data-exposure scan failed for " + url, e);
+        }
+    }
+
+    /**
+     * Builds excessive-data-exposure (response) and mass-assignment-candidate (request) issues from
+     * JSON field names; adds a UI row only when a finding is newly built.
+     */
+    private List<AuditIssue> dataExposureIssues(String url, HttpRequest request, HttpResponse response, HttpRequestResponse pair) {
+        List<AuditIssue> out = new ArrayList<>();
+        String contentType = response.headerValue("Content-Type");
+        boolean jsonish = contentType != null && contentType.toLowerCase(Locale.ROOT).contains("json");
+        String body = response.bodyToString();
+        if (jsonish || looksLikeJson(body)) {
+            for (DataExposureEngine.Field field : DataExposureEngine.excessiveDataExposure(body)) {
+                addIfPresent(out, buildDataExposureIssue(field, url, pair, true));
+            }
+        }
+        if (request != null && isStateChangingMethod(request.method())) {
+            String reqContentType = request.headerValue("Content-Type");
+            boolean reqJsonish = reqContentType != null && reqContentType.toLowerCase(Locale.ROOT).contains("json");
+            String reqBody = request.bodyToString();
+            if (reqJsonish || looksLikeJson(reqBody)) {
+                for (DataExposureEngine.Field field : DataExposureEngine.massAssignmentCandidates(reqBody)) {
+                    addIfPresent(out, buildDataExposureIssue(field, url, pair, false));
+                }
+            }
+        }
+        return out;
+    }
+
+    private AuditIssue buildDataExposureIssue(DataExposureEngine.Field field, String url, HttpRequestResponse pair, boolean isExposure) {
+        String kind = isExposure ? "excessive data exposure" : "mass-assignment candidate";
+        AuditIssue issue = reporter.buildIfNew(
+                (isExposure ? "exposure-issue\0" : "massassign-issue\0") + url + "\0" + field.path(),
+                kind + " (" + field.key() + ")",
+                "<b>" + (isExposure ? "Sensitive field present in an API response" : "Privileged field present in a request body") + "</b><br>"
+                        + "Field: <code>" + escape(field.path()) + "</code><br>"
+                        + "Value preview: <code>" + escape(field.valuePreview()) + "</code><br><br>"
+                        + (isExposure
+                            ? "This field name suggests sensitive data (credentials, PII, or payment/financial data) a "
+                                    + "typical client response shouldn't need to include. Confirm whether the consuming "
+                                    + "client actually needs this field, and remove it from the response if not."
+                            : "This field name suggests a privileged/server-controlled attribute (role, verification "
+                                    + "state, balance, etc.). If the server blindly binds request fields to its data "
+                                    + "model, an attacker could set this directly. Confirm the server explicitly "
+                                    + "allow-lists writable fields."),
+                isExposure
+                        ? "Remove unnecessary sensitive fields from API responses (use an explicit response DTO/serializer allow-list rather than returning the full internal model)."
+                        : "Explicitly allow-list which client-supplied fields may be bound to the server-side model; never mass-bind/deserialize the whole request body onto a privileged entity.",
+                url, isExposure ? AuditIssueSeverity.MEDIUM : AuditIssueSeverity.LOW, AuditIssueConfidence.TENTATIVE,
+                "Recon Hound scans JSON " + (isExposure ? "responses" : "request bodies") + " for field names that suggest " + kind + ".",
+                "This is a field-name heuristic, not a confirmed vulnerability; verify the field is actually attacker-reachable and unintended before treating it as a real finding.",
+                pair);
+        if (issue != null) {
+            addActiveRow(isExposure ? "MEDIUM" : "LOW", isExposure ? "DataExposure" : "MassAssignment",
+                    field.key(), "candidate", field.path() + " = " + field.valuePreview(), url);
+        }
+        return issue;
+    }
+
+    private static boolean looksLikeJson(String body) {
+        if (body == null) return false;
+        String trimmed = body.strip();
+        return trimmed.startsWith("{") || trimmed.startsWith("[");
+    }
+
+    private static boolean isStateChangingMethod(String method) {
+        if (method == null) return false;
+        String upper = method.toUpperCase(Locale.ROOT);
+        return upper.equals("POST") || upper.equals("PUT") || upper.equals("PATCH");
     }
 
     /** Builds SCA issues for a response body; adds a UI row only when a finding is newly built. */
@@ -2104,6 +2182,7 @@ final class ReconController implements HttpHandler {
             }
             issues.addAll(scaIssues(url, response.bodyToString(), rr));
             issues.addAll(domXssIssues(url, response.bodyToString(), rr));
+            issues.addAll(dataExposureIssues(url, request, response, rr));
         } catch (Exception e) {
             api.logging().logToError("Passive audit failed for " + url, e);
         }
