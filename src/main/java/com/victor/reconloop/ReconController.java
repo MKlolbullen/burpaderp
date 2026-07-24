@@ -946,14 +946,20 @@ final class ReconController implements HttpHandler {
     /** Builds DOM-XSS issues; adds a UI row only when a finding is newly built. */
     private List<AuditIssue> domXssIssues(String url, String body, HttpRequestResponse pair) {
         List<AuditIssue> out = new ArrayList<>();
+        int bodyOffset = (pair != null && pair.hasResponse()) ? pair.response().bodyOffset() : 0;
         for (DomXssEngine.DomFinding finding : DomXssEngine.analyze(body)) {
+            int start = bodyOffset + finding.start();
+            int end = bodyOffset + finding.end();
+            String located = (pair != null && pair.hasResponse())
+                    ? locatedEvidence(pair.response().toString(), start, end, false) : "";
+            HttpRequestResponse evidence = IssueReporter.withResponseEvidence(pair, start, end);
             AuditIssue issue = reporter.buildIfNew(
                     "domxss\0" + url + "\0" + finding.sink() + "\0" + finding.source(),
                     "potential DOM XSS (" + finding.source() + " -> " + finding.sink() + ")",
                     "<b>Potential DOM-based XSS: a tainted source flows to a dangerous sink</b><br>"
                             + "Source: <code>" + escape(finding.source()) + "</code><br>"
                             + "Sink: <code>" + escape(finding.sink()) + "</code><br>"
-                            + "Statement: <code>" + escape(finding.snippet()) + "</code><br><br>"
+                            + "Statement: <code>" + escape(finding.snippet()) + "</code>" + located + "<br><br>"
                             + "A user-controllable value reaches an HTML/script sink in the same statement. If it is not "
                             + "sanitised/encoded, an attacker can execute script in the victim's browser.",
                     "Encode/sanitise the value for its sink (use textContent instead of innerHTML, DOMPurify for HTML) "
@@ -961,7 +967,7 @@ final class ReconController implements HttpHandler {
                     url, AuditIssueSeverity.MEDIUM, AuditIssueConfidence.TENTATIVE,
                     "Recon Hound flags JS statements where a known DOM XSS source co-occurs with a dangerous sink.",
                     "Heuristic co-occurrence, not proven dataflow; confirm the source actually reaches the sink.",
-                    pair);
+                    evidence);
             if (issue != null) {
                 addActiveRow("MEDIUM", "DOM-XSS", finding.sink(), "source->sink",
                         finding.source() + " -> " + finding.sink(), url);
@@ -1601,16 +1607,19 @@ final class ReconController implements HttpHandler {
         }
         if (vectorHtml.isEmpty()) vectorHtml.append("<li>No pre-canned vector matches the surviving character set.</li>");
 
+        String located = (pair != null && pair.hasResponse())
+                ? locatedEvidence(pair.response().toString(), reflection.start(), reflection.end(), false) : "";
         String detail = "<b>Reflected input candidate for cross-site scripting</b><br>"
                 + "Parameter: <code>" + escape(reflection.parameter()) + "</code> (" + escape(reflection.type()) + ")<br>"
                 + "Reflection context: " + escape(reflection.context().label()) + "<br>"
                 + "Characters surviving unencoded: <code>" + escape(reflection.survivingChars().isEmpty()
                         ? "(none literal)" : reflection.survivingChars()) + "</code><br>"
                 + "Occurrences: " + reflection.occurrences() + "<br>"
-                + "Reflected value: <code>" + escape(reflection.valuePreview()) + "</code><br><br>"
+                + "Reflected value: <code>" + escape(reflection.valuePreview()) + "</code>" + located + "<br><br>"
                 + "Context-appropriate vectors from the XSS cheat sheet to validate manually:<ul>"
                 + vectorHtml + "</ul>";
 
+        HttpRequestResponse evidence = IssueReporter.withResponseEvidence(pair, reflection.start(), reflection.end());
         return reporter.buildIfNew(
                 "reflect-issue\0" + reflection.url() + "\0" + reflection.parameter()
                         + "\0" + reflection.type() + "\0" + reflection.context().label(),
@@ -1621,7 +1630,7 @@ final class ReconController implements HttpHandler {
                 reflection.url(), severity, AuditIssueConfidence.TENTATIVE,
                 "Recon Hound passively maps parameter values that are reflected into responses and classifies the sink context.",
                 "Reflection is necessary but not sufficient for XSS; confirm by injecting a context-appropriate vector against an authorised target.",
-                pair
+                evidence
         );
     }
 
