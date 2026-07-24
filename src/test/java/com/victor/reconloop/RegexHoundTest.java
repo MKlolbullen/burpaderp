@@ -37,7 +37,9 @@ public class RegexHoundTest {
 
     @Test
     public void detectsGenericJwtShape() {
-        String jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dGhpc2lzYXNpZ25hdHVyZQ";
+        // Concatenated (rather than one literal) so this fake fixture never appears as a single
+        // contiguous JWT-shaped string in the source, which trips secret-scanning tools.
+        String jwt = "eyJhbGciOiJIUzI1NiJ9" + "." + "eyJzdWIiOiIxMjM0NTY3ODkwIn0" + "." + "dGhpc2lzYXNpZ25hdHVyZQ";
         List<RegexHound.Finding> findings = hound.scan("token=" + jwt, "response", "u", false);
 
         assertTrue(findings.stream().anyMatch(f -> f.rule().id().equals("jwt") && f.value().equals(jwt)));
