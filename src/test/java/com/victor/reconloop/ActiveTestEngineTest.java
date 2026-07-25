@@ -1,0 +1,234 @@
+package com.victor.reconloop;
+
+import org.junit.Test;
+
+import java.util.Optional;
+
+import static org.junit.Assert.*;
+
+public class ActiveTestEngineTest {
+
+    // ---- detectSstiEval ----
+
+    @Test
+    public void detectsJinjaStyleEvaluation() {
+        String body = "result: rhs5439she done";
+        Optional<String> engine = ActiveTestEngine.detectSstiEval(body, "rhs{{7*777}}she");
+        assertTrue(engine.isPresent());
+        assertTrue(engine.get().toLowerCase().contains("jinja"));
+    }
+
+    @Test
+    public void detectsElStyleEvaluation() {
+        String body = "x=rhs5439she";
+        Optional<String> engine = ActiveTestEngine.detectSstiEval(body, "rhs${7*777}she");
+        assertTrue(engine.isPresent());
+        assertTrue(engine.get().toLowerCase().contains("el/freemarker"));
+    }
+
+    @Test
+    public void noEvaluationMarkerMeansEmpty() {
+        assertTrue(ActiveTestEngine.detectSstiEval("nothing here", "rhs{{7*777}}she").isEmpty());
+        assertTrue(ActiveTestEngine.detectSstiEval(null, "rhs{{7*777}}she").isEmpty());
+    }
+
+    // ---- survivingXssChars ----
+
+    @Test
+    public void findsAllFourSurvivingMetacharacters() {
+        String token = "rhx1";
+        String body = "before " + token + "<img>\"' after";
+        assertEquals("<>\"'", ActiveTestEngine.survivingXssChars(body, token));
+    }
+
+    @Test
+    public void encodedMetacharactersDoNotSurvive() {
+        String token = "rhx1";
+        String body = "before " + token + "&lt;img&gt;&quot;&#39; after";
+        assertEquals("", ActiveTestEngine.survivingXssChars(body, token));
+    }
+
+    @Test
+    public void tokenAbsentMeansNoSurvivors() {
+        assertEquals("", ActiveTestEngine.survivingXssChars("no token here", "rhx1"));
+        assertEquals("", ActiveTestEngine.survivingXssChars(null, "rhx1"));
+    }
+
+    // ---- fingerprintWaf ----
+
+    @Test
+    public void identifiesCloudflareFromBodySignature() {
+        Optional<String> waf = ActiveTestEngine.fingerprintWaf(403, "Attention Required! | Cloudflare", null);
+        assertEquals(Optional.of("Cloudflare"), waf);
+    }
+
+    @Test
+    public void identifiesAkamaiFromServerHeader() {
+        Optional<String> waf = ActiveTestEngine.fingerprintWaf(403, "blocked", "AkamaiGHost");
+        assertEquals(Optional.of("Akamai"), waf);
+    }
+
+    @Test
+    public void genericBlockStatusWithoutSignatureIsStillFlagged() {
+        Optional<String> waf = ActiveTestEngine.fingerprintWaf(406, "nope", null);
+        assertTrue(waf.isPresent());
+        assertTrue(waf.get().contains("generic"));
+    }
+
+    @Test
+    public void ordinaryResponseIsNotFingerprinted() {
+        assertTrue(ActiveTestEngine.fingerprintWaf(200, "<html>ok</html>", "nginx").isEmpty());
+    }
+
+    // ---- detectOpenRedirect ----
+
+    @Test
+    public void redirectToMarkerHostViaHttpsIsDetected() {
+        Optional<String> hit = ActiveTestEngine.detectOpenRedirect(302, "https://rh-redirect.example.net/", "rh-redirect.example.net");
+        assertTrue(hit.isPresent());
+    }
+
+    @Test
+    public void redirectToMarkerHostViaSchemeRelativeIsDetected() {
+        Optional<String> hit = ActiveTestEngine.detectOpenRedirect(301, "//rh-redirect.example.net/path", "rh-redirect.example.net");
+        assertTrue(hit.isPresent());
+    }
+
+    @Test
+    public void markerOnlyInQueryValueIsNotFalselyFlagged() {
+        Optional<String> hit = ActiveTestEngine.detectOpenRedirect(302, "/login?next=rh-redirect.example.net", "rh-redirect.example.net");
+        assertTrue(hit.isEmpty());
+    }
+
+    @Test
+    public void nonRedirectStatusIsIgnored() {
+        assertTrue(ActiveTestEngine.detectOpenRedirect(200, "https://rh-redirect.example.net/", "rh-redirect.example.net").isEmpty());
+    }
+
+    @Test
+    public void missingLocationHeaderIsIgnored() {
+        assertTrue(ActiveTestEngine.detectOpenRedirect(302, null, "rh-redirect.example.net").isEmpty());
+    }
+
+    // ---- encodeCorrelation / decodeCorrelation ----
+
+    @Test
+    public void correlationRoundTripsThroughEncodeDecode() {
+        String encoded = ActiveTestEngine.encodeCorrelation("SSRF", "url", "https://example.com/a|b");
+        String[] decoded = ActiveTestEngine.decodeCorrelation(encoded);
+        assertArrayEquals(new String[]{"SSRF", "url", "https://example.com/a|b"}, decoded);
+    }
+
+    @Test
+    public void decodeRejectsUnrelatedCustomData() {
+        assertNull(ActiveTestEngine.decodeCorrelation("something-else"));
+        assertNull(ActiveTestEngine.decodeCorrelation(null));
+    }
+
+    // ---- containsSqlError ----
+
+    @Test
+    public void recognisesMysqlErrorSignature() {
+        assertTrue(ActiveTestEngine.containsSqlError("You have an error in your SQL syntax; check the manual"));
+    }
+
+    @Test
+    public void recognisesOracleErrorCode() {
+        assertTrue(ActiveTestEngine.containsSqlError("ORA-00933: SQL command not properly ended"));
+    }
+
+    @Test
+    public void recognisesMssqlOdbcSignature() {
+        assertTrue(ActiveTestEngine.containsSqlError("Microsoft OLE DB Provider for ODBC Drivers error '80040e14'"));
+    }
+
+    @Test
+    public void ordinaryBodyHasNoSqlErrorSignature() {
+        assertFalse(ActiveTestEngine.containsSqlError("<html><body>Welcome back</body></html>"));
+        assertFalse(ActiveTestEngine.containsSqlError(null));
+        assertFalse(ActiveTestEngine.containsSqlError(""));
+    }
+
+    // ---- closeEnough ----
+
+    @Test
+    public void identicalBodiesAreCloseEnough() {
+        assertTrue(ActiveTestEngine.closeEnough("same page content", "same page content"));
+    }
+
+    @Test
+    public void slightlyDifferentLengthWithinToleranceIsCloseEnough() {
+        String a = "x".repeat(1000);
+        String b = "x".repeat(1004);
+        assertTrue(ActiveTestEngine.closeEnough(a, b));
+    }
+
+    @Test
+    public void substantiallyDifferentLengthIsNotCloseEnough() {
+        String a = "x".repeat(1000);
+        String b = "x".repeat(50);
+        assertFalse(ActiveTestEngine.closeEnough(a, b));
+    }
+
+    @Test
+    public void nullBodiesAreNeverCloseEnough() {
+        assertFalse(ActiveTestEngine.closeEnough(null, "x"));
+        assertFalse(ActiveTestEngine.closeEnough("x", null));
+    }
+
+    // ---- looksBooleanBased ----
+
+    @Test
+    public void classicBooleanBlindDivergenceIsDetected() {
+        String baseline = "<html>1 user found: alice</html>";
+        String trueBody = "<html>1 user found: alice</html>";
+        String falseBody = "<html>0 users found</html>";
+        assertTrue(ActiveTestEngine.looksBooleanBased(baseline, trueBody, falseBody));
+    }
+
+    @Test
+    public void identicalTrueAndFalseResponsesAreNotBooleanBlind() {
+        String baseline = "<html>page</html>";
+        String trueBody = "<html>page</html>";
+        String falseBody = "<html>page</html>";
+        assertFalse(ActiveTestEngine.looksBooleanBased(baseline, trueBody, falseBody));
+    }
+
+    @Test
+    public void trueDivergingFromBaselineIsNotBooleanBlind() {
+        String baseline = "<html>1 user found: alice</html>";
+        String trueBody = "<html>error</html>";
+        String falseBody = "<html>error</html>";
+        assertFalse(ActiveTestEngine.looksBooleanBased(baseline, trueBody, falseBody));
+    }
+
+    @Test
+    public void nullBodiesProduceNoBooleanBlindVerdict() {
+        assertFalse(ActiveTestEngine.looksBooleanBased(null, "a", "b"));
+        assertFalse(ActiveTestEngine.looksBooleanBased("a", null, "b"));
+        assertFalse(ActiveTestEngine.looksBooleanBased("a", "b", null));
+    }
+
+    // ---- looksTimeBased ----
+
+    @Test
+    public void fullFiveSecondDelayIsDetected() {
+        assertTrue(ActiveTestEngine.looksTimeBased(150, 5100, 5));
+    }
+
+    @Test
+    public void delayWithinToleranceIsStillDetected() {
+        assertTrue(ActiveTestEngine.looksTimeBased(100, 4200, 5)); // 4.1s delta, within 1s tolerance of 5s
+    }
+
+    @Test
+    public void noMeaningfulDelayIsNotDetected() {
+        assertFalse(ActiveTestEngine.looksTimeBased(150, 300, 5));
+    }
+
+    @Test
+    public void slowBaselineDoesNotFalselyTriggerOnAbsoluteTimeAlone() {
+        // Both requests are slow (e.g. a loaded server), but there's no meaningful delta.
+        assertFalse(ActiveTestEngine.looksTimeBased(4800, 4900, 5));
+    }
+}
