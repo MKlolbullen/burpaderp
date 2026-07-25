@@ -8,6 +8,7 @@ import burp.api.montoya.http.message.params.HttpParameter;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.responses.HttpResponse;
 
+import java.net.URI;
 import java.util.*;
 import java.util.regex.Pattern;
 
@@ -61,6 +62,12 @@ final class ActiveTestEngine {
             "'; WAITFOR DELAY '0:0:5'-- -"); // MSSQL
     private static final int SQLI_TIME_DELAY_SECONDS = 5;
 
+    // CORS: crafted attacker-controlled Origin headers targeting the specific validation bugs real
+    // apps ship — naive contains/startsWith/endsWith checks, missing dot-boundary requirements, and
+    // scheme-blind comparisons — not just whatever Origin happened to appear in observed traffic.
+    private static final String CORS_ARBITRARY_ORIGIN = "https://recon-hound-cors-probe.invalid";
+    private static final String CORS_NULL_ORIGIN = "null";
+
     private final MontoyaApi api;
     private final long throttleMillis;
     private volatile CollaboratorClient collaborator;
@@ -105,6 +112,7 @@ final class ActiveTestEngine {
             if (budget > 0) budget -= testSqli(base, parameter, findings);
         }
         if (budget > 0) budget -= testHostHeaderInjection(base, findings);
+        if (budget > 0) budget -= testCors(base, findings);
         return findings;
     }
 
@@ -275,6 +283,40 @@ final class ActiveTestEngine {
         return 1;
     }
 
+    /**
+     * Actively confirms CORS misconfiguration by replaying {@code base} with crafted, attacker-chosen
+     * {@code Origin} headers and checking whether the server trusts them — much stronger evidence than
+     * passively observing whatever Origin happened to appear in traffic (see
+     * {@link WebHygieneEngine#analyzeCors}), since it specifically targets naive origin-validation bugs.
+     */
+    private int testCors(HttpRequest base, List<ActiveFinding> out) {
+        List<String> origins = craftCorsProbeOrigins(hostOf(base.url()));
+        int sent = 0;
+        for (String origin : origins) {
+            try {
+                if (!api.scope().isInScope(base.url())) break;
+                HttpRequestResponse rr = api.http().sendRequest(base.withUpdatedHeader("Origin", origin));
+                sent++;
+                throttle();
+                if (rr == null || rr.response() == null) continue;
+                HttpResponse response = rr.response();
+                String acao = response.headerValue("Access-Control-Allow-Origin");
+                if (corsReflectsOrigin(origin, acao)) {
+                    String acac = response.headerValue("Access-Control-Allow-Credentials");
+                    boolean credentials = acac != null && acac.trim().equalsIgnoreCase("true");
+                    String kind = CORS_NULL_ORIGIN.equalsIgnoreCase(origin) ? "null Origin" : "crafted attacker Origin (" + origin + ")";
+                    out.add(new ActiveFinding(credentials ? "HIGH" : "MEDIUM", "CORS", "Origin",
+                            "Server reflected a " + kind + " in Access-Control-Allow-Origin"
+                                    + (credentials ? " with Allow-Credentials:true — full cross-origin credentialed read." : "."),
+                            true, base.url()));
+                }
+            } catch (Exception e) {
+                api.logging().logToError("CORS probe failed for " + base.url(), e);
+            }
+        }
+        return sent;
+    }
+
     private HttpResponse sendMutated(HttpRequest base, HttpParameter parameter, String value) {
         try {
             if (!api.scope().isInScope(base.url())) return null;
@@ -397,6 +439,41 @@ final class ActiveTestEngine {
     static boolean looksTimeBased(long baselineMillis, long payloadMillis, int delaySeconds) {
         long expectedDelta = delaySeconds * 1000L;
         return (payloadMillis - baselineMillis) >= expectedDelta - 1000;
+    }
+
+    /**
+     * Attacker-chosen {@code Origin} values worth trying against {@code host}: an origin wholly
+     * unrelated to the target (catches "trust anything"), the {@code null} origin (sandboxed
+     * iframes/data: URLs), and — when the host is known — three payloads that specifically defeat
+     * common naive origin-validation bugs: appending an attacker suffix after the trusted host (naive
+     * {@code startsWith}/{@code contains} checks), prepending "evil" directly onto the host with no
+     * separator (naive {@code endsWith}/{@code contains} checks missing a dot-boundary requirement),
+     * and downgrading the scheme (checks that compare only the host, ignoring scheme).
+     */
+    static List<String> craftCorsProbeOrigins(String host) {
+        List<String> origins = new ArrayList<>();
+        origins.add(CORS_ARBITRARY_ORIGIN);
+        origins.add(CORS_NULL_ORIGIN);
+        if (host != null && !host.isBlank()) {
+            origins.add("https://" + host + ".recon-hound-probe.invalid");
+            origins.add("https://evil" + host);
+            origins.add("http://" + host);
+        }
+        return origins;
+    }
+
+    /** True if the server trusted our crafted Origin by reflecting it back verbatim. */
+    static boolean corsReflectsOrigin(String sentOrigin, String acao) {
+        return sentOrigin != null && acao != null && acao.trim().equalsIgnoreCase(sentOrigin.trim());
+    }
+
+    /** Best-effort host extraction for building host-dependent CORS bypass payloads; null on failure. */
+    static String hostOf(String url) {
+        try {
+            return url == null ? null : URI.create(url).getHost();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     static String encodeCorrelation(String testClass, String parameter, String url) {
