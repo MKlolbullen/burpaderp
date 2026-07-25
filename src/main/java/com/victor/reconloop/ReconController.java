@@ -873,6 +873,7 @@ final class ReconController implements HttpHandler {
         scanDomXss(request.url(), response, pair);
         scanDataExposure(request.url(), request, response, pair);
         scanSensitivePaths(request.url(), response, pair);
+        scanFileUpload(request, response, pair);
         scanOAuth(request, pair);
         scanSaml(request, pair);
         ingestApiSpec(request.url(), response, pair);
@@ -1218,6 +1219,75 @@ final class ReconController implements HttpHandler {
             }
         } catch (Exception e) {
             api.logging().logToError("Sensitive-path scan failed for " + url, e);
+        }
+    }
+
+    private void scanFileUpload(HttpRequest request, HttpResponse response, HttpRequestResponse pair) {
+        try {
+            String contentType = request.headerValue("Content-Type");
+            if (!FileUploadEngine.looksLikeMultipartFileUpload(contentType)) return;
+            String boundary = FileUploadEngine.extractBoundary(contentType);
+            if (boundary == null) return;
+
+            List<FileUploadEngine.UploadedFile> files =
+                    FileUploadEngine.extractUploadedFiles(request.bodyToString(), boundary);
+            if (files.isEmpty()) return;
+
+            short code = response.statusCode();
+            boolean accepted = code >= 200 && code < 300;
+            String url = request.url();
+
+            for (FileUploadEngine.UploadedFile file : files) {
+                boolean dangerous = FileUploadEngine.isDangerousExtension(file.filename());
+                boolean mimeMismatch = FileUploadEngine.mimeExtensionMismatch(file.filename(), file.declaredContentType());
+                Optional<String> stored = accepted
+                        ? FileUploadEngine.findStoredDangerousPath(response.bodyToString(), file.filename())
+                        : Optional.empty();
+
+                if (dangerous && accepted && issueDedupe.add("upload-dangerous\0" + url + "\0" + file.filename())) {
+                    addSyntheticFinding(stored.isPresent() ? "HIGH" : "MEDIUM", "upload", "Executable file type accepted",
+                            "response", "\"" + file.filename() + "\" (part \"" + file.partName() + "\")"
+                                    + stored.map(p -> "; stored at " + p).orElse(""), url);
+                    reporter.report("upload-dangerous-issue\0" + url + "\0" + file.filename(),
+                            "Executable/script file type accepted by upload endpoint",
+                            "<b>An upload with an executable/script extension was accepted</b><br>"
+                                    + "URL: <code>" + escape(url) + "</code><br>"
+                                    + "Filename: <code>" + escape(file.filename()) + "</code> (part \""
+                                    + escape(file.partName()) + "\")<br>"
+                                    + stored.map(p -> "Stored at: <code>" + escape(p) + "</code><br>").orElse("")
+                                    + "<br>The server accepted a file whose extension (php/jsp/asp/exe/sh/...) is "
+                                    + "commonly executed directly if reachable, rather than merely served as static content.",
+                            "Validate uploads by content (not just extension/declared MIME type), store them outside "
+                                    + "the webroot or with execution disabled, and serve them through a handler that "
+                                    + "sets a safe Content-Disposition/Content-Type.",
+                            url, stored.isPresent() ? AuditIssueSeverity.HIGH : AuditIssueSeverity.MEDIUM,
+                            stored.isPresent() ? AuditIssueConfidence.FIRM : AuditIssueConfidence.TENTATIVE,
+                            "Recon Hound inspects multipart file-upload requests for executable/script filename extensions.",
+                            "Acceptance alone doesn't confirm the file is served as executable code; verify reachability.",
+                            pair);
+                }
+
+                if (mimeMismatch && issueDedupe.add("upload-mime-mismatch\0" + url + "\0" + file.filename())) {
+                    addSyntheticFinding("MEDIUM", "upload", "Upload content-type/extension mismatch", "request",
+                            "\"" + file.filename() + "\" declared as " + file.declaredContentType(), url);
+                    reporter.report("upload-mime-mismatch-issue\0" + url + "\0" + file.filename(),
+                            "File upload declares a benign content-type for a dangerous extension",
+                            "<b>An uploaded file's extension and declared Content-Type disagree</b><br>"
+                                    + "Filename: <code>" + escape(file.filename()) + "</code><br>"
+                                    + "Declared Content-Type: <code>" + escape(file.declaredContentType()) + "</code><br><br>"
+                                    + "This is the shape of a classic content-type-only upload-filter bypass attempt: "
+                                    + "the declared MIME type looks benign, but the extension is one many servers "
+                                    + "execute directly regardless of what MIME type was declared alongside it.",
+                            "Never trust the client-declared Content-Type; validate uploads by actual content/magic "
+                                    + "bytes and enforce an extension allow-list server-side.",
+                            url, AuditIssueSeverity.MEDIUM, AuditIssueConfidence.FIRM,
+                            "Recon Hound compares an uploaded file's extension against its declared multipart Content-Type.",
+                            "Flags the mismatch itself; whether the server actually executes the file must be confirmed separately.",
+                            pair);
+                }
+            }
+        } catch (Exception e) {
+            api.logging().logToError("File-upload scan failed for " + request.url(), e);
         }
     }
 

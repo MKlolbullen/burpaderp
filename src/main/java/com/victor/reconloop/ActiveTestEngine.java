@@ -127,6 +127,7 @@ final class ActiveTestEngine {
         if (budget > 0) budget -= testHostHeaderInjection(base, findings);
         if (budget > 0) budget -= testCors(base, findings);
         if (budget > 0) budget -= testRateLimit(base, findings);
+        if (budget > 0) budget -= testFileUploadBypass(base, findings);
         return findings;
     }
 
@@ -366,6 +367,52 @@ final class ActiveTestEngine {
                     statuses.size() + " consecutive identical requests to a sensitive-looking endpoint all "
                             + "succeeded with no rate-limit signal (no 429/503, Retry-After header, or lockout "
                             + "wording) observed", true, base.url()));
+        }
+        return sent;
+    }
+
+    /**
+     * Replays an already-observed multipart file-upload request with its filename renamed to a small
+     * set of extension-bypass variants (double extensions, case variants, alternate PHP-executable
+     * extensions, legacy null-byte truncation). Only mutates the filename -- the rest of the request,
+     * including the actual file bytes, is left exactly as observed. A 2xx response is a lead; finding
+     * the renamed filename echoed back with its dangerous extension intact in the response body
+     * confirms it.
+     */
+    private int testFileUploadBypass(HttpRequest base, List<ActiveFinding> out) {
+        String contentType = base.headerValue("Content-Type");
+        if (!FileUploadEngine.looksLikeMultipartFileUpload(contentType)) return 0;
+        String boundary = FileUploadEngine.extractBoundary(contentType);
+        if (boundary == null) return 0;
+        String body = base.bodyToString();
+        List<FileUploadEngine.UploadedFile> files = FileUploadEngine.extractUploadedFiles(body, boundary);
+        if (files.isEmpty()) return 0;
+
+        int sent = 0;
+        for (FileUploadEngine.UploadedFile file : files) {
+            if (FileUploadEngine.isDangerousExtension(file.filename())) continue; // already dangerous; nothing to bypass
+            for (String variant : FileUploadEngine.bypassFilenameVariants(file.filename())) {
+                String mutatedBody = FileUploadEngine.withRenamedFilename(body, file.filename(), variant);
+                if (mutatedBody.equals(body)) continue;
+                try {
+                    if (!api.scope().isInScope(base.url())) return sent;
+                    HttpRequestResponse rr = api.http().sendRequest(base.withBody(mutatedBody));
+                    sent++;
+                    throttle();
+                    if (rr == null || rr.response() == null) continue;
+                    int status = rr.response().statusCode();
+                    if (status >= 200 && status < 300) {
+                        Optional<String> stored = FileUploadEngine.findStoredDangerousPath(rr.response().bodyToString(), variant);
+                        out.add(new ActiveFinding(stored.isPresent() ? "HIGH" : "MEDIUM", "FileUpload", file.partName(),
+                                "Renamed upload \"" + file.filename() + "\" -> \"" + variant + "\" was accepted (status "
+                                        + status + ")" + stored.map(p -> "; stored at " + p).orElse(""),
+                                stored.isPresent(), base.url()));
+                        if (stored.isPresent()) break; // strongest possible signal for this file already found
+                    }
+                } catch (Exception e) {
+                    api.logging().logToError("File-upload bypass probe failed for " + base.url(), e);
+                }
+            }
         }
         return sent;
     }
