@@ -6,6 +6,8 @@ import burp.api.montoya.collaborator.Interaction;
 import burp.api.montoya.http.HttpService;
 import burp.api.montoya.http.handler.*;
 import burp.api.montoya.http.message.HttpRequestResponse;
+import burp.api.montoya.http.message.params.HttpParameter;
+import burp.api.montoya.http.message.params.HttpParameterType;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.responses.HttpResponse;
 import burp.api.montoya.persistence.PersistedObject;
@@ -824,6 +826,8 @@ final class ReconController implements HttpHandler {
         scanDomXss(request.url(), response, pair);
         scanDataExposure(request.url(), request, response, pair);
         scanSensitivePaths(request.url(), response, pair);
+        scanOAuth(request, pair);
+        scanSaml(request, pair);
         ingestApiSpec(request.url(), response, pair);
 
         short code = response.statusCode();
@@ -1064,6 +1068,54 @@ final class ReconController implements HttpHandler {
         if (method == null) return false;
         String upper = method.toUpperCase(Locale.ROOT);
         return upper.equals("POST") || upper.equals("PUT") || upper.equals("PATCH");
+    }
+
+    /** Passively inspects a request's URL parameters for OAuth 2.0 / OIDC authorization-flow weaknesses. */
+    private void scanOAuth(HttpRequest request, HttpRequestResponse pair) {
+        try {
+            Map<String, String> urlParams = new LinkedHashMap<>();
+            for (HttpParameter parameter : request.parameters()) {
+                if (parameter.type() == HttpParameterType.URL) urlParams.put(parameter.name(), parameter.value());
+            }
+            if (urlParams.isEmpty()) return;
+            for (OAuthEngine.Note note : OAuthEngine.analyze(request.url(), urlParams)) {
+                addProtocolIssue("oauth", "OAuth/OIDC", note.severity(), note.name(), note.detail(), request.url(), pair,
+                        "Recon Hound passively inspects OAuth/OIDC authorization requests for common flow weaknesses.",
+                        "These are protocol-configuration leads; confirm against the actual authorization-server behaviour before reporting.");
+            }
+        } catch (Exception e) {
+            api.logging().logToError("OAuth scan failed for " + request.url(), e);
+        }
+    }
+
+    /** Passively decodes any SAMLRequest/SAMLResponse parameter and inspects it for message-level weaknesses. */
+    private void scanSaml(HttpRequest request, HttpRequestResponse pair) {
+        try {
+            for (HttpParameter parameter : request.parameters()) {
+                if (!SamlEngine.looksLikeSamlParam(parameter.name())) continue;
+                for (SamlEngine.Note note : SamlEngine.analyze(parameter.value())) {
+                    addProtocolIssue("saml", "SAML", note.severity(), note.name(), note.detail(), request.url(), pair,
+                            "Recon Hound decodes SAMLRequest/SAMLResponse parameters and inspects them for signature/structure weaknesses.",
+                            "These are structural signals from lightweight regex parsing, not a full XML-security audit; confirm manually.");
+                }
+            }
+        } catch (Exception e) {
+            api.logging().logToError("SAML scan failed for " + request.url(), e);
+        }
+    }
+
+    /** Shared filer for the OAuth/SAML passive notes, which share the same simple name+detail+severity shape. */
+    private void addProtocolIssue(String provider, String label, String severity, String name, String detail, String url,
+                                  HttpRequestResponse pair, String background, String remediationBackground) {
+        String dedupe = provider + "\0" + name + "\0" + url;
+        if (!issueDedupe.add(dedupe)) return;
+        addSyntheticFinding(severity, provider, name, "request", detail, url);
+        reporter.report(provider + "-issue\0" + name + "\0" + url,
+                name,
+                "<b>" + escape(name) + "</b><br>" + escape(detail),
+                "Review the " + label + " client/authorization-server configuration for this flow per the finding above.",
+                url, IssueReporter.severity(severity), AuditIssueConfidence.TENTATIVE,
+                background, remediationBackground, pair);
     }
 
     /**
