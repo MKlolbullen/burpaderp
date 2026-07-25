@@ -43,6 +43,7 @@ final class ReconController implements HttpHandler {
     private final ParameterDiscoveryEngine parameterDiscovery;
     private final ActiveTestEngine activeTestEngine;
     private final CorpusFuzzEngine corpusFuzzEngine;
+    private volatile SqlmapClient sqlmapClient;
     private final IssueReporter reporter;
     private final PdcpClient pdcp = new PdcpClient();
     private volatile PersistedObject store;
@@ -87,6 +88,13 @@ final class ReconController implements HttpHandler {
     // whose single-thread serialization deliberately paces requests fired at the target itself.
     private final ExecutorService llmWorker = Executors.newFixedThreadPool(LlmProvider.values().length, r -> {
         Thread t = new Thread(r, "Burp-Recon-Hound-LLM");
+        t.setDaemon(true);
+        return t;
+    });
+
+    // sqlmap runs can take minutes; kept off activeWorker so it can't stall the rest of active testing.
+    private final ExecutorService sqlmapWorker = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "Burp-Recon-Hound-Sqlmap");
         t.setDaemon(true);
         return t;
     });
@@ -141,6 +149,7 @@ final class ReconController implements HttpHandler {
         } catch (Exception e) {
             api.logging().logToError("Persisted-state restore skipped", e);
         }
+        this.sqlmapClient = new SqlmapClient(null);
         worker.submit(this::workerLoop);
         oobPoller.scheduleWithFixedDelay(this::pollCollaborator, 12, 12, TimeUnit.SECONDS);
         oobPoller.scheduleWithFixedDelay(this::saveState, 60, 60, TimeUnit.SECONDS);
@@ -520,6 +529,68 @@ final class ReconController implements HttpHandler {
         });
     }
 
+    /** Sets the sqlmap binary path/name to invoke; blank means "sqlmap" resolved via PATH. */
+    void setSqlmapPath(String path) { this.sqlmapClient = new SqlmapClient(path); }
+
+    boolean sqlmapAvailable() { return sqlmapClient.isAvailable(); }
+
+    /**
+     * Opt-in follow-up to {@code testSqli}: shells out to a real, locally-installed sqlmap binary
+     * against one manually specified target/parameter for deeper confirmation. The default flags
+     * built by {@link SqlmapClient#buildArgs} are confirmation-only (batch, conservative level/risk,
+     * no dumping or shell-spawning options) -- {@code extraArgs} is the user's own responsibility and
+     * runs with sqlmap's full capability, same as invoking it directly from a terminal.
+     */
+    void runSqlmap(String url, String method, String parameter, String body, String cookieHeader,
+                    int level, int risk, String techniques, String extraArgs, long timeoutSeconds) {
+        if (!activeTestsEnabled.get()) {
+            api.logging().logToOutput("[Recon Hound] Active tests are disabled; enable the opt-in checkbox first.");
+            return;
+        }
+        String target = url == null ? "" : url.trim();
+        if (!target.startsWith("http")) { api.logging().logToError("Invalid sqlmap target URL: " + target); return; }
+        if (!api.scope().isInScope(target)) { api.logging().logToError("sqlmap target not in scope: " + target); return; }
+
+        SqlmapClient client = sqlmapClient;
+        sqlmapWorker.submit(() -> {
+            api.logging().logToOutput("[Recon Hound] Running sqlmap against " + target
+                    + (parameter == null || parameter.isBlank() ? "" : " (parameter " + parameter + ")") + " ...");
+            SqlmapClient.Target sqlmapTarget = new SqlmapClient.Target(target, method, parameter, body, cookieHeader);
+            SqlmapClient.RunResult result = client.run(sqlmapTarget, level, risk, techniques, extraArgs, timeoutSeconds);
+
+            if (!result.started()) {
+                addActiveRow("INFO", "sqlmap", parameter == null ? "" : parameter, "not run", result.error(), target);
+                api.logging().logToError("[Recon Hound] sqlmap did not run: " + result.error());
+                publishStatus();
+                return;
+            }
+
+            if (result.vulnerable()) {
+                String types = String.join(", ", result.injectionTypes());
+                addActiveRow("HIGH", "sqlmap", parameter == null ? "" : parameter, "confirmed", types, target);
+                reporter.report("sqlmap-issue\0" + target + "\0" + parameter,
+                        "SQL injection confirmed by sqlmap",
+                        "<b>sqlmap confirmed SQL injection</b><br>"
+                                + "URL: <code>" + escape(target) + "</code><br>"
+                                + (parameter == null || parameter.isBlank() ? "" : "Parameter: <code>" + escape(parameter) + "</code><br>")
+                                + "Technique(s): " + escape(types) + "<br><br>"
+                                + "Confirmed by a real sqlmap run, not just Recon Hound's own lightweight heuristic test.",
+                        "Use parameterized queries/prepared statements everywhere this input reaches a query; "
+                                + "never build SQL by string concatenation.",
+                        target, AuditIssueSeverity.HIGH, AuditIssueConfidence.CERTAIN,
+                        "Recon Hound shelled out to a user-invoked sqlmap run against a manually specified target.",
+                        "sqlmap's own confirmation is strong evidence; review its full output for exploitation depth.",
+                        (HttpRequestResponse) null);
+            } else {
+                String status = SqlmapClient.looksNotInjectable(result.rawOutput()) ? "not injectable" : "inconclusive";
+                addActiveRow("INFO", "sqlmap", parameter == null ? "" : parameter, status,
+                        "sqlmap run completed; see Burp output log for full output", target);
+            }
+            api.logging().logToOutput("[Recon Hound] sqlmap run complete for " + target);
+            publishStatus();
+        });
+    }
+
     private static HttpRequest httpRequestFromString(HttpRequest template, String raw) {
         return HttpRequest.httpRequest(template.httpService(), raw);
     }
@@ -663,6 +734,7 @@ final class ReconController implements HttpHandler {
         worker.shutdownNow();
         activeWorker.shutdownNow();
         llmWorker.shutdownNow();
+        sqlmapWorker.shutdownNow();
     }
 
     /** Synchronous save for extension unload, when the async EDT task might not run in time. */

@@ -142,6 +142,45 @@ final class ReconPanel extends JPanel {
         activePanel.add(new JLabel("(fires payloads/*.txt: LFI/RCE/SQLi/SSTI/XSS corpus at heuristically-matched "
                 + "parameters; destructive entries are skipped, callback hosts are rewritten to Collaborator)"));
 
+        // sqlmap follow-up: deeper confirmation of a parameter already flagged by the native SQLi test.
+        JTextField sqlmapUrl = new JTextField(20);
+        JComboBox<String> sqlmapMethod = new JComboBox<>(new String[]{"GET", "POST"});
+        JTextField sqlmapParam = new JTextField(10);
+        JTextField sqlmapBinary = new JTextField("sqlmap", 10);
+        JButton sqlmapCheck = new JButton("Check sqlmap");
+        JButton sqlmapRun = new JButton("Run sqlmap");
+        JPanel sqlmapRow1 = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        sqlmapRow1.add(new JLabel("sqlmap follow-up — URL:")); sqlmapRow1.add(sqlmapUrl);
+        sqlmapRow1.add(sqlmapMethod);
+        sqlmapRow1.add(new JLabel("Parameter:")); sqlmapRow1.add(sqlmapParam);
+        sqlmapRow1.add(new JLabel("Binary:")); sqlmapRow1.add(sqlmapBinary);
+        sqlmapRow1.add(sqlmapCheck);
+        activePanel.add(sqlmapRow1);
+
+        JTextArea sqlmapBody = new JTextArea(1, 20);
+        JTextField sqlmapCookie = new JTextField(16);
+        JSpinner sqlmapLevel = new JSpinner(new SpinnerNumberModel(1, 1, 5, 1));
+        JSpinner sqlmapRisk = new JSpinner(new SpinnerNumberModel(1, 1, 3, 1));
+        JTextField sqlmapTechniques = new JTextField("BEUST", 6);
+        JTextField sqlmapExtraArgs = new JTextField(16);
+        JSpinner sqlmapTimeout = new JSpinner(new SpinnerNumberModel(120, 10, 3600, 10));
+        JPanel sqlmapRow2 = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        sqlmapRow2.add(new JLabel("POST body:")); sqlmapRow2.add(new JScrollPane(sqlmapBody));
+        sqlmapRow2.add(new JLabel("Cookie:")); sqlmapRow2.add(sqlmapCookie);
+        sqlmapRow2.add(new JLabel("Level:")); sqlmapRow2.add(sqlmapLevel);
+        sqlmapRow2.add(new JLabel("Risk:")); sqlmapRow2.add(sqlmapRisk);
+        sqlmapRow2.add(new JLabel("Techniques:")); sqlmapRow2.add(sqlmapTechniques);
+        sqlmapRow2.add(new JLabel("Timeout(s):")); sqlmapRow2.add(sqlmapTimeout);
+        activePanel.add(sqlmapRow2);
+
+        JPanel sqlmapRow3 = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        sqlmapRow3.add(new JLabel("Extra sqlmap args (advanced — runs with full sqlmap capability, e.g. --dump):"));
+        sqlmapRow3.add(sqlmapExtraArgs);
+        sqlmapRow3.add(sqlmapRun);
+        activePanel.add(sqlmapRow3);
+        activePanel.add(new JLabel("(opt-in — shells out to a locally-installed sqlmap for deeper confirmation than "
+                + "the native SQLi test; default flags are confirmation-only, authorized targets only)"));
+
         // Access-control / IDOR (Autorize-style)
         JTextArea acHeaders = new JTextArea(2, 60);
         acHeaders.setToolTipText("Alternate identity headers, one per line, e.g. 'Cookie: session=lowpriv' or 'Authorization: Bearer ...'");
@@ -212,6 +251,21 @@ final class ReconPanel extends JPanel {
             if (encB64Url.isSelected()) encodings.add(PayloadEncoder.Encoding.BASE64_THEN_URL);
             if (encUrlB64.isSelected()) encodings.add(PayloadEncoder.Encoding.URL_THEN_BASE64);
             controller.runCorpusFuzz(encodings, (Integer) corpusBudget.getValue());
+        });
+        sqlmapCheck.addActionListener(e -> {
+            controller.setSqlmapPath(sqlmapBinary.getText());
+            boolean available = controller.sqlmapAvailable();
+            JOptionPane.showMessageDialog(this,
+                    available ? "sqlmap found and runnable." : "sqlmap not found (or failed to run --version) at \""
+                            + sqlmapBinary.getText() + "\".",
+                    "sqlmap availability", available ? JOptionPane.INFORMATION_MESSAGE : JOptionPane.WARNING_MESSAGE);
+        });
+        sqlmapRun.addActionListener(e -> {
+            controller.setSqlmapPath(sqlmapBinary.getText());
+            controller.runSqlmap(sqlmapUrl.getText(), (String) sqlmapMethod.getSelectedItem(), sqlmapParam.getText(),
+                    sqlmapBody.getText(), sqlmapCookie.getText(), (Integer) sqlmapLevel.getValue(),
+                    (Integer) sqlmapRisk.getValue(), sqlmapTechniques.getText(), sqlmapExtraArgs.getText(),
+                    (Integer) sqlmapTimeout.getValue());
         });
         acButton.addActionListener(e -> controller.runAccessControlTest(acHeaders.getText(), acUnauth.isSelected()));
         maxRequests.addChangeListener(e -> controller.setMaxRequests((Integer) maxRequests.getValue()));
