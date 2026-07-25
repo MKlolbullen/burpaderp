@@ -1303,6 +1303,27 @@ final class ReconController implements HttpHandler {
                     "Recon Hound ingests exposed OpenAPI/Swagger specs and expands them into the crawl surface.",
                     "Spec exposure is informational; the risk is the endpoints it reveals.",
                     pair);
+
+            if (ApiSurfaceEngine.hasGlobalSecurityRequirement(body)) {
+                Set<String> authOptOuts = ApiSurfaceEngine.findAuthOptOutOperations(body, base);
+                if (!authOptOuts.isEmpty()) {
+                    String list = String.join("<br>", authOptOuts.stream().map(ReconController::escape).toList());
+                    addSyntheticFinding("MEDIUM", "openapi", "Auth opt-out operations", "response",
+                            authOptOuts.size() + " operation(s) explicitly disable the spec's default auth requirement", url);
+                    reporter.report("openapi-auth-optout-issue\0" + url,
+                            "OpenAPI spec declares operations that opt out of authentication",
+                            "<b>" + authOptOuts.size() + " documented operation(s) explicitly set an empty security "
+                                    + "requirement</b> (<code>\"security\": []</code>), opting out of the spec's default "
+                                    + "authentication requirement.<br>Endpoints:<br>" + list + "<br><br>"
+                                    + "Verify each of these genuinely needs to be unauthenticated; an accidental opt-out "
+                                    + "is a common source of BOLA/IDOR.",
+                            "Review every explicit security override and confirm it is intentional.",
+                            url, AuditIssueSeverity.MEDIUM, AuditIssueConfidence.FIRM,
+                            "Recon Hound parses OpenAPI specs for per-operation security overrides.",
+                            "Flags explicit opt-outs only; endpoints silently inheriting the default aren't included.",
+                            pair);
+                }
+            }
         } catch (Exception e) {
             api.logging().logToError("API spec ingestion failed for " + url, e);
         }
@@ -1884,8 +1905,9 @@ final class ReconController implements HttpHandler {
                         .withBody(ApiSurfaceEngine.introspectionQuery());
                 HttpRequestResponse rr = api.http().sendRequest(request);
                 if (rr == null || rr.response() == null) return;
-                String summary = ApiSurfaceEngine.summarizeIntrospection(rr.response().bodyToString());
-                boolean enabled = summary.contains("ENABLED");
+                ApiSurfaceEngine.IntrospectionDetail detail = ApiSurfaceEngine.analyzeIntrospection(rr.response().bodyToString());
+                String summary = ApiSurfaceEngine.describe(detail);
+                boolean enabled = detail.enabled();
                 addActiveRow(enabled ? "MEDIUM" : "INFO", "GraphQL", "introspection",
                         enabled ? "confirmed" : "checked", summary, target);
                 if (enabled && rr.hasResponse()) {
@@ -1898,6 +1920,22 @@ final class ReconController implements HttpHandler {
                             "Recon Hound queried the GraphQL introspection endpoint on request.",
                             "Introspection disclosure is informational to low severity depending on exposure.",
                             rr);
+                    if (!detail.sensitiveNames().isEmpty()) {
+                        reporter.report(
+                                "graphql-sensitive-schema-issue\0" + target,
+                                "GraphQL introspection exposes sensitive-sounding fields",
+                                "<b>Sensitive-sounding fields/mutations discoverable via introspection</b><br>"
+                                        + escape(String.join(", ", detail.sensitiveNames())) + "<br><br>"
+                                        + "Introspection lets an attacker enumerate exactly which dangerous mutations/fields "
+                                        + "exist before ever calling them, focusing follow-up testing (BOLA, privilege "
+                                        + "escalation, mass assignment).",
+                                "Disable introspection in production; regardless, enforce authorization on every "
+                                        + "resolver independent of schema visibility.",
+                                target, AuditIssueSeverity.MEDIUM, AuditIssueConfidence.FIRM,
+                                "Recon Hound scans the introspected schema's field/type names for sensitive-sounding keywords.",
+                                "Name-based heuristic; confirm each flagged field's actual authorization requirement.",
+                                rr);
+                    }
                 }
                 api.logging().logToOutput("[Recon Hound] GraphQL introspection on " + target + ": " + summary);
             } catch (Exception e) {
