@@ -68,6 +68,19 @@ final class ActiveTestEngine {
     private static final String CORS_ARBITRARY_ORIGIN = "https://recon-hound-cors-probe.invalid";
     private static final String CORS_NULL_ORIGIN = "null";
 
+    // Rate limiting: a small burst of identical, unmutated requests at an endpoint whose URL suggests
+    // it guards a sensitive operation (login, password reset, OTP/MFA, registration). Kept small (not
+    // hundreds of requests) -- enough to see whether a rate limiter engages at all, without hammering
+    // a real login/lockout mechanism on an authorized target harder than a normal security test would.
+    private static final Set<String> SENSITIVE_ENDPOINT_HINTS = Set.of(
+            "login", "signin", "sign-in", "logon", "authenticate", "password", "forgot", "reset",
+            "otp", "mfa", "2fa", "verify", "verification", "register", "signup", "sign-up");
+    private static final Set<Integer> RATE_LIMIT_STATUS_CODES = Set.of(429, 503);
+    private static final List<String> RATE_LIMIT_BODY_HINTS = List.of(
+            "too many requests", "too many attempts", "rate limit", "rate-limit", "try again later",
+            "temporarily locked", "temporarily blocked", "account locked", "please wait", "slow down");
+    private static final int RATE_LIMIT_BURST_SIZE = 6;
+
     private final MontoyaApi api;
     private final long throttleMillis;
     private volatile CollaboratorClient collaborator;
@@ -113,6 +126,7 @@ final class ActiveTestEngine {
         }
         if (budget > 0) budget -= testHostHeaderInjection(base, findings);
         if (budget > 0) budget -= testCors(base, findings);
+        if (budget > 0) budget -= testRateLimit(base, findings);
         return findings;
     }
 
@@ -317,6 +331,45 @@ final class ActiveTestEngine {
         return sent;
     }
 
+    /**
+     * Fires a small burst of unmutated, identical requests at endpoints whose URL suggests they guard
+     * a sensitive operation (login, password reset, OTP/MFA, registration) and checks whether anything
+     * in the burst shows a rate-limit signal (429/503, a Retry-After header, or lockout wording in the
+     * body). No signal across the whole burst is reported as a likely missing/weak rate limiter — a
+     * lead, not proof; a real limiter might trip on a slightly larger burst or a longer window than
+     * this deliberately small, low-impact probe covers.
+     */
+    private int testRateLimit(HttpRequest base, List<ActiveFinding> out) {
+        if (!looksLikeSensitiveEndpoint(base.url())) return 0;
+
+        List<Integer> statuses = new ArrayList<>();
+        List<String> bodies = new ArrayList<>();
+        List<String> retryAfters = new ArrayList<>();
+        int sent = 0;
+        for (int i = 0; i < RATE_LIMIT_BURST_SIZE; i++) {
+            try {
+                if (!api.scope().isInScope(base.url())) break;
+                HttpRequestResponse rr = api.http().sendRequest(base);
+                sent++;
+                if (rr != null && rr.response() != null) {
+                    statuses.add((int) rr.response().statusCode());
+                    bodies.add(rr.response().bodyToString());
+                    retryAfters.add(rr.response().headerValue("Retry-After"));
+                }
+            } catch (Exception e) {
+                api.logging().logToError("Rate-limit probe failed for " + base.url(), e);
+            }
+        }
+
+        if (!statuses.isEmpty() && !anyRateLimited(statuses, bodies, retryAfters)) {
+            out.add(new ActiveFinding("MEDIUM", "RateLimit", "burst",
+                    statuses.size() + " consecutive identical requests to a sensitive-looking endpoint all "
+                            + "succeeded with no rate-limit signal (no 429/503, Retry-After header, or lockout "
+                            + "wording) observed", true, base.url()));
+        }
+        return sent;
+    }
+
     private HttpResponse sendMutated(HttpRequest base, HttpParameter parameter, String value) {
         try {
             if (!api.scope().isInScope(base.url())) return null;
@@ -474,6 +527,33 @@ final class ActiveTestEngine {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /** True if the URL's path suggests it guards a sensitive operation worth rate-limit testing. */
+    static boolean looksLikeSensitiveEndpoint(String url) {
+        if (url == null) return false;
+        String lower = url.toLowerCase(Locale.ROOT);
+        for (String hint : SENSITIVE_ENDPOINT_HINTS) if (lower.contains(hint)) return true;
+        return false;
+    }
+
+    /** True if any response in the burst shows a rate-limit signal: status, Retry-After, or body wording. */
+    static boolean anyRateLimited(List<Integer> statusCodes, List<String> bodies, List<String> retryAfters) {
+        if (statusCodes == null) return false;
+        for (int i = 0; i < statusCodes.size(); i++) {
+            Integer status = statusCodes.get(i);
+            if (status != null && RATE_LIMIT_STATUS_CODES.contains(status)) return true;
+
+            String retryAfter = retryAfters != null && i < retryAfters.size() ? retryAfters.get(i) : null;
+            if (retryAfter != null && !retryAfter.isBlank()) return true;
+
+            String body = bodies != null && i < bodies.size() ? bodies.get(i) : null;
+            if (body != null) {
+                String lower = body.toLowerCase(Locale.ROOT);
+                for (String hint : RATE_LIMIT_BODY_HINTS) if (lower.contains(hint)) return true;
+            }
+        }
+        return false;
     }
 
     static String encodeCorrelation(String testClass, String parameter, String url) {

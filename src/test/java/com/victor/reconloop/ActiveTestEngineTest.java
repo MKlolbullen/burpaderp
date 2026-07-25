@@ -2,6 +2,7 @@ package com.victor.reconloop;
 
 import org.junit.Test;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
@@ -298,5 +299,52 @@ public class ActiveTestEngineTest {
     public void returnsNullForUnparsableOrMissingUrls() {
         assertNull(ActiveTestEngine.hostOf(null));
         assertNull(ActiveTestEngine.hostOf("not a url at all :: /// "));
+    }
+
+    // ---- looksLikeSensitiveEndpoint ----
+
+    @Test
+    public void recognisesCommonSensitiveEndpointShapes() {
+        assertTrue(ActiveTestEngine.looksLikeSensitiveEndpoint("https://app.example.com/login"));
+        assertTrue(ActiveTestEngine.looksLikeSensitiveEndpoint("https://app.example.com/account/password/reset"));
+        assertTrue(ActiveTestEngine.looksLikeSensitiveEndpoint("https://app.example.com/api/v1/otp/verify"));
+        assertTrue(ActiveTestEngine.looksLikeSensitiveEndpoint("https://app.example.com/signup"));
+    }
+
+    @Test
+    public void ordinaryEndpointsAreNotSensitive() {
+        assertFalse(ActiveTestEngine.looksLikeSensitiveEndpoint("https://app.example.com/products/42"));
+        assertFalse(ActiveTestEngine.looksLikeSensitiveEndpoint(null));
+    }
+
+    // ---- anyRateLimited ----
+
+    @Test
+    public void statusCode429IsRecognisedAsRateLimited() {
+        assertTrue(ActiveTestEngine.anyRateLimited(List.of(200, 200, 429, 200), List.of("", "", "", ""), List.of("", "", "", "")));
+    }
+
+    @Test
+    public void retryAfterHeaderIsRecognisedAsRateLimited() {
+        assertTrue(ActiveTestEngine.anyRateLimited(
+                List.of(200, 503), List.of("ok", "slow down"), Arrays.asList(null, "30")));
+    }
+
+    @Test
+    public void lockoutWordingInBodyIsRecognisedAsRateLimited() {
+        assertTrue(ActiveTestEngine.anyRateLimited(
+                List.of(200, 200), List.of("ok", "Too many attempts, please try again later."), List.of("", "")));
+    }
+
+    @Test
+    public void allSuccessfulResponsesWithNoSignalAreNotRateLimited() {
+        assertFalse(ActiveTestEngine.anyRateLimited(
+                List.of(200, 200, 200, 200), List.of("ok", "ok", "ok", "ok"), List.of("", "", "", "")));
+    }
+
+    @Test
+    public void emptyBurstIsNotRateLimited() {
+        assertFalse(ActiveTestEngine.anyRateLimited(List.of(), List.of(), List.of()));
+        assertFalse(ActiveTestEngine.anyRateLimited(null, null, null));
     }
 }
