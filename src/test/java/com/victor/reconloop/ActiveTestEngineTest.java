@@ -2,6 +2,7 @@ package com.victor.reconloop;
 
 import org.junit.Test;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.Assert.*;
@@ -230,5 +231,72 @@ public class ActiveTestEngineTest {
     public void slowBaselineDoesNotFalselyTriggerOnAbsoluteTimeAlone() {
         // Both requests are slow (e.g. a loaded server), but there's no meaningful delta.
         assertFalse(ActiveTestEngine.looksTimeBased(4800, 4900, 5));
+    }
+
+    // ---- craftCorsProbeOrigins ----
+
+    @Test
+    public void alwaysIncludesArbitraryAndNullOriginsRegardlessOfHost() {
+        List<String> withHost = ActiveTestEngine.craftCorsProbeOrigins("app.example.com");
+        List<String> withoutHost = ActiveTestEngine.craftCorsProbeOrigins(null);
+        for (List<String> origins : List.of(withHost, withoutHost)) {
+            assertTrue(origins.contains("https://recon-hound-cors-probe.invalid"));
+            assertTrue(origins.contains("null"));
+        }
+    }
+
+    @Test
+    public void hostDependentBypassPayloadsAreOnlyAddedWhenHostIsKnown() {
+        List<String> withHost = ActiveTestEngine.craftCorsProbeOrigins("app.example.com");
+        assertTrue(withHost.contains("https://app.example.com.recon-hound-probe.invalid"));
+        assertTrue(withHost.contains("https://evilapp.example.com"));
+        assertTrue(withHost.contains("http://app.example.com"));
+
+        assertEquals(2, ActiveTestEngine.craftCorsProbeOrigins(null).size());
+        assertEquals(2, ActiveTestEngine.craftCorsProbeOrigins("").size());
+    }
+
+    @Test
+    public void noSeparatorPrefixBypassPayloadWouldSatisfyANaiveEndsWithCheck() {
+        List<String> origins = ActiveTestEngine.craftCorsProbeOrigins("app.example.com");
+        String bypass = origins.stream().filter(o -> o.equals("https://evilapp.example.com")).findFirst().orElseThrow();
+        // The exact bug this payload targets: an endsWith(".../app.example.com") check with no dot-boundary requirement.
+        assertTrue(bypass.endsWith("app.example.com"));
+    }
+
+    // ---- corsReflectsOrigin ----
+
+    @Test
+    public void reflectsWhenAcaoExactlyMatchesTheSentOrigin() {
+        assertTrue(ActiveTestEngine.corsReflectsOrigin("https://evil.example", "https://evil.example"));
+    }
+
+    @Test
+    public void reflectsIsCaseInsensitiveAndTrimsWhitespace() {
+        assertTrue(ActiveTestEngine.corsReflectsOrigin("NULL", " null "));
+    }
+
+    @Test
+    public void doesNotReflectWhenAcaoDiffersFromSentOrigin() {
+        assertFalse(ActiveTestEngine.corsReflectsOrigin("https://evil.example", "https://real-app.example"));
+    }
+
+    @Test
+    public void doesNotReflectWhenAcaoOrOriginIsMissing() {
+        assertFalse(ActiveTestEngine.corsReflectsOrigin(null, "https://evil.example"));
+        assertFalse(ActiveTestEngine.corsReflectsOrigin("https://evil.example", null));
+    }
+
+    // ---- hostOf ----
+
+    @Test
+    public void extractsHostFromAnOrdinaryUrl() {
+        assertEquals("app.example.com", ActiveTestEngine.hostOf("https://app.example.com/path?x=1"));
+    }
+
+    @Test
+    public void returnsNullForUnparsableOrMissingUrls() {
+        assertNull(ActiveTestEngine.hostOf(null));
+        assertNull(ActiveTestEngine.hostOf("not a url at all :: /// "));
     }
 }
