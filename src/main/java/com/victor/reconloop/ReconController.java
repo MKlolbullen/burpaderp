@@ -42,6 +42,7 @@ final class ReconController implements HttpHandler {
     private final CertificateTransparencyClient ctClient;
     private final ParameterDiscoveryEngine parameterDiscovery;
     private final ActiveTestEngine activeTestEngine;
+    private final CorpusFuzzEngine corpusFuzzEngine;
     private final IssueReporter reporter;
     private final PdcpClient pdcp = new PdcpClient();
     private volatile PersistedObject store;
@@ -133,6 +134,7 @@ final class ReconController implements HttpHandler {
         this.ctClient = new CertificateTransparencyClient(api);
         this.parameterDiscovery = new ParameterDiscoveryEngine(api);
         this.activeTestEngine = new ActiveTestEngine(api, activeThrottleMillis.get());
+        this.corpusFuzzEngine = new CorpusFuzzEngine(api, payloadLibrary, activeThrottleMillis.get());
         try {
             this.store = api.persistence().extensionData();
             restoreState();
@@ -204,6 +206,7 @@ final class ReconController implements HttpHandler {
         try {
             collaborator = api.collaborator().createClient();
             activeTestEngine.setCollaborator(collaborator);
+            corpusFuzzEngine.setCollaborator(collaborator);
             api.logging().logToOutput("[Recon Hound] Collaborator client ready for OOB (SSRF / blind XSS) testing.");
             return true;
         } catch (Exception e) {
@@ -291,6 +294,50 @@ final class ReconController implements HttpHandler {
                 publishStatus();
             }
             api.logging().logToOutput("[Recon Hound] Active testing pass complete. OOB results will arrive asynchronously.");
+        });
+    }
+
+    /**
+     * Opt-in corpus fuzz: replays the bundled {@code payloads/*.txt} corpus (see {@link PayloadLibrary})
+     * against heuristically relevant parameters of every in-scope, parameterised site-map request, in
+     * each requested encoding. Deliberately separate from {@link #runActiveTests()}'s small, curated
+     * payload set — this corpus is large, so it's never fired implicitly.
+     */
+    void runCorpusFuzz(Set<PayloadEncoder.Encoding> encodings, int maxPerCategory) {
+        if (!activeTestsEnabled.get()) {
+            api.logging().logToOutput("[Recon Hound] Active tests are disabled; enable the opt-in checkbox first.");
+            return;
+        }
+        ensureCollaborator();
+        activeWorker.submit(() -> {
+            List<HttpRequest> targets = api.siteMap().requestResponses().stream()
+                    .map(HttpRequestResponse::request)
+                    .filter(Objects::nonNull)
+                    .filter(HttpRequest::isInScope)
+                    .filter(HttpRequest::hasParameters)
+                    .collect(java.util.stream.Collectors.toMap(HttpRequest::url, r -> r, (a, b) -> a, LinkedHashMap::new))
+                    .values().stream().toList();
+
+            api.logging().logToOutput("[Recon Hound] Corpus-fuzzing " + targets.size() + " in-scope parameterised request(s) "
+                    + "(" + payloadLibrary.totalPayloads() + " corpus payloads available, encodings=" + encodings + ").");
+            for (HttpRequest base : targets) {
+                if (!activeTestsEnabled.get()) break;
+                try {
+                    for (HttpParameter parameter : base.parameters()) {
+                        if (!activeTestsEnabled.get()) break;
+                        if (parameter == null || parameter.name() == null || parameter.name().isBlank()) continue;
+                        if ("COOKIE".equalsIgnoreCase(String.valueOf(parameter.type()))) continue;
+                        for (ActiveTestEngine.ActiveFinding finding :
+                                corpusFuzzEngine.fuzz(base, parameter, encodings, maxPerCategory)) {
+                            reportActiveFinding(finding, base);
+                        }
+                    }
+                } catch (Exception e) {
+                    api.logging().logToError("Corpus fuzz failed for " + base.url(), e);
+                }
+                publishStatus();
+            }
+            api.logging().logToOutput("[Recon Hound] Corpus fuzz pass complete. OOB results will arrive asynchronously.");
         });
     }
 
