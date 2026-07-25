@@ -9,7 +9,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 import java.util.TreeSet;
 
 final class ReconPanel extends JPanel {
@@ -120,6 +122,26 @@ final class ReconPanel extends JPanel {
         activeRow4.add(new JLabel("(opt-in — JWT replays GET/HEAD/OPTIONS; takeover fetches enumerated hosts)"));
         activePanel.add(activeRow4);
 
+        // Corpus fuzz: fires the (otherwise-dormant) payloads/*.txt corpus in one or more encodings.
+        JCheckBox encRaw = new JCheckBox("Raw", true);
+        JCheckBox encUrl = new JCheckBox("URL", false);
+        JCheckBox encHtml = new JCheckBox("HTML", false);
+        JCheckBox encBase64 = new JCheckBox("Base64", false);
+        JCheckBox encDoubleUrl = new JCheckBox("Double URL", false);
+        JCheckBox encB64Url = new JCheckBox("Base64->URL", false);
+        JCheckBox encUrlB64 = new JCheckBox("URL->Base64", false);
+        JSpinner corpusBudget = new JSpinner(new SpinnerNumberModel(5, 1, 200, 1));
+        JButton runCorpusFuzz = new JButton("Run corpus fuzz on in-scope site map");
+        JPanel corpusRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        corpusRow.add(new JLabel("Corpus fuzz encodings:"));
+        corpusRow.add(encRaw); corpusRow.add(encUrl); corpusRow.add(encHtml); corpusRow.add(encBase64);
+        corpusRow.add(encDoubleUrl); corpusRow.add(encB64Url); corpusRow.add(encUrlB64);
+        corpusRow.add(new JLabel("Max payloads/category:")); corpusRow.add(corpusBudget);
+        corpusRow.add(runCorpusFuzz);
+        activePanel.add(corpusRow);
+        activePanel.add(new JLabel("(fires payloads/*.txt: LFI/RCE/SQLi/SSTI/XSS corpus at heuristically-matched "
+                + "parameters; destructive entries are skipped, callback hosts are rewritten to Collaborator)"));
+
         // Access-control / IDOR (Autorize-style)
         JTextArea acHeaders = new JTextArea(2, 60);
         acHeaders.setToolTipText("Alternate identity headers, one per line, e.g. 'Cookie: session=lowpriv' or 'Authorization: Bearer ...'");
@@ -180,6 +202,17 @@ final class ReconPanel extends JPanel {
         runActive.addActionListener(e -> controller.runActiveTests());
         runJwt.addActionListener(e -> controller.runJwtAttacks());
         runTakeover.addActionListener(e -> controller.runSubdomainTakeoverCheck());
+        runCorpusFuzz.addActionListener(e -> {
+            Set<PayloadEncoder.Encoding> encodings = EnumSet.noneOf(PayloadEncoder.Encoding.class);
+            if (encRaw.isSelected()) encodings.add(PayloadEncoder.Encoding.RAW);
+            if (encUrl.isSelected()) encodings.add(PayloadEncoder.Encoding.URL);
+            if (encHtml.isSelected()) encodings.add(PayloadEncoder.Encoding.HTML);
+            if (encBase64.isSelected()) encodings.add(PayloadEncoder.Encoding.BASE64);
+            if (encDoubleUrl.isSelected()) encodings.add(PayloadEncoder.Encoding.DOUBLE_URL);
+            if (encB64Url.isSelected()) encodings.add(PayloadEncoder.Encoding.BASE64_THEN_URL);
+            if (encUrlB64.isSelected()) encodings.add(PayloadEncoder.Encoding.URL_THEN_BASE64);
+            controller.runCorpusFuzz(encodings, (Integer) corpusBudget.getValue());
+        });
         acButton.addActionListener(e -> controller.runAccessControlTest(acHeaders.getText(), acUnauth.isSelected()));
         maxRequests.addChangeListener(e -> controller.setMaxRequests((Integer) maxRequests.getValue()));
         maxRedirects.addChangeListener(e -> controller.setMaxRedirects((Integer) maxRedirects.getValue()));
