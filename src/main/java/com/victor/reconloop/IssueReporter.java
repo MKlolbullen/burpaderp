@@ -7,6 +7,10 @@ import burp.api.montoya.scanner.audit.issues.AuditIssue;
 import burp.api.montoya.scanner.audit.issues.AuditIssueConfidence;
 import burp.api.montoya.scanner.audit.issues.AuditIssueSeverity;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
@@ -24,8 +28,12 @@ import static burp.api.montoya.scanner.audit.issues.AuditIssue.auditIssue;
  * <p>Findings are deduplicated on a caller-supplied key so the same issue is
  * never filed twice, and {@code INFORMATION}-level results are filed too (Burp
  * groups and filters them natively) to honour "results always end up there".
+ * Raw dedupe keys are never retained: they are normalised and SHA-256 fingerprinted before entering
+ * memory or project persistence, because callers may include discovered credentials in those keys.
  */
 final class IssueReporter {
+    private static final String KEY_PREFIX = "sha256:";
+
     private final MontoyaApi api;
     private final Set<String> filed = ConcurrentHashMap.newKeySet();
 
@@ -54,19 +62,48 @@ final class IssueReporter {
         };
     }
 
-    /** True once a finding with this dedupe key has been filed. */
-    boolean alreadyFiled(String dedupeKey) {
-        return dedupeKey != null && filed.contains(dedupeKey);
+    /**
+     * Stable, persistence-safe fingerprint for a caller-supplied dedupe key. Existing fingerprints
+     * are returned unchanged so state can be loaded and saved repeatedly without double hashing.
+     */
+    static String fingerprintKey(String dedupeKey) {
+        if (dedupeKey == null) return null;
+        String normalized = dedupeKey.replace('\n', ' ').replace('\r', ' ');
+        if (normalized.startsWith(KEY_PREFIX)
+                && normalized.length() == KEY_PREFIX.length() + 64
+                && normalized.substring(KEY_PREFIX.length()).matches("[0-9a-f]{64}")) {
+            return normalized;
+        }
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(normalized.getBytes(StandardCharsets.UTF_8));
+            return KEY_PREFIX + HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable", e);
+        }
     }
 
-    /** Snapshot of the dedupe keys filed so far (for persistence across sessions). */
+    /** True once a finding with this dedupe key has been filed. */
+    boolean alreadyFiled(String dedupeKey) {
+        String fingerprint = fingerprintKey(dedupeKey);
+        return fingerprint != null && filed.contains(fingerprint);
+    }
+
+    /** Snapshot of fingerprinted dedupe keys filed so far (for persistence across sessions). */
     Set<String> filedSnapshot() {
         return new java.util.HashSet<>(filed);
     }
 
-    /** Re-seeds the dedupe set from persisted keys so a reloaded session won't re-file old findings. */
+    /**
+     * Re-seeds the dedupe set from persisted keys so a reloaded session won't re-file old findings.
+     * Legacy raw keys are fingerprinted during migration; already-fingerprinted keys remain unchanged.
+     */
     void restore(java.util.Collection<String> keys) {
-        if (keys != null) filed.addAll(keys);
+        if (keys == null) return;
+        for (String key : keys) {
+            String fingerprint = fingerprintKey(key);
+            if (fingerprint != null) filed.add(fingerprint);
+        }
     }
 
     /** Clears the dedupe set (used on Reset so findings can be re-filed after the site map is cleared). */
@@ -144,9 +181,8 @@ final class IssueReporter {
                           String background,
                           String remediationBackground,
                           HttpRequestResponse... evidence) {
-        // Normalise CR/LF so keys survive the newline-delimited persisted store (PersistedState).
-        if (dedupeKey != null) dedupeKey = dedupeKey.replace('\n', ' ').replace('\r', ' ');
-        if (dedupeKey != null && !filed.add(dedupeKey)) return null;
+        String fingerprint = fingerprintKey(dedupeKey);
+        if (fingerprint != null && !filed.add(fingerprint)) return null;
         try {
             HttpRequestResponse[] cleaned = java.util.Arrays.stream(evidence == null ? new HttpRequestResponse[0] : evidence)
                     .filter(Objects::nonNull)
@@ -157,6 +193,9 @@ final class IssueReporter {
                     severity, confidence, background, remediationBackground,
                     severity, cleaned);
         } catch (Exception e) {
+            // Reservation must be rolled back: otherwise a transient construction failure permanently
+            // suppresses this finding for the rest of the project session and after persistence.
+            if (fingerprint != null) filed.remove(fingerprint);
             api.logging().logToError("Failed to build audit issue: " + title, e);
             return null;
         }
