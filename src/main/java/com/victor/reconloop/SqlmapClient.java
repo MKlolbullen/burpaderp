@@ -5,6 +5,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -55,22 +58,51 @@ final class SqlmapClient {
         List<String> command = new ArrayList<>();
         command.add(sqlmapPath);
         command.addAll(buildArgs(target, level, risk, techniques, extraArgs));
+
+        ExecutorService outputReader = Executors.newSingleThreadExecutor(r -> {
+            Thread thread = new Thread(r, "Recon-Hound-sqlmap-output");
+            thread.setDaemon(true);
+            return thread;
+        });
+        Process process = null;
+        Future<String> outputFuture = null;
         try {
-            Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
+            process = new ProcessBuilder(command).redirectErrorStream(true).start();
+            Process runningProcess = process;
+            outputFuture = outputReader.submit(() ->
+                    new String(runningProcess.getInputStream().readAllBytes(), StandardCharsets.UTF_8));
+
+            boolean finished = process.waitFor(Math.max(1, timeoutSeconds), TimeUnit.SECONDS);
             if (!finished) {
-                process.destroyForcibly();
-                return new RunResult(true, false, List.of(), output,
+                process.destroy();
+                if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroyForcibly();
+                String partial = readOutput(outputFuture, 2);
+                return new RunResult(true, false, List.of(), partial,
                         "sqlmap timed out after " + timeoutSeconds + "s (partial output captured)");
             }
+
+            String output = readOutput(outputFuture, 2);
             return new RunResult(true, looksVulnerable(output), extractInjectionTypes(output), output, null);
         } catch (IOException e) {
             return new RunResult(false, false, List.of(), "",
                     "sqlmap not found or failed to start (" + sqlmapPath + "): " + e.getMessage());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            if (process != null) process.destroyForcibly();
             return new RunResult(false, false, List.of(), "", "interrupted while waiting for sqlmap");
+        } finally {
+            if (outputFuture != null && !outputFuture.isDone()) outputFuture.cancel(true);
+            outputReader.shutdownNow();
+        }
+    }
+
+    private static String readOutput(Future<String> outputFuture, long timeoutSeconds) {
+        if (outputFuture == null) return "";
+        try {
+            return outputFuture.get(timeoutSeconds, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            outputFuture.cancel(true);
+            return "";
         }
     }
 

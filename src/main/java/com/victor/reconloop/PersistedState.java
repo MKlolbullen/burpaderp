@@ -14,7 +14,8 @@ import java.util.List;
  * plugin's results and, crucially, avoid re-filing findings it already reported.
  *
  * <p>Storage is newline-delimited records with tab-separated fields; field values are sanitised of
- * tabs/newlines on write. Dependency-free.
+ * tabs/newlines on write. The findings format is backward compatible: legacy six-field rows load
+ * with an empty AI-triage verdict, while current seven-field rows retain that verdict.
  */
 final class PersistedState {
     static final String K_FILED = "reconhound.filed";
@@ -37,7 +38,7 @@ final class PersistedState {
         StringBuilder out = new StringBuilder();
         for (ReconModel.FindingRow r : rows) {
             if (out.length() > 0) out.append('\n');
-            out.append(join(r.severity(), r.provider(), r.rule(), r.location(), r.value(), r.url()));
+            out.append(join(r.severity(), r.provider(), r.rule(), r.location(), r.value(), r.url(), r.triage()));
         }
         store.setString(K_FINDINGS, out.toString());
     }
@@ -48,7 +49,11 @@ final class PersistedState {
         if (value == null || value.isBlank()) return out;
         for (String line : value.split("\n")) {
             String[] p = line.split("\t", -1);
-            if (p.length == 6) out.add(new ReconModel.FindingRow(p[0], p[1], p[2], p[3], p[4], p[5]));
+            if (p.length == 6) {
+                out.add(new ReconModel.FindingRow(p[0], p[1], p[2], p[3], p[4], p[5]));
+            } else if (p.length == 7) {
+                out.add(new ReconModel.FindingRow(p[0], p[1], p[2], p[3], p[4], p[5], p[6]));
+            }
         }
         return out;
     }
