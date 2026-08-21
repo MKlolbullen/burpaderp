@@ -58,7 +58,8 @@ jobs:
           test -f "$JAR"
           java -jar "$JAR" --help >/tmp/recon-hound-help.txt
           grep -q -- '--fail-on' /tmp/recon-hound-help.txt
-          jar tf "$JAR" | grep -q '^com/victor/reconloop/ReconLoopExtension.class$'
+          jar tf "$JAR" >/tmp/recon-hound-jar.txt
+          grep -q '^com/victor/reconloop/ReconLoopExtension.class$' /tmp/recon-hound-jar.txt
           sha256sum "$JAR" > "$JAR.sha256"
 
       - name: Publish GitHub Release
