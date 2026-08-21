@@ -8,8 +8,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * Standalone, Burp-free command-line scanner for CI. Fetches target URLs over HTTP and runs Recon
@@ -22,32 +24,27 @@ import java.util.Locale;
 public final class ReconHoundCli {
 
     private record Finding(String ruleId, String name, String severity, String url, String detail) {}
+    record Options(List<String> urls, Path output, String failOn, boolean help) {}
 
     public static void main(String[] args) throws Exception {
-        List<String> urls = new ArrayList<>();
-        String output = "recon-hound.sarif";
-        String failOn = "high";
-
-        for (int i = 0; i < args.length; i++) {
-            String arg = args[i];
-            switch (arg) {
-                case "-o", "--output" -> output = args[++i];
-                case "--fail-on" -> failOn = args[++i].toLowerCase(Locale.ROOT);
-                case "-f", "--file" -> {
-                    for (String line : Files.readAllLines(Path.of(args[++i]))) {
-                        String value = line.trim();
-                        if (value.startsWith("http")) urls.add(value);
-                    }
-                }
-                case "-h", "--help" -> { printHelp(); return; }
-                default -> { if (arg.startsWith("http")) urls.add(arg); }
-            }
+        Options options;
+        try {
+            options = parseOptions(args);
+        } catch (IllegalArgumentException e) {
+            System.err.println("Error: " + e.getMessage());
+            printHelp();
+            System.exit(2);
+            return;
         }
-
-        if (urls.isEmpty()) {
+        if (options.help()) {
+            printHelp();
+            return;
+        }
+        if (options.urls().isEmpty()) {
             System.err.println("No target URLs supplied.");
             printHelp();
             System.exit(2);
+            return;
         }
 
         HttpClient http = HttpClient.newBuilder()
@@ -58,7 +55,7 @@ public final class ReconHoundCli {
         DependencyVulnEngine sca = new DependencyVulnEngine();
         List<Finding> findings = new ArrayList<>();
 
-        for (String url : urls) {
+        for (String url : options.urls()) {
             try {
                 HttpResponse<String> response = http.send(
                         HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(30)).GET().build(),
@@ -95,15 +92,69 @@ public final class ReconHoundCli {
             }
         }
 
-        Files.writeString(Path.of(output), toSarif(findings));
-        System.err.println("[recon-hound] " + findings.size() + " finding(s) written to " + output);
+        Path parent = options.output().toAbsolutePath().getParent();
+        if (parent != null) Files.createDirectories(parent);
+        Files.writeString(options.output(), toSarif(findings));
+        System.err.println("[recon-hound] " + findings.size() + " finding(s) written to " + options.output());
 
-        int threshold = rank(failOn);
+        int threshold = rank(options.failOn());
         long breaching = threshold < 0 ? 0
                 : findings.stream().filter(f -> rank(f.severity().toLowerCase(Locale.ROOT)) <= threshold).count();
         if (breaching > 0) {
-            System.err.println("[recon-hound] " + breaching + " finding(s) at or above '" + failOn + "' — failing the build.");
+            System.err.println("[recon-hound] " + breaching + " finding(s) at or above '" + options.failOn() + "' — failing the build.");
             System.exit(1);
+        }
+    }
+
+    static Options parseOptions(String[] args) throws Exception {
+        Set<String> urls = new LinkedHashSet<>();
+        Path output = Path.of("recon-hound.sarif");
+        String failOn = "high";
+        boolean help = false;
+
+        for (int i = 0; i < args.length; i++) {
+            String arg = args[i];
+            switch (arg) {
+                case "-o", "--output" -> output = Path.of(requireValue(args, ++i, arg));
+                case "--fail-on" -> failOn = requireValue(args, ++i, arg).toLowerCase(Locale.ROOT);
+                case "-f", "--file" -> {
+                    Path input = Path.of(requireValue(args, ++i, arg));
+                    for (String line : Files.readAllLines(input)) {
+                        String value = line.strip();
+                        if (!value.isEmpty() && !value.startsWith("#")) urls.add(validateUrl(value));
+                    }
+                }
+                case "-h", "--help" -> help = true;
+                default -> {
+                    if (arg.startsWith("-")) throw new IllegalArgumentException("unknown option: " + arg);
+                    urls.add(validateUrl(arg));
+                }
+            }
+        }
+        if (rank(failOn) < 0 && !"none".equals(failOn)) {
+            throw new IllegalArgumentException("invalid --fail-on level: " + failOn);
+        }
+        return new Options(List.copyOf(urls), output, failOn, help);
+    }
+
+    private static String requireValue(String[] args, int index, String option) {
+        if (index >= args.length || args[index].isBlank()) {
+            throw new IllegalArgumentException("missing value for " + option);
+        }
+        return args[index];
+    }
+
+    private static String validateUrl(String value) {
+        try {
+            URI uri = URI.create(value);
+            String scheme = uri.getScheme();
+            if (uri.getHost() == null || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
+                throw new IllegalArgumentException("target must be an absolute HTTP(S) URL: " + value);
+            }
+            return uri.toString();
+        } catch (IllegalArgumentException e) {
+            if (e.getMessage() != null && e.getMessage().startsWith("target must")) throw e;
+            throw new IllegalArgumentException("invalid target URL: " + value, e);
         }
     }
 
@@ -190,7 +241,7 @@ public final class ReconHoundCli {
                   -f, --file <path>     Read target URLs (one per line) from a file
                   -o, --output <path>   SARIF output path (default: recon-hound.sarif)
                       --fail-on <lvl>   Exit non-zero if any finding is >= lvl:
-                                        high (default) | medium | low | none
+                                        high (default) | medium | low | info | none
                   -h, --help            Show this help
 
                 Exit codes: 0 clean, 1 findings at/above --fail-on, 2 bad usage.""");
