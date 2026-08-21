@@ -70,19 +70,19 @@ final class CorpusFuzzEngine {
     void setCollaborator(CollaboratorClient collaborator) { this.collaborator = collaborator; }
 
     /**
-     * Fuzzes one parameter with the relevant corpus categories, in every requested encoding. The
-     * {@code maxPerCategory} budget is soft: it counts encoding attempts, not raw payloads, so a
-     * payload can be cut off partway through its encoding list once the cap is hit.
+     * Fuzzes one parameter with the relevant corpus categories, in every requested encoding.
+     * {@code maxPerCategory} is a hard outbound-request cap for each category. Timing probes consume
+     * two budget tokens (baseline + mutated request), so they cannot silently overshoot the cap.
      */
     List<ActiveTestEngine.ActiveFinding> fuzz(HttpRequest base, HttpParameter parameter,
                                                Set<PayloadEncoder.Encoding> encodings, int maxPerCategory) {
         List<ActiveTestEngine.ActiveFinding> out = new ArrayList<>();
-        if (base == null || parameter == null || encodings == null || encodings.isEmpty()) return out;
+        if (base == null || parameter == null || encodings == null || encodings.isEmpty() || maxPerCategory <= 0) return out;
 
         for (String category : relevantCategories(parameter.name(), parameter.value(), rceParamHints, library.categories())) {
-            int sent = 0;
+            RequestBudget budget = new RequestBudget(maxPerCategory);
             for (String rawPayload : library.get(category)) {
-                if (sent >= maxPerCategory) break;
+                if (budget.exhausted()) break;
                 if (isDestructive(rawPayload)) continue;
 
                 String payload = rawPayload;
@@ -96,13 +96,17 @@ final class CorpusFuzzEngine {
 
                 boolean timeBased = mentionsSleep(payload);
                 for (PayloadEncoder.Encoding encoding : encodings) {
+                    if (budget.exhausted()) break;
                     String encoded = PayloadEncoder.encode(payload, encoding);
-                    sent++;
 
                     if (timeBased) {
-                        long baselineMillis = timeRequest(base, parameter, parameter.value());
-                        long payloadMillis = timeRequest(base, parameter, encoded);
-                        if (ActiveTestEngine.looksTimeBased(baselineMillis, payloadMillis, TIME_BASED_DELAY_SECONDS)) {
+                        // A meaningful timing comparison needs both requests. Do not spend the final
+                        // token on a baseline that can never be paired with its mutation.
+                        if (budget.remaining() < 2) break;
+                        long baselineMillis = timeRequest(base, parameter, parameter.value(), budget);
+                        long payloadMillis = timeRequest(base, parameter, encoded, budget);
+                        if (baselineMillis >= 0 && payloadMillis >= 0
+                                && ActiveTestEngine.looksTimeBased(baselineMillis, payloadMillis, TIME_BASED_DELAY_SECONDS)) {
                             out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-" + category, parameter.name(),
                                     "[" + encoding + "] time-based signal from corpus payload: " + truncate(rawPayload),
                                     true, base.url()));
@@ -110,7 +114,7 @@ final class CorpusFuzzEngine {
                         continue;
                     }
 
-                    HttpResponse response = sendMutated(base, parameter, encoded);
+                    HttpResponse response = sendMutated(base, parameter, encoded, budget);
                     if (response == null) continue;
                     String body = response.bodyToString();
 
@@ -137,9 +141,10 @@ final class CorpusFuzzEngine {
         return out;
     }
 
-    private HttpResponse sendMutated(HttpRequest base, HttpParameter parameter, String value) {
+    private HttpResponse sendMutated(HttpRequest base, HttpParameter parameter, String value, RequestBudget budget) {
         try {
             if (!api.scope().isInScope(base.url())) return null;
+            if (!budget.tryAcquire()) return null;
             HttpParameter mutated = HttpParameter.parameter(parameter.name(), value, parameter.type());
             HttpRequestResponse rr = api.http().sendRequest(base.withUpdatedParameters(mutated));
             throttle();
@@ -150,9 +155,12 @@ final class CorpusFuzzEngine {
         }
     }
 
-    private long timeRequest(HttpRequest base, HttpParameter parameter, String value) {
+    private long timeRequest(HttpRequest base, HttpParameter parameter, String value, RequestBudget budget) {
+        if (budget.exhausted()) return -1;
         long start = System.currentTimeMillis();
-        sendMutated(base, parameter, value);
+        int before = budget.used();
+        sendMutated(base, parameter, value, budget);
+        if (budget.used() == before) return -1;
         return System.currentTimeMillis() - start;
     }
 
