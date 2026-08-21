@@ -56,7 +56,8 @@ jobs:
           VERSION='${{ steps.version.outputs.version }}'
           JAR="build/libs/burp-recon-hound-${VERSION}.jar"
           test -f "$JAR"
-          java -jar "$JAR" --help >/tmp/recon-hound-help.txt
+          # Usage/help is intentionally written to stderr by the CLI.
+          java -jar "$JAR" --help >/tmp/recon-hound-help.txt 2>&1
           grep -q -- '--fail-on' /tmp/recon-hound-help.txt
           jar tf "$JAR" >/tmp/recon-hound-jar.txt
           grep -q '^com/victor/reconloop/ReconLoopExtension.class$' /tmp/recon-hound-jar.txt
