@@ -1,23 +1,25 @@
 name: CI
 
-# Build and validate on pull requests. No release is published here — that is
-# handled by release.yml on pushes to main.
+# Validate pull requests and every commit that lands on main. Stable publishing is handled separately
+# by release.yml and only runs for explicit version tags.
 
 on:
   pull_request:
+  push:
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Cancel superseded runs for the same PR.
+# Cancel superseded runs for the same PR/branch.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    name: Build and validate
+    name: Build, test and smoke-check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -29,12 +31,20 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      # Build via the Gradle wrapper directly instead of gradle/actions, which
-      # the repository's allowed-actions policy blocks (only GitHub-owned
-      # actions are permitted). The wrapper pins Gradle 8.14.3 and verifies the
-      # distribution checksum (distributionSha256Sum in gradle-wrapper.properties).
-      - name: Build
-        run: ./gradlew clean build --no-daemon
+      # Build via the checked-in Gradle wrapper directly. gradle-wrapper.properties is the single
+      # source of truth for the Gradle version and distribution checksum.
+      - name: Build and test
+        run: ./gradlew clean build --no-daemon --stacktrace
+
+      - name: CLI smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          JAR="$(find build/libs -maxdepth 1 -type f -name 'burp-recon-hound-*.jar' -print -quit)"
+          test -n "$JAR"
+          java -jar "$JAR" --help >/tmp/recon-hound-help.txt
+          grep -q -- '--fail-on' /tmp/recon-hound-help.txt
+          jar tf "$JAR" | grep -q '^com/victor/reconloop/ReconLoopExtension.class$'
 
       - name: Upload jar artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
