@@ -20,15 +20,15 @@ dependencies {
 }
 
 java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
-    }
     sourceCompatibility = JavaVersion.VERSION_21
     targetCompatibility = JavaVersion.VERSION_21
 }
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
+    // Compile with any installed JDK >= 21 while still producing Java 21 bytecode. Requiring an
+    // exact Java 21 toolchain made local builds fail on newer JDKs even though javac can target 21.
+    options.release = 21
 }
 
 jar {

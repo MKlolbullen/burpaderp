@@ -43,6 +43,8 @@ Or build it yourself:
 ./gradlew clean build      # -> build/libs/burp-recon-hound-<version>.jar
 ```
 
+The build accepts any installed JDK 21 or newer and always emits Java 21-compatible bytecode.
+
 > Successor to the original Recon Loop tooling, which was stuck on the legacy Extender API under
 > **Jython (Python 2)** — EOL, awkward threading, no Montoya. This is a native Java 21 extension with no
 > Python runtime, running on Burp's own JVM with full access to the modern HTTP handler, site map,
@@ -262,8 +264,11 @@ java -jar burp-recon-hound.jar --fail-on high -o recon-hound.sarif https://targe
 java -jar burp-recon-hound.jar --file targets.txt --fail-on medium
 ```
 
-It fetches each URL, writes a **SARIF 2.1.0** report, and exits non-zero when a finding meets
-`--fail-on` (`high` default / `medium` / `low` / `none`) so it can gate a pipeline. A ready
+It validates and de-duplicates HTTP(S) targets, fetches each URL, creates missing report directories,
+writes a **SARIF 2.1.0** report, and exits non-zero when a finding meets `--fail-on` (`high` default /
+`medium` / `low` / `info` / `none`) so it can gate a pipeline. Target files accept blank lines and
+`#` comments. Invalid URLs, unknown options, missing option values, and invalid severity thresholds
+fail fast with exit code 2 instead of being silently ignored. A ready
 **`Recon Scan`** GitHub Actions workflow (`.github/workflows/recon-scan.yml`, `workflow_dispatch`)
 builds the jar, scans the target URLs you pass, and uploads the SARIF artifact — using only the
 allowed GitHub-owned actions and the Gradle wrapper directly.
