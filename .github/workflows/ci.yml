@@ -31,6 +31,18 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: recon/go.mod
+          cache: false
+
+      - name: Test typed recon contracts
+        working-directory: recon
+        run: |
+          go test ./...
+          go vet ./...
+
       # Build via the checked-in Gradle wrapper directly. gradle-wrapper.properties is the single
       # source of truth for the Gradle version and distribution checksum.
       - name: Build and test
