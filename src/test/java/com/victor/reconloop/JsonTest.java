@@ -96,4 +96,9 @@ public class JsonTest {
         Object parsed = Json.parse("{\"a\":1} and then some trailing prose");
         assertEquals(1.0, (double) (Double) Json.asObject(parsed).get("a"), 0.0001);
     }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void strictParseRejectsTrailingContent() {
+        Json.parseStrict("{\"a\":1} trailing");
+    }
 }
