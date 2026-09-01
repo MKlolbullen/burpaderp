@@ -36,21 +36,40 @@ final class ParameterDiscoveryEngine {
 
     int wordlistSize() { return wordlist.size(); }
 
+    /**
+     * Compatibility entry point.  New callers should create a {@link ScanRun} and use the overload
+     * below so request accounting and cancellation are visible to the coordinator.
+     */
     List<Discovered> discover(HttpRequest base, int maxRequests, long throttleMillis) {
-        if (base == null) return List.of();
+        if (base == null || maxRequests <= 0) return List.of();
+        ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.forTargetUrl(base.url()), maxRequests);
+        ActiveRequestGateway gateway = new ActiveRequestGateway(
+                RequestPolicy.safeDefault(api.scope()::isInScope), api.http()::sendRequest);
+        try {
+            return discover(base, run, gateway, throttleMillis);
+        } finally {
+            run.complete();
+        }
+    }
+
+    /**
+     * Discovers parameters through the run-scoped request gateway.  Every baseline and chunk probe
+     * is checked against the exact same scope, method, cancellation, and budget policy.
+     */
+    List<Discovered> discover(HttpRequest base, ScanRun run, ActiveRequestGateway gateway, long throttleMillis) {
+        if (base == null || run == null || gateway == null || !run.isRunning()) return List.of();
         HttpRequest seed = base.withMethod("GET");
         String url = seed.url();
 
-        HttpRequestResponse baseline = send(seed);
+        HttpRequestResponse baseline = send(seed, run, gateway);
         if (baseline == null || baseline.response() == null) return List.of();
         int baselineLength = baseline.response().bodyToString().length();
         short baselineStatus = baseline.response().statusCode();
 
         List<Discovered> discovered = new ArrayList<>();
         Set<String> reported = new HashSet<>();
-        int sent = 1;
 
-        for (int i = 0; i < wordlist.size() && sent < maxRequests; i += CHUNK) {
+        for (int i = 0; i < wordlist.size() && !run.requestBudget().exhausted() && !run.isCancelled(); i += CHUNK) {
             List<String> chunk = wordlist.subList(i, Math.min(i + CHUNK, wordlist.size()));
 
             Map<String, String> canaries = new LinkedHashMap<>();
@@ -64,8 +83,7 @@ final class ParameterDiscoveryEngine {
             if (params.isEmpty()) continue;
 
             HttpRequest probe = seed.withAddedParameters(params);
-            HttpRequestResponse rr = send(probe);
-            sent++;
+            HttpRequestResponse rr = send(probe, run, gateway);
             throttle(throttleMillis);
             if (rr == null || rr.response() == null) continue;
 
@@ -106,14 +124,13 @@ final class ParameterDiscoveryEngine {
         return "rh" + Integer.toString(h, 36) + "zq";
     }
 
-    private HttpRequestResponse send(HttpRequest request) {
-        try {
-            if (!api.scope().isInScope(request.url())) return null;
-            return api.http().sendRequest(request);
-        } catch (Exception e) {
-            api.logging().logToError("Parameter discovery request failed", e);
-            return null;
+    private HttpRequestResponse send(HttpRequest request, ScanRun run, ActiveRequestGateway gateway) {
+        ActiveRequestGateway.Result result = gateway.send(run,
+                RequestPolicy.PlannedRequest.safe(request.method(), request.url(), "parameter-discovery"), request);
+        if (result.error() != null) {
+            api.logging().logToError("Parameter discovery request failed", result.error());
         }
+        return result.response();
     }
 
     private static void throttle(long millis) {
