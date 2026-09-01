@@ -49,7 +49,10 @@ func DefaultToolRegistry() ToolRegistry {
 		{Name: "chaos", Binary: "chaos", Consumes: []Kind{KindDomain}, Produces: []Kind{KindHostname}, Risk: RiskPassiveOSINT, Description: "ProjectDiscovery Chaos subdomain source"},
 		{Name: "findomain", Binary: "findomain", Consumes: []Kind{KindDomain}, Produces: []Kind{KindHostname}, Risk: RiskPassiveOSINT, Description: "passive subdomain enumeration"},
 
-		{Name: "puredns", Binary: "puredns", Consumes: []Kind{KindHostname}, Produces: []Kind{KindResolvedHost}, Risk: RiskDNSProbe, Description: "DNS resolution/wildcard filtering"},
+		// puredns is treated as a resolver/filter: its normal line output proves the
+		// hostname resolved but does not carry the complete A/AAAA/CNAME tuple. dnsx
+		// is therefore the record-enrichment boundary that produces resolved_host.
+		{Name: "puredns", Binary: "puredns", Consumes: []Kind{KindHostname}, Produces: []Kind{KindHostname}, Risk: RiskDNSProbe, Description: "DNS resolution and wildcard filtering"},
 		{Name: "dnsx", Binary: "dnsx", Consumes: []Kind{KindHostname}, Produces: []Kind{KindResolvedHost}, Risk: RiskDNSProbe, Description: "A/AAAA/CNAME resolution and DNS probing"},
 
 		{Name: "alterx", Binary: "alterx", Consumes: []Kind{KindHostname}, Produces: []Kind{KindHostname}, Risk: RiskLocalTransform, Description: "subdomain permutation generation"},
