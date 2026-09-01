@@ -47,3 +47,28 @@ func TestNetworkScannersDoNotAcceptHostnames(t *testing.T) {
 		}
 	}
 }
+
+func TestExtendedCatalogKeepsInjectionToolsBehindParameterizedURL(t *testing.T) {
+	r := DefaultToolRegistry()
+	for _, name := range []string{"dalfox", "sqlmap"} {
+		spec, err := r.MustGet(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !spec.Accepts(KindParameterizedURL) || spec.Accepts(KindURL) {
+			t.Fatalf("%s must require an explicit parameterized_url injection point", name)
+		}
+		if spec.Risk != RiskActiveFuzz {
+			t.Fatalf("%s must remain behind the active-fuzz policy gate", name)
+		}
+	}
+}
+
+func TestExtendedCatalogDoesNotTreatWorkflowUtilitiesAsTools(t *testing.T) {
+	r := DefaultToolRegistry()
+	for _, name := range []string{"jq", "anew", "notify"} {
+		if _, ok := r.Get(name); ok {
+			t.Fatalf("workflow utility %s must not masquerade as a typed scanner", name)
+		}
+	}
+}
