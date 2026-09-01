@@ -72,7 +72,7 @@ func DefaultToolRegistry() ToolRegistry {
 		{Name: "gf", Binary: "gf", Consumes: []Kind{KindURL}, Produces: []Kind{KindParameterizedURL}, Risk: RiskLocalTransform, Description: "pattern-based URL/parameter classification"},
 
 		{Name: "dalfox", Binary: "dalfox", Consumes: []Kind{KindParameterizedURL}, Produces: []Kind{KindFinding}, Risk: RiskActiveFuzz, Description: "XSS parameter analysis and verification"},
-		{Name: "nuclei", Binary: "nuclei", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindFinding}, Risk: RiskHTTPProbe, Description: "template-driven vulnerability scanning"},
+		{Name: "nuclei", Binary: "nuclei", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindFinding}, Risk: RiskActiveFuzz, Description: "template-driven vulnerability scanning"},
 		{Name: "corsy", Binary: "corsy", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindFinding}, Risk: RiskHTTPProbe, Description: "CORS checks"},
 		{Name: "crlfuzz", Binary: "crlfuzz", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindFinding}, Risk: RiskActiveFuzz, Description: "CRLF/header injection checks"},
 	}
