@@ -16,11 +16,16 @@ import burp.api.montoya.scanner.audit.issues.AuditIssueConfidence;
 import burp.api.montoya.scanner.audit.issues.AuditIssueSeverity;
 
 import javax.swing.*;
+import java.io.IOException;
+import java.io.Reader;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 import static burp.api.montoya.http.handler.RequestToBeSentAction.continueWith;
 import static burp.api.montoya.http.handler.ResponseReceivedAction.continueWith;
@@ -67,6 +72,7 @@ final class ReconController implements HttpHandler {
     private final Set<String> minedWebpack = ConcurrentHashMap.newKeySet();
     private final Set<String> ingestedSpecs = ConcurrentHashMap.newKeySet();
     private final Set<String> llmJsAnalyzed = ConcurrentHashMap.newKeySet();
+    private final Set<String> sidecarAssetDedupe = ConcurrentHashMap.newKeySet();
     private final Set<String> assetHosts = ConcurrentHashMap.newKeySet();
     private final Set<String> assetIps = ConcurrentHashMap.newKeySet();
     private final Map<String, HttpRequest> originTemplates = new ConcurrentHashMap<>();
@@ -264,19 +270,153 @@ final class ReconController implements HttpHandler {
     }
 
     void discoverParameters(String url) {
+        if (!activeTestsEnabled.get()) {
+            api.logging().logToOutput("[Recon Hound] Parameter discovery sends active traffic; enable the opt-in checkbox first.");
+            return;
+        }
         activeWorker.submit(() -> {
             String target = url == null ? "" : url.trim();
             if (!target.startsWith("http")) { api.logging().logToError("Invalid parameter-discovery URL: " + target); return; }
             if (!api.scope().isInScope(target)) { api.logging().logToError("Target not in scope: " + target); return; }
             HttpRequest base = httpRequestFromUrl(target);
+            ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.forTargetUrl(target),
+                    activeRequestBudget.get() * 3);
+            ActiveRequestGateway gateway = new ActiveRequestGateway(
+                    RequestPolicy.safeDefault(api.scope()::isInScope), api.http()::sendRequest);
             api.logging().logToOutput("[Recon Hound] Arjun-style parameter discovery on " + target
-                    + " (" + parameterDiscovery.wordlistSize() + " candidates)");
-            for (ParameterDiscoveryEngine.Discovered found :
-                    parameterDiscovery.discover(base, activeRequestBudget.get() * 3, activeThrottleMillis.get())) {
-                addActiveRow("INFO", "PARAM", found.name(), "discovered", found.evidence(), found.url());
+                    + " (" + parameterDiscovery.wordlistSize() + " candidates, run " + run.id() + ")");
+            try {
+                for (ParameterDiscoveryEngine.Discovered found :
+                        parameterDiscovery.discover(base, run, gateway, activeThrottleMillis.get())) {
+                    addActiveRow("INFO", "PARAM", found.name(), "discovered", found.evidence(), found.url());
+                }
+            } finally {
+                run.complete();
+                api.logging().logToOutput("[Recon Hound] Parameter-discovery run " + run.id() + " ended "
+                        + run.status().name().toLowerCase(Locale.ROOT) + " after " + run.requestBudget().used()
+                        + "/" + run.requestBudget().limit() + " request(s).");
             }
             publishStatus();
         });
+    }
+
+    /**
+     * Imports already-normalized Go-sidecar JSONL without launching any process or sending target
+     * traffic.  Every line is parsed, bounded, and checked against the current Burp scope again;
+     * rejected records are counted and logged instead of being silently accepted.
+     */
+    void importSidecarJsonl(Path path, Consumer<String> completion) {
+        if (path == null) {
+            deliverImportCompletion(completion, "[error] Choose a reconctl JSONL file first.");
+            return;
+        }
+        worker.submit(() -> {
+            ScanRun run = ScanRun.begin(ScanProfile.EXTERNAL_TOOL, ScopeSnapshot.empty(), 0);
+            try (Reader reader = Files.newBufferedReader(path)) {
+                SidecarEventImporter.ImportResult result = SidecarEventImporter.importJsonl(reader,
+                        this::sidecarEventInScope, event -> materializeSidecarEvent(event, run.id()));
+                run.complete();
+                String summary = "Imported " + result.accepted() + " typed sidecar record(s); rejected "
+                        + result.rejected() + ". Run " + run.id() + ".";
+                api.logging().logToOutput("[Recon Hound] " + summary);
+                if (!result.rejectionReasons().isEmpty()) {
+                    api.logging().logToOutput("[Recon Hound] Sidecar import rejection sample: "
+                            + result.rejectionReasons().get(0));
+                }
+                publishStatus();
+                deliverImportCompletion(completion, summary);
+            } catch (IOException e) {
+                run.fail("sidecar JSONL read failed");
+                String message = "[error] Failed to import sidecar JSONL: " + e.getMessage();
+                api.logging().logToError("Sidecar JSONL import failed", e);
+                deliverImportCompletion(completion, message);
+            }
+        });
+    }
+
+    private void deliverImportCompletion(Consumer<String> completion, String message) {
+        if (completion == null) return;
+        SwingUtilities.invokeLater(() -> completion.accept(message));
+    }
+
+    private boolean sidecarEventInScope(SidecarEvent.Event event) {
+        for (String candidate : event.scopeCandidates()) {
+            try {
+                if (api.scope().isInScope(candidate)) return true;
+            } catch (Exception ignored) {
+                // Scope predicates are treated as fail-closed at this external boundary.
+            }
+        }
+        return false;
+    }
+
+    private void materializeSidecarEvent(SidecarEvent.Event event, UUID importRunId) {
+        String sidecarRun = event.runId() == null || event.runId().isBlank() ? "unlabelled" : event.runId();
+        String source = "reconctl:" + event.tool() + " sidecar-run=" + sidecarRun + " import-run=" + importRunId;
+        switch (event.kind()) {
+            case DOMAIN, HOSTNAME -> recordAsset(event.hostname(), source);
+            case RESOLVED_HOST -> {
+                recordAsset(event.hostname(), source);
+                event.addresses().forEach(address -> recordIp(address, source));
+                event.cnames().forEach(cname -> recordAsset(cname, source));
+            }
+            case IP -> recordIp(event.ip(), source);
+            case SERVICE -> recordSidecarService(event, source);
+            case HTTP_TARGET, URL -> recordImportedUrl(event.url(), source);
+            case PARAMETERIZED_URL -> {
+                recordImportedUrl(event.url(), source);
+                String key = "sidecar\0" + event.url() + "\0" + event.parameter();
+                if (parameterDedupe.add(key)) {
+                    SwingUtilities.invokeLater(() -> parameterModel.add(new ReconModel.ParameterRow(
+                            0, "sidecar", event.parameter(), "external discovery", "", event.url())));
+                }
+            }
+            case FINDING -> materializeSidecarFinding(event, source);
+            case CIDR, PAYLOAD -> throw new IllegalArgumentException("non-materializable sidecar kind reached controller");
+        }
+    }
+
+    private void recordSidecarService(SidecarEvent.Event event, String source) {
+        String host = event.ip() == null || event.ip().isBlank() ? event.hostname() : event.ip();
+        if (host == null || host.isBlank()) return;
+        recordAsset(host, source);
+        String value = host + ":" + event.port() + "/" + (event.protocol() == null || event.protocol().isBlank()
+                ? "tcp" : event.protocol());
+        if (sidecarAssetDedupe.add("service\0" + value)) {
+            SwingUtilities.invokeLater(() -> assetModel.add(new ReconModel.AssetRow("service", value, source)));
+        }
+    }
+
+    /** Adds an imported URL to inventory without queueing it, changing scope, or sending traffic. */
+    private void recordImportedUrl(String url, String source) {
+        try {
+            URI uri = URI.create(url);
+            if (uri.getHost() == null) return;
+            recordAsset(uri.getHost(), source);
+            if (discoveredUrls.add(uri.toString())) {
+                String kind = InterestingResourceCatalog.classify(uri);
+                SwingUtilities.invokeLater(() -> discoveryModel.add(new ReconModel.DiscoveryRow(kind, uri.toString(), source)));
+            }
+        } catch (IllegalArgumentException ignored) {
+            // The parser validates URL syntax first; retain this defensive guard at the materialization boundary.
+        }
+    }
+
+    private void materializeSidecarFinding(SidecarEvent.Event event, String source) {
+        recordImportedUrl(event.url(), source);
+        String evidence = event.evidence() == null || event.evidence().isBlank()
+                ? "No tool evidence was included in this sidecar record." : RegexHound.redact(event.evidence());
+        String provider = "sidecar:" + event.tool();
+        addSyntheticFinding(event.severity(), provider, "external finding", "sidecar", evidence, event.url());
+        reporter.report(
+                "sidecar-finding\0" + event.tool() + "\0" + event.severity() + "\0" + event.url() + "\0" + evidence,
+                "External " + event.tool() + " finding",
+                "<b>Imported typed sidecar finding</b><br>Tool: <code>" + escape(event.tool()) + "</code><br>"
+                        + "Target: <code>" + escape(event.url()) + "</code><br>Evidence: " + escape(evidence),
+                "Reproduce the finding in Burp and remediate the affected endpoint or configuration.",
+                event.url(), IssueReporter.severity(event.severity()), AuditIssueConfidence.TENTATIVE,
+                "Recon Hound imported a contract-validated external-tool result through the Go recon sidecar.",
+                "External tool output is evidence, not final proof. Reproduce the result in the current Burp session.");
     }
 
     void runActiveTests() {
@@ -2266,14 +2406,16 @@ final class ReconController implements HttpHandler {
     }
 
     private void reportActiveFinding(ActiveTestEngine.ActiveFinding finding, HttpRequest base) {
-        String status = finding.confirmed() ? "confirmed" : "pending OOB";
+        VerificationState state = finding.verificationState() == null
+                ? VerificationState.SIGNAL : finding.verificationState();
+        String status = state.displayLabel();
         String dedupe = "active\0" + finding.testClass() + "\0" + finding.parameter()
                 + "\0" + finding.url() + "\0" + finding.evidence();
         if (!activeDedupe.add(dedupe)) return;
 
         addActiveRow(finding.severity(), finding.testClass(), finding.parameter(), status, finding.evidence(), finding.url());
 
-        if (finding.confirmed() && !"INFO".equals(finding.severity())) {
+        if (state.isReportable() && !"INFO".equals(finding.severity())) {
             AuditIssueSeverity severity = switch (finding.severity()) {
                 case "HIGH" -> AuditIssueSeverity.HIGH;
                 case "MEDIUM" -> AuditIssueSeverity.MEDIUM;
@@ -2288,7 +2430,8 @@ final class ReconController implements HttpHandler {
                     detail,
                     activeRemediation(finding.testClass()),
                     finding.url(), severity, AuditIssueConfidence.FIRM,
-                    "Recon Hound actively probes parameters for SSRF, SSTI and XSS when active testing is enabled.",
+                    "Recon Hound actively probes parameters for SSRF, SSTI and XSS when active testing is enabled. "
+                            + "Verification state: " + state.displayLabel() + ".",
                     "Confirm the impact manually and only test targets you are authorised to assess.");
         }
     }
