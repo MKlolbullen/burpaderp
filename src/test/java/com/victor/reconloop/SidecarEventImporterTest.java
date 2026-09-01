@@ -17,6 +17,7 @@ public class SidecarEventImporterTest {
                 {"kind":"payload","value":"<script>alert(1)</script>","tool":"payloads"}
                 {"kind":"url","url":"https://outside.example.invalid/","tool":"katana"}
                 not-json
+                {"kind":"hostname","hostname":"api.example.test","tool":"subfinder"} trailing
                 """;
         List<SidecarEvent.Event> accepted = new ArrayList<>();
 
@@ -24,7 +25,7 @@ public class SidecarEventImporterTest {
                 event -> event.scopeCandidates().stream().anyMatch(url -> url.contains("example.test")), accepted::add);
 
         assertEquals(1, result.accepted());
-        assertEquals(3, result.rejected());
+        assertEquals(4, result.rejected());
         assertEquals(SidecarEvent.Kind.HOSTNAME, accepted.get(0).kind());
         assertTrue(result.rejectionReasons().stream().anyMatch(reason -> reason.contains("not importable")));
         assertTrue(result.rejectionReasons().stream().anyMatch(reason -> reason.contains("outside current Burp scope")));
