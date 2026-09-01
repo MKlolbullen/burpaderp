@@ -3,7 +3,6 @@ package recon
 import (
 	"bufio"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -123,7 +122,7 @@ func (s ContractSocket) FilterJSONL(direction Direction, source string, in io.Re
 		stats.Accepted++
 	}
 	if err := scanner.Err(); err != nil {
-		if errors.Is(err, bufio.ErrTooLong) || strings.Contains(strings.ToLower(err.Error()), "token too long") {
+		if strings.Contains(strings.ToLower(err.Error()), "token too long") {
 			return stats, fmt.Errorf("JSONL line exceeds %d-byte socket limit: %w", limits.MaxLineBytes, err)
 		}
 		return stats, fmt.Errorf("read JSONL stream: %w", err)
