@@ -72,7 +72,7 @@ final class SidecarEvent {
     private SidecarEvent() {}
 
     static Event parse(String jsonLine) {
-        Map<String, Object> object = Json.asObject(Json.parse(jsonLine));
+        Map<String, Object> object = Json.asObject(Json.parseStrict(jsonLine));
         if (object == null) throw new IllegalArgumentException("sidecar line must be a JSON object");
         Kind kind = Kind.fromWire(text(object, "kind", 64, true));
         String value = text(object, "value", MAX_URL, false);
