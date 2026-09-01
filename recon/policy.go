@@ -22,13 +22,13 @@ func DefaultRunPolicy() RunPolicy {
 		AllowLocalTransform: true,
 		AllowDNSProbe: true,
 		AllowHTTPProbe: true,
-		AllowNetworkProbe: false,
-		AllowActiveFuzz: false,
+		AllowNetworkProbe: true,
+		AllowActiveFuzz: true,
 	}
 }
 
 func (p RunPolicy) Check(spec ToolSpec) error {
-	allowed := false
+	allowed := true
 	switch spec.Risk {
 	case RiskPassiveOSINT:
 		allowed = p.AllowPassiveOSINT
