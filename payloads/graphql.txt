@@ -1,0 +1,58 @@
+# GraphQL probes. Catalogued only — GraphQlFuzzEngine already has active builders;
+# this pack is the corpus counterpart and is not auto-fired.
+{"query":"{__typename}"}
+{"query":"query { __typename }"}
+{"query":"{__schema{queryType{name}}}"}
+{"query":"{__schema{types{name}}}"}
+{"query":"{__schema{mutationType{name}}}"}
+{"query":"{__schema{subscriptionType{name}}}"}
+{"query":"{__type(name:\"Query\"){name fields{name}}}"}
+{"query":"{__type(name:\"Mutation\"){name fields{name}}}"}
+{"query":"{__type(name:\"User\"){name fields{name args{name type{name}}}}}"}
+{"query":"query { __invalidFieldZxq9 }"}
+{"query":"query IntrospectionQuery { __schema { queryType { name } mutationType { name } subscriptionType { name } types { ...FullType } directives { name locations args { ...InputValue } } } } fragment FullType on __Type { kind name description fields(includeDeprecated: true) { name description args { ...InputValue } type { ...TypeRef } isDeprecated deprecationReason } inputFields { ...InputValue } interfaces { ...TypeRef } enumValues(includeDeprecated: true) { name description isDeprecated deprecationReason } possibleTypes { ...TypeRef } } fragment InputValue on __InputValue { name description type { ...TypeRef } defaultValue } fragment TypeRef on __Type { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } } } } } }"}
+[{"query":"{__typename}"},{"query":"{__typename}"}]
+[{"query":"{__typename}"},{"query":"{__schema{types{name}}}"}]
+{"query":"query { a0: __typename a1: __typename a2: __typename a3: __typename a4: __typename }"}
+{"query":"query { a0: __typename a1: __typename a2: __typename a3: __typename a4: __typename a5: __typename a6: __typename a7: __typename a8: __typename a9: __typename }"}
+{"query":"mutation { __typename }"}
+{"query":"subscription { __typename }"}
+{"query":"query Q { __typename }"}
+{"operationName":"Q","query":"query Q { __typename }"}
+{"query":"{__typename}","variables":{}}
+{"query":"query ($id: ID!) { node(id: $id) { __typename } }","variables":{"id":"1"}}
+{"query":"query ($id: ID!) { user(id: $id) { id email } }","variables":{"id":"1"}}
+{"query":"query { users { id email password hash token } }"}
+{"query":"query { node(id: \"1\") { ... on User { id email } } }"}
+{"query":"{ viewer { id email roles permissions } }"}
+{"query":"{ me { id email admin isAdmin role } }"}
+{"query":"query { __type(name:\"Query\"){fields{name args{name type{kind name ofType{name}}}}}}"}
+{"query":"fragment U on User { id email } query { users { ...U } }"}
+{"query":"{ __schema { types { name kind fields { name } } } }"}
+{"query":"query { debug }"}
+{"query":"query { config }"}
+{"query":"query { settings }"}
+{"query":"query { env }"}
+{"query":"query { dump }"}
+{"query":"query { export }"}
+{"query":"query { internal }"}
+{"query":"query { admin }"}
+{"query":"query { users(first:1) { edges { node { id } } } }"}
+{"query":"query { users(limit:1) { id } }"}
+{"query":"{ __typename @include(if: true) }"}
+{"query":"{ __typename @skip(if: false) }"}
+{"query":"query { __type(name:\"__Schema\"){fields{name}} }"}
+{"query":"query IntrospectionDisabled { __schema { queryType { name } } }"}
+{"query":"{ alias1: __typename alias2: __typename }"}
+{"query":"query { search(q:\"'\") { __typename } }"}
+{"query":"query { search(q:\"1=1\") { __typename } }"}
+{"query":"query { file(path:\"/etc/passwd\") { content } }"}
+{"query":"query { url(href:\"http://169.254.169.254/\") { body } }"}
+{"query":"query { importUrl(url:\"http://127.0.0.1/\") }"}
+{"extensions":{"persistedQuery":{"version":1,"sha256Hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}
+{"query":"query { __typename }","extensions":{"tracing":true}}
+{"query":null}
+{"query":""}
+{"query":"{"}
+{"query":"query { __typename "}
+{"query":"{ __typename } # comment\n"}

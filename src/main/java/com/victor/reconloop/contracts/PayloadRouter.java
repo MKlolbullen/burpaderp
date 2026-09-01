@@ -82,6 +82,14 @@ public final class PayloadRouter {
         if (s.equals("ssti")) return PayloadFamily.SSTI;
         if (s.equals("lfi")) return PayloadFamily.LFI;
         if (s.startsWith("rce")) return PayloadFamily.RCE;
+        if (s.equals("ssrf")) return PayloadFamily.SSRF;
+        if (s.equals("redirect") || s.equals("open_redirect") || s.equals("open-redirect")) {
+            return PayloadFamily.OPEN_REDIRECT;
+        }
+        if (s.equals("crlf")) return PayloadFamily.CRLF;
+        if (s.equals("graphql")) return PayloadFamily.GRAPHQL;
+        if (s.equals("jwt")) return PayloadFamily.JWT;
+        if (s.equals("idor")) return PayloadFamily.IDOR;
         return PayloadFamily.GENERIC;
     }
 }

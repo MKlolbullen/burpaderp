@@ -40,5 +40,20 @@ public class PayloadRouterTest {
         assertEquals(PayloadFamily.IDOR, PayloadRouter.hintFromProfilerClass("IDOR/BOLA"));
         assertEquals(PayloadFamily.SQLI, PayloadRouter.fromManifestCategory("sqli2"));
         assertEquals(PayloadFamily.RCE, PayloadRouter.fromManifestCategory("rce_payloads"));
+        assertEquals(PayloadFamily.SSRF, PayloadRouter.fromManifestCategory("ssrf"));
+        assertEquals(PayloadFamily.OPEN_REDIRECT, PayloadRouter.fromManifestCategory("redirect"));
+        assertEquals(PayloadFamily.CRLF, PayloadRouter.fromManifestCategory("crlf"));
+        assertEquals(PayloadFamily.GRAPHQL, PayloadRouter.fromManifestCategory("graphql"));
+        assertEquals(PayloadFamily.GENERIC, PayloadRouter.fromManifestCategory("unknown-pack"));
+    }
+
+    @Test
+    public void ssrfAndRedirectAreCrossCompatible() {
+        PayloadRouter router = new PayloadRouter();
+        Asset.ParameterizedUrl url = target("next", PayloadFamily.OPEN_REDIRECT);
+        Asset.ParameterizedUrl dest = target("dest", PayloadFamily.SSRF);
+        assertTrue(router.compatible(PayloadFamily.SSRF, url));
+        assertTrue(router.compatible(PayloadFamily.OPEN_REDIRECT, dest));
+        assertFalse(router.compatible(PayloadFamily.GRAPHQL, url));
     }
 }
