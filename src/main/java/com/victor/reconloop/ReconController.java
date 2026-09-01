@@ -515,13 +515,22 @@ final class ReconController implements HttpHandler {
             }
             api.logging().logToOutput("[Recon Hound] JWT alg:none test on " + targets.size() + " JWT-bearing request(s).");
 
-            int budget = activeRequestBudget.get();
-            int sent = 0;
+            ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestBudget.get());
+            ActiveRequestGateway gateway = newSafeTargetGateway();
             for (JwtTarget target : targets) {
-                if (!activeTestsEnabled.get() || sent >= budget) break;
+                if (!activeTestsEnabled.get()) { run.cancel(); break; }
+                if (run.requestBudget().exhausted()) break;
                 try {
-                    HttpRequestResponse valid = api.http().sendRequest(target.request());
-                    sent++;
+                    HttpRequest originalRequest = target.request();
+                    ActiveRequestGateway.Result validResult = gateway.send(run,
+                            RequestPolicy.PlannedRequest.safe(originalRequest.method(), originalRequest.url(), "jwt-baseline"),
+                            originalRequest);
+                    if (validResult.error() != null) {
+                        api.logging().logToError("JWT baseline request failed for " + originalRequest.url(), validResult.error());
+                        continue;
+                    }
+                    if (!validResult.dispatched()) continue;
+                    HttpRequestResponse valid = validResult.response();
                     if (valid == null || valid.response() == null) continue;
                     int validStatus = valid.response().statusCode();
                     if (validStatus >= 400) continue;   // token not granting access here; nothing to bypass
@@ -529,12 +538,18 @@ final class ReconController implements HttpHandler {
 
                     boolean reported = false;
                     for (String forgedToken : JwtAttackEngine.forgeNoneVariants(target.token())) {
-                        if (sent >= budget) break;
+                        if (run.requestBudget().exhausted()) break;
                         HttpRequest forgedReq = httpRequestFromString(target.request(),
                                 target.request().toString().replace(target.token(), forgedToken));
-                        HttpRequestResponse forged = api.http().sendRequest(forgedReq);
-                        sent++;
+                        ActiveRequestGateway.Result forgedResult = gateway.send(run,
+                                RequestPolicy.PlannedRequest.safe(forgedReq.method(), forgedReq.url(), "jwt-alg-none"), forgedReq);
+                        if (forgedResult.error() != null) {
+                            api.logging().logToError("JWT alg:none request failed for " + target.request().url(), forgedResult.error());
+                            continue;
+                        }
+                        if (!forgedResult.dispatched()) continue;
                         Thread.sleep(activeThrottleMillis.get());
+                        HttpRequestResponse forged = forgedResult.response();
                         if (forged == null || forged.response() == null) continue;
                         int forgedStatus = forged.response().statusCode();
                         int forgedLen = forged.response().bodyToString().length();
@@ -568,15 +583,21 @@ final class ReconController implements HttpHandler {
                     // signed with it and confirm the server accepts a token it never issued.
                     String alg = JwtAttackEngine.headerAlg(target.token());
                     String[] parts = target.token().split("\\.");
-                    if (alg != null && alg.startsWith("hs") && parts.length >= 3 && sent < budget) {
+                    if (alg != null && alg.startsWith("hs") && parts.length >= 3 && !run.requestBudget().exhausted()) {
                         String secret = WebHygieneEngine.crackHmac(parts[0] + "." + parts[1], parts[2], alg);
                         String forgedToken = secret == null ? null : JwtAttackEngine.forgeWithSecret(target.token(), secret, alg);
                         if (forgedToken != null) {
                             HttpRequest forgedReq = httpRequestFromString(target.request(),
                                     target.request().toString().replace(target.token(), forgedToken));
-                            HttpRequestResponse forged = api.http().sendRequest(forgedReq);
-                            sent++;
+                            ActiveRequestGateway.Result forgedResult = gateway.send(run,
+                                    RequestPolicy.PlannedRequest.safe(forgedReq.method(), forgedReq.url(), "jwt-weak-secret"), forgedReq);
+                            if (forgedResult.error() != null) {
+                                api.logging().logToError("JWT weak-secret request failed for " + target.request().url(), forgedResult.error());
+                                continue;
+                            }
+                            if (!forgedResult.dispatched()) continue;
                             Thread.sleep(activeThrottleMillis.get());
+                            HttpRequestResponse forged = forgedResult.response();
                             if (forged != null && forged.response() != null) {
                                 int forgedStatus = forged.response().statusCode();
                                 boolean accepted = forgedStatus < 400 && forgedStatus == validStatus;
@@ -604,12 +625,15 @@ final class ReconController implements HttpHandler {
                     publishStatus();
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
+                    run.cancel();
                     return;
                 } catch (Exception e) {
                     api.logging().logToError("JWT attack failed for " + target.request().url(), e);
                 }
             }
-            api.logging().logToOutput("[Recon Hound] JWT alg:none test complete (" + sent + " request(s)).");
+            if (run.isRunning()) run.complete();
+            api.logging().logToOutput("[Recon Hound] JWT alg:none test complete (" + run.requestBudget().used()
+                    + " request(s), run " + run.id() + ").");
             publishStatus();
         });
     }
@@ -627,44 +651,58 @@ final class ReconController implements HttpHandler {
         activeWorker.submit(() -> {
             List<String> hosts = new ArrayList<>(assetHosts);
             api.logging().logToOutput("[Recon Hound] Subdomain-takeover check on " + hosts.size() + " enumerated host(s).");
-            int budget = activeRequestBudget.get() * 2;
-            int sent = 0;
-            for (String host : hosts) {
-                if (!activeTestsEnabled.get() || sent >= budget) break;
-                for (String scheme : List.of("https://", "http://")) {
-                    if (sent >= budget) break;
-                    try {
-                        HttpRequestResponse rr = api.http().sendRequest(httpRequestFromUrl(scheme + host + "/"));
-                        sent++;
-                        Thread.sleep(activeThrottleMillis.get());
-                        if (rr == null || rr.response() == null) continue;
-                        String service = SubdomainTakeoverEngine.match(rr.response().bodyToString());
-                        if (service == null) continue;
-
+            ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestBudget.get() * 2);
+            ActiveRequestGateway gateway = newSafeTargetGateway();
+            try {
+                for (String host : hosts) {
+                    if (!activeTestsEnabled.get()) { run.cancel(); break; }
+                    if (run.requestBudget().exhausted()) break;
+                    for (String scheme : List.of("https://", "http://")) {
+                        if (run.requestBudget().exhausted()) break;
                         String url = scheme + host + "/";
-                        addActiveRow("HIGH", "Takeover", host, "fingerprint", service, url);
-                        reporter.report("takeover\0" + host + "\0" + service,
-                                "Potential subdomain takeover (" + service + ")",
-                                "<b>Dangling " + escape(service) + " resource</b><br>"
-                                        + "Host: <code>" + escape(host) + "</code><br><br>"
-                                        + "The host serves " + escape(service) + "'s 'unclaimed resource' page, which suggests a "
-                                        + "dangling DNS record whose backend no longer exists. An attacker who claims that backend "
-                                        + "can serve arbitrary content on this subdomain (phishing, cookie/session theft, CSP bypass).",
-                                "Remove the dangling DNS record, or (re)claim the " + escape(service) + " resource it points to.",
-                                url, AuditIssueSeverity.HIGH, AuditIssueConfidence.TENTATIVE,
-                                "Recon Hound fetches enumerated hosts and matches known subdomain-takeover fingerprints.",
-                                "Confirm the DNS points to a genuinely unclaimed resource before attempting a takeover (authorised only).",
-                                rr);
-                        break;   // one scheme is enough for this host
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        return;
-                    } catch (Exception e) {
-                        api.logging().logToError("Takeover check failed for " + host, e);
+                        try {
+                            HttpRequest request = httpRequestFromUrl(url);
+                            ActiveRequestGateway.Result result = gateway.send(run,
+                                    RequestPolicy.PlannedRequest.safe(request.method(), request.url(), "subdomain-takeover"), request);
+                            if (result.error() != null) {
+                                api.logging().logToError("Takeover check failed for " + host, result.error());
+                                continue;
+                            }
+                            if (!result.dispatched()) continue;
+                            Thread.sleep(activeThrottleMillis.get());
+                            HttpRequestResponse rr = result.response();
+                            if (rr == null || rr.response() == null) continue;
+                            String service = SubdomainTakeoverEngine.match(rr.response().bodyToString());
+                            if (service == null) continue;
+
+                            addActiveRow("HIGH", "Takeover", host, "fingerprint", service, url);
+                            reporter.report("takeover\0" + host + "\0" + service,
+                                    "Potential subdomain takeover (" + service + ")",
+                                    "<b>Dangling " + escape(service) + " resource</b><br>"
+                                            + "Host: <code>" + escape(host) + "</code><br><br>"
+                                            + "The host serves " + escape(service) + "'s 'unclaimed resource' page, which suggests a "
+                                            + "dangling DNS record whose backend no longer exists. An attacker who claims that backend "
+                                            + "can serve arbitrary content on this subdomain (phishing, cookie/session theft, CSP bypass).",
+                                    "Remove the dangling DNS record, or (re)claim the " + escape(service) + " resource it points to.",
+                                    url, AuditIssueSeverity.HIGH, AuditIssueConfidence.TENTATIVE,
+                                    "Recon Hound fetches enumerated hosts and matches known subdomain-takeover fingerprints.",
+                                    "Confirm the DNS points to a genuinely unclaimed resource before attempting a takeover (authorised only).",
+                                    rr);
+                            break;   // one scheme is enough for this host
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            run.cancel();
+                            return;
+                        } catch (Exception e) {
+                            api.logging().logToError("Takeover check failed for " + host, e);
+                        }
                     }
                 }
+            } finally {
+                if (run.isRunning()) run.complete();
             }
-            api.logging().logToOutput("[Recon Hound] Subdomain-takeover check complete (" + sent + " request(s)).");
+            api.logging().logToOutput("[Recon Hound] Subdomain-takeover check complete (" + run.requestBudget().used()
+                    + " request(s), run " + run.id() + ").");
             publishStatus();
         });
     }
@@ -1005,33 +1043,53 @@ final class ReconController implements HttpHandler {
         URI current = item.uri();
         Set<String> redirectSeen = new HashSet<>();
         int hop = 0;
+        int remainingGlobalBudget = Math.max(0, maxRequests.get() - sentRequests.get());
+        if (remainingGlobalBudget == 0) return;
+        ScanRun run = ScanRun.begin(ScanProfile.DISCOVERY, ScopeSnapshot.forTargetUrl(current.toString()),
+                Math.min(remainingGlobalBudget, maxRedirects.get() + 1));
+        ActiveRequestGateway gateway = newSafeTargetGateway();
+        try {
+            while (current != null && hop <= maxRedirects.get() && running.get()) {
+                if (sentRequests.get() >= maxRequests.get()) return;
+                if (!redirectSeen.add(current.toString())) return;
 
-        while (current != null && hop <= maxRedirects.get() && running.get()) {
-            if (sentRequests.get() >= maxRequests.get()) return;
-            if (!api.scope().isInScope(current.toString())) return;
-            if (!redirectSeen.add(current.toString())) return;
+                HttpRequest request = buildAuthenticatedGet(current);
+                ActiveRequestGateway.Result result = gateway.send(run,
+                        RequestPolicy.PlannedRequest.safe(request.method(), request.url(), "discovery-crawl"), request);
+                if (result.error() != null) {
+                    api.logging().logToError("Discovery request failed for " + current, result.error());
+                    return;
+                }
+                if (!result.dispatched()) return;
+                sentRequests.incrementAndGet();
+                api.logging().logToOutput("[Recon Hound] GET " + current + (hop > 0 ? " [redirect hop " + hop + "]" : ""));
 
-            HttpRequest request = buildAuthenticatedGet(current);
-            sentRequests.incrementAndGet();
-            api.logging().logToOutput("[Recon Hound] GET " + current + (hop > 0 ? " [redirect hop " + hop + "]" : ""));
+                HttpRequestResponse rr = result.response();
+                if (rr == null || !rr.hasResponse() || rr.response() == null) return;
 
-            HttpRequestResponse rr = api.http().sendRequest(request);
-            if (rr == null || !rr.hasResponse() || rr.response() == null) return;
+                api.siteMap().add(rr);
+                processActivePair(rr, hop);
 
-            api.siteMap().add(rr);
-            processActivePair(rr, hop);
+                HttpResponse response = rr.response();
+                short code = response.statusCode();
+                if (!followRedirects.get() || code < 300 || code >= 400) return;
 
-            HttpResponse response = rr.response();
-            short code = response.statusCode();
-            if (!followRedirects.get() || code < 300 || code >= 400) return;
-
-            String location = response.headerValue("Location");
-            URI next = discovery.redirectTarget(current, location);
-            if (next == null) return;
-            addDiscovered(next, item.rootOrigin(), "redirect " + code + " from " + current, false);
-            current = next;
-            hop++;
+                String location = response.headerValue("Location");
+                URI next = discovery.redirectTarget(current, location);
+                if (next == null) return;
+                addDiscovered(next, item.rootOrigin(), "redirect " + code + " from " + current, false);
+                current = next;
+                hop++;
+            }
+        } finally {
+            if (!running.get()) run.cancel();
+            else run.complete();
         }
+    }
+
+    /** Shared safe-method gateway for native discovery and read-only replay paths. */
+    private ActiveRequestGateway newSafeTargetGateway() {
+        return new ActiveRequestGateway(RequestPolicy.safeDefault(api.scope()::isInScope), api.http()::sendRequest);
     }
 
     private HttpRequest buildAuthenticatedGet(URI uri) {
