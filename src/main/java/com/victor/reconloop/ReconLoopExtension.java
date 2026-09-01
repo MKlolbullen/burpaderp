@@ -16,10 +16,9 @@ public final class ReconLoopExtension implements BurpExtension {
         ReconModel.ReflectionTableModel reflectionModel = new ReconModel.ReflectionTableModel();
         ReconModel.ActiveTableModel activeModel = new ReconModel.ActiveTableModel();
         ReconModel.AssetTableModel assetModel = new ReconModel.AssetTableModel();
-        ReconModel.QuarantineTableModel quarantineModel = new ReconModel.QuarantineTableModel();
-        controller = new ReconController(api, findingModel, discoveryModel, parameterModel, reflectionModel, activeModel, assetModel, quarantineModel);
+        controller = new ReconController(api, findingModel, discoveryModel, parameterModel, reflectionModel, activeModel, assetModel);
 
-        ReconPanel panel = new ReconPanel(api, controller, findingModel, discoveryModel, parameterModel, reflectionModel, activeModel, assetModel, quarantineModel);
+        ReconPanel panel = new ReconPanel(api, controller, findingModel, discoveryModel, parameterModel, reflectionModel, activeModel, assetModel);
 
         api.http().registerHttpHandler(controller);
         api.scanner().registerPassiveScanCheck(new ReconScanCheck(controller),
