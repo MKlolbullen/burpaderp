@@ -25,8 +25,24 @@ import java.util.regex.Pattern;
  */
 final class ActiveTestEngine {
 
+    /**
+     * A finding keeps an explicit verification state instead of collapsing detector evidence into a
+     * binary "confirmed" flag.  The boolean constructor remains only as a conservative bridge for
+     * existing probes while they are migrated to name their evidence state directly.
+     */
     record ActiveFinding(String severity, String testClass, String parameter,
-                         String evidence, boolean confirmed, String url) {}
+                         String evidence, VerificationState verificationState, String url) {
+        ActiveFinding(String severity, String testClass, String parameter,
+                      String evidence, boolean legacyConfirmed, String url) {
+            this(severity, testClass, parameter, evidence,
+                    VerificationState.fromLegacyConfirmed(legacyConfirmed), url);
+        }
+
+        /** Compatibility accessor for older UI/consumer code. */
+        boolean confirmed() {
+            return verificationState != null && verificationState.isReportable();
+        }
+    }
 
     // Server-side template injection: distinctive product avoids coincidental "49" matches.
     static final long SSTI_A = 7, SSTI_B = 777, SSTI_PRODUCT = SSTI_A * SSTI_B; // 5439
