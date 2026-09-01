@@ -12,7 +12,12 @@ final class ReconModel {
         }
     }
     record DiscoveryRow(String kind, String url, String source) {}
-    record ParameterRow(int score, String type, String name, String classes, String value, String url) {}
+    record ParameterRow(int score, String type, String name, String classes, String value, String url, String family) {
+        ParameterRow(int score, String type, String name, String classes, String value, String url) {
+            this(score, type, name, classes, value, url, "");
+        }
+    }
+    record QuarantineRow(String schema, String reason, String raw, String source) {}
     record ReflectionRow(String severity, String parameter, String type, String context,
                          String surviving, String suggestion, String value, String url) {}
     record ActiveRow(String severity, String testClass, String parameter, String status,
@@ -86,7 +91,7 @@ final class ReconModel {
     }
 
     static final class ParameterTableModel extends AbstractTableModel {
-        private final String[] columns = {"Score", "Type", "Parameter", "Candidate classes", "Value preview", "URL"};
+        private final String[] columns = {"Score", "Type", "Parameter", "Candidate classes", "Family", "Value preview", "URL"};
         private final List<ParameterRow> rows = new ArrayList<>();
         @Override public int getRowCount() { return rows.size(); }
         @Override public int getColumnCount() { return columns.length; }
@@ -95,7 +100,8 @@ final class ReconModel {
             ParameterRow r = rows.get(row);
             return switch (col) {
                 case 0 -> r.score(); case 1 -> r.type(); case 2 -> r.name();
-                case 3 -> r.classes(); case 4 -> r.value(); default -> r.url();
+                case 3 -> r.classes(); case 4 -> r.family().isBlank() ? "generic" : r.family();
+                case 5 -> r.value(); default -> r.url();
             };
         }
         void add(ParameterRow row) { rows.add(0, row); fireTableRowsInserted(0, 0); }
@@ -150,5 +156,22 @@ final class ReconModel {
         void add(AssetRow row) { rows.add(0, row); fireTableRowsInserted(0, 0); }
         void clear() { int n = rows.size(); rows.clear(); if (n > 0) fireTableDataChanged(); }
         List<AssetRow> snapshot() { return new ArrayList<>(rows); }
+    }
+
+    static final class QuarantineTableModel extends AbstractTableModel {
+        private final String[] columns = {"Schema", "Reason", "Raw", "Source"};
+        private final List<QuarantineRow> rows = new ArrayList<>();
+        @Override public int getRowCount() { return rows.size(); }
+        @Override public int getColumnCount() { return columns.length; }
+        @Override public String getColumnName(int column) { return columns[column]; }
+        @Override public Object getValueAt(int row, int col) {
+            QuarantineRow r = rows.get(row);
+            return switch (col) {
+                case 0 -> r.schema(); case 1 -> r.reason(); case 2 -> r.raw(); default -> r.source();
+            };
+        }
+        void add(QuarantineRow row) { rows.add(0, row); fireTableRowsInserted(0, 0); }
+        void clear() { int n = rows.size(); rows.clear(); if (n > 0) fireTableDataChanged(); }
+        List<QuarantineRow> snapshot() { return new ArrayList<>(rows); }
     }
 }

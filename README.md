@@ -34,7 +34,7 @@ issue** (Dashboard / Target), not just a plugin tab.
 
 ## Install
 
-1. Grab the latest `burp-recon-hound-*.jar` from **[Releases](https://github.com/MKlolbullen/burpaderp/releases/latest)** (a new build is cut on every commit to `main`).
+1. Grab the latest stable `burp-recon-hound-*.jar` from **[Releases](https://github.com/MKlolbullen/burpaderp/releases/latest)**. Stable releases are cut from explicit `vMAJOR.MINOR.PATCH` tags; commits to `main` are built and retained as short-lived CI artifacts.
 2. Burp Suite → **Extensions → Installed → Add → Java** → select the jar.
 
 Or build it yourself:
@@ -290,10 +290,10 @@ authorized targets.
 
 ## Build
 
-Requires Java 21 and Gradle:
+Requires Java 21. The checked-in Gradle wrapper pins and verifies the build toolchain:
 
 ```bash
-gradle clean jar
+./gradlew clean build
 ```
 
 The build targets:
@@ -302,7 +302,7 @@ The build targets:
 net.portswigger.burp.extensions:montoya-api:2026.7
 ```
 
-Load the generated JAR (`build/libs/burp-recon-hound-0.2.0.jar`) through:
+Load the generated JAR (`build/libs/burp-recon-hound-<version>.jar`) through:
 
 ```text
 Burp Suite → Extensions → Installed → Add → Java
