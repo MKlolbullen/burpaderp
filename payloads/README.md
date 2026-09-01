@@ -18,4 +18,10 @@ These payloads are **not automatically fired** by passive scanning, crawling, or
 
 `rce.txt` specifically is **not** a payload list — its lines (`?cmd={payload}`, `?exec={payload}`, ...) are parsed as parameter-name hints for the `rce_payloads` heuristic above, never sent as literal request values.
 
-Current categories are described in `manifest.json`.
+## Hunter packs (catalogued, not auto-fired)
+
+`ssrf.txt`, `redirect.txt`, `crlf.txt`, and `graphql.txt` are wired through `payloads/manifest.json` and `PayloadRouter.fromManifestCategory` so a parameterized URL can carry the right family hint.
+
+They are **not** returned by `CorpusFuzzEngine.relevantCategories`. That is deliberate: SSRF, open redirect, CRLF, and GraphQL batching/introspection need `RequestPolicy` permissions (issue #44) before they may leave the box. `GraphQlFuzzEngine` remains the active GraphQL builder; the `.txt` pack is the corpus twin for a later opt-in path.
+
+Current categories are described in `manifest.json`. Growth rules live in `docs/GROWTH.md`.

@@ -42,6 +42,38 @@
       "file": "xss.txt",
       "payloads": 68,
       "bytes": 3039
+    },
+    {
+      "name": "ssrf",
+      "file": "ssrf.txt",
+      "payloads": 82,
+      "bytes": 2734,
+      "autoFire": false,
+      "family": "SSRF"
+    },
+    {
+      "name": "redirect",
+      "file": "redirect.txt",
+      "payloads": 81,
+      "bytes": 2000,
+      "autoFire": false,
+      "family": "OPEN_REDIRECT"
+    },
+    {
+      "name": "crlf",
+      "file": "crlf.txt",
+      "payloads": 48,
+      "bytes": 1844,
+      "autoFire": false,
+      "family": "CRLF"
+    },
+    {
+      "name": "graphql",
+      "file": "graphql.txt",
+      "payloads": 56,
+      "bytes": 3873,
+      "autoFire": false,
+      "family": "GRAPHQL"
     }
   ]
 }
