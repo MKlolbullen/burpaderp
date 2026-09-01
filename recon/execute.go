@@ -13,24 +13,25 @@ import (
 )
 
 type RunSummary struct {
-	Tool             string        `json:"tool"`
-	StartedAt        time.Time     `json:"started_at"`
-	Duration         time.Duration `json:"duration"`
-	InputAccepted    int           `json:"input_accepted"`
-	InputRejected    int           `json:"input_rejected"`
-	Executions       int           `json:"executions"`
-	OutputAccepted   int           `json:"output_accepted"`
-	OutputRejected   int           `json:"output_rejected"`
-	StdoutTruncated  bool          `json:"stdout_truncated"`
-	StderrTruncated  bool          `json:"stderr_truncated"`
+	RunID           string        `json:"run_id"`
+	Tool            string        `json:"tool"`
+	StartedAt       time.Time     `json:"started_at"`
+	Duration        time.Duration `json:"duration"`
+	InputAccepted   int           `json:"input_accepted"`
+	InputRejected   int           `json:"input_rejected"`
+	Executions      int           `json:"executions"`
+	OutputAccepted  int           `json:"output_accepted"`
+	OutputRejected  int           `json:"output_rejected"`
+	StdoutTruncated bool          `json:"stdout_truncated"`
+	StderrTruncated bool          `json:"stderr_truncated"`
 }
 
 // RunProfile executes one pinned command profile between the two typed sockets.
 // It is intentionally a single-stage primitive: a DAG orchestrator can compose
 // it, but no tool can bypass input validation or output adaptation when it does.
-func RunProfile(ctx context.Context, scope Scope, toolName string, inputs []Record, policy RunPolicy, quarantine io.Writer) ([]Record, RunSummary, error) {
+func RunProfile(ctx context.Context, scope Scope, toolName string, inputs []Record, policy RunPolicy, runID string, quarantine io.Writer) ([]Record, RunSummary, error) {
 	started := time.Now()
-	summary := RunSummary{Tool: strings.ToLower(strings.TrimSpace(toolName)), StartedAt: started.UTC()}
+	summary := RunSummary{RunID: runID, Tool: strings.ToLower(strings.TrimSpace(toolName)), StartedAt: started.UTC()}
 	registry := DefaultToolRegistry()
 	spec, err := registry.MustGet(toolName)
 	if err != nil {
@@ -128,17 +129,17 @@ func RunProfile(ctx context.Context, scope Scope, toolName string, inputs []Reco
 	}
 
 	summary.Duration = time.Since(started)
-	output = DedupeRecords(output)
+	output = StampRunID(DedupeRecords(output), runID)
 	return output, summary, errors.Join(runErrors...)
 }
 
 func executeOnce(ctx context.Context, socket ContractSocket, profile CommandProfile, args []string, stdin []byte, quarantine io.Writer) ([]Record, SocketStats, ExecResult, error) {
 	result, runErr := RunExternal(ctx, ExecRequest{
 		Binary: socket.Tool.Binary,
-		Args: args,
-		Stdin: stdin,
+		Args:   args,
+		Stdin:  stdin,
 		Limits: ExecLimits{
-			Timeout: profile.Timeout,
+			Timeout:        profile.Timeout,
 			MaxStdoutBytes: DefaultExecLimits().MaxStdoutBytes,
 			MaxStderrBytes: DefaultExecLimits().MaxStderrBytes,
 		},
