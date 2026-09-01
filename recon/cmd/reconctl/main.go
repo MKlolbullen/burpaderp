@@ -76,7 +76,7 @@ Shared stream flags:
   --allow-derived-ips              explicit override for DNS-derived network targets
   --rejects run/rejects.jsonl      append rejected records with reason/provenance
 
-`run` additionally requires explicit --allow-network for network_probe tools and
+run additionally requires explicit --allow-network for network_probe tools and
 --allow-active for active-fuzz/vulnerability tools. No shell command string is
 constructed; pinned argument vectors are executed directly.`)
 }

@@ -18,21 +18,17 @@ import (
 type Kind string
 
 const (
-	 KindDomain          Kind = "domain"
-	 KindHostname        Kind = "hostname"
-	 KindResolvedHost    Kind =  "resolved_host"
- 	KindIP               Kind = "ip"
- 	KindCIDR             Kind = "cidr"
- 	KindService          Kind = "service"
- KindServVersion      Kind = "version"
- 	KindHTTPTarget       Kind = "http_target"
- 	KindURL              Kind = "url"
- KindFiles            Kind = "files"
- 	KindParameterizedURL Kind = "parameterized_url"
- KindFileType         Kind = "filetypes"
- KindFiles            Kind = "js_files"
- 	KindPayload          Kind = "payload"
- 	KindFinding          Kind = "finding"
+	KindDomain           Kind = "domain"
+	KindHostname         Kind = "hostname"
+	KindResolvedHost     Kind = "resolved_host"
+	KindIP               Kind = "ip"
+	KindCIDR             Kind = "cidr"
+	KindService          Kind = "service"
+	KindHTTPTarget       Kind = "http_target"
+	KindURL              Kind = "url"
+	KindParameterizedURL Kind = "parameterized_url"
+	KindPayload          Kind = "payload"
+	KindFinding          Kind = "finding"
 )
 
 // Record is the JSONL wire type used by the Go recon sidecar. It is deliberately
