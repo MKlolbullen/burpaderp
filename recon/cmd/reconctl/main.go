@@ -29,6 +29,10 @@ func main() {
 		err = runEdge(os.Args[2:], os.Stdout)
 	case "socket":
 		err = runSocket(os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
+	case "render":
+		err = runRender(os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
+	case "adapt":
+		err = runAdapt(os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
 	case "help", "-h", "--help":
 		usage(os.Stdout)
 		return
@@ -49,14 +53,28 @@ Usage:
   reconctl doctor
   reconctl plan
   reconctl edge --from httpx --to katana
-  reconctl socket --tool <name> --direction input|output \
-      --scope-domain example.com [--scope-cidr 203.0.113.0/24] \
-      [--allow-derived-ips] [--rejects rejects.jsonl]
 
-The socket command reads normalized Record JSONL on stdin, writes only canonical
-compatible records on stdout, and quarantines malformed/incompatible records.
-It does not execute the target tool; execution adapters sit on either side of
-this gate.`)
+  # normalized Record JSONL -> canonical records
+  reconctl socket --tool <name> --direction input|output --scope-domain example.com
+
+  # normalized Record JSONL -> actual stdin lines for the tool
+  reconctl render --tool dnsx --scope-domain example.com
+
+  # actual machine-readable/raw tool stdout -> normalized Record JSONL
+  reconctl adapt --tool dnsx --scope-domain example.com
+
+Shared stream flags:
+  --scope-domain example.com        repeatable
+  --scope-cidr 203.0.113.0/24      repeatable; use /32 or /128 for a single IP
+  --allow-derived-ips              explicit override for DNS-derived network targets
+  --rejects run/rejects.jsonl      append rejected records with reason/provenance
+  --source <label>                 quarantine provenance label
+  --max-line-bytes <n>
+  --max-records <n>
+
+The render/adapt commands are the two real contract sockets around a process.
+They deliberately do not build a shell pipeline or guess unsupported output
+formats.`)
 }
 
 type doctorRow struct {
@@ -116,65 +134,121 @@ func runEdge(args []string, w io.Writer) error {
 	return writeJSON(w, map[string]any{"compatible": true, "from": producer.Name, "to": consumer.Name})
 }
 
-func runSocket(args []string, in io.Reader, out, errOut io.Writer) error {
-	fs := flag.NewFlagSet("socket", flag.ContinueOnError)
+type contractArgs struct {
+	socket      recon.ContractSocket
+	direction   recon.Direction
+	source      string
+	rejectsPath string
+}
+
+func parseContractArgs(command string, args []string, withDirection bool) (contractArgs, error) {
+	fs := flag.NewFlagSet(command, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	toolName := fs.String("tool", "", "tool contract name")
 	directionRaw := fs.String("direction", "", "input or output")
 	var domains stringList
 	var cidrs stringList
 	fs.Var(&domains, "scope-domain", "authorised domain/FQDN (repeatable)")
-	fs.Var(&cidrs, "scope-cidr", "authorised IP/CIDR (repeatable)")
+	fs.Var(&cidrs, "scope-cidr", "authorised CIDR; use /32 or /128 for one IP (repeatable)")
 	allowDerived := fs.Bool("allow-derived-ips", false, "permit network probing IPs resolved from in-scope hostnames")
 	rejectsPath := fs.String("rejects", "", "quarantine JSONL path")
 	source := fs.String("source", "stdin", "source label written to quarantine records")
-	maxLine := fs.Int("max-line-bytes", 4<<20, "maximum JSONL record size")
+	maxLine := fs.Int("max-line-bytes", 4<<20, "maximum line/record size")
 	maxRecords := fs.Int("max-records", 1_000_000, "maximum records in one stream")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return contractArgs{}, err
 	}
 	if *toolName == "" {
-		return fmt.Errorf("--tool is required")
-	}
-	direction := recon.Direction(strings.ToLower(strings.TrimSpace(*directionRaw)))
-	if direction != recon.DirectionInput && direction != recon.DirectionOutput {
-		return fmt.Errorf("--direction must be input or output")
+		return contractArgs{}, fmt.Errorf("--tool is required")
 	}
 
-	registry := recon.DefaultToolRegistry()
-	spec, err := registry.MustGet(*toolName)
+	var direction recon.Direction
+	if withDirection {
+		direction = recon.Direction(strings.ToLower(strings.TrimSpace(*directionRaw)))
+		if direction != recon.DirectionInput && direction != recon.DirectionOutput {
+			return contractArgs{}, fmt.Errorf("--direction must be input or output")
+		}
+	} else if strings.TrimSpace(*directionRaw) != "" {
+		return contractArgs{}, fmt.Errorf("--direction is only valid with socket")
+	}
+
+	spec, err := recon.DefaultToolRegistry().MustGet(*toolName)
 	if err != nil {
-		return err
+		return contractArgs{}, err
 	}
 	scope, err := recon.NewScope(domains, cidrs, *allowDerived)
 	if err != nil {
-		return err
+		return contractArgs{}, err
 	}
-
-	var quarantine io.Writer
-	var rejectFile *os.File
-	if *rejectsPath != "" {
-		parent := filepath.Dir(*rejectsPath)
-		if parent != "." {
-			if err := os.MkdirAll(parent, 0o755); err != nil {
-				return fmt.Errorf("create quarantine directory: %w", err)
-			}
-		}
-		rejectFile, err = os.OpenFile(*rejectsPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-		if err != nil {
-			return fmt.Errorf("open quarantine file: %w", err)
-		}
-		defer rejectFile.Close()
-		quarantine = rejectFile
-	}
-
 	socket := recon.NewContractSocket(scope, spec)
 	socket.Limits = recon.SocketLimits{MaxLineBytes: *maxLine, MaxRecords: *maxRecords}
-	stats, err := socket.FilterJSONL(direction, *source, in, out, quarantine)
-	if statsErr := writeJSON(errOut, stats); statsErr != nil && err == nil {
-		err = statsErr
+	return contractArgs{socket: socket, direction: direction, source: *source, rejectsPath: *rejectsPath}, nil
+}
+
+func runSocket(args []string, in io.Reader, out, errOut io.Writer) error {
+	cfg, err := parseContractArgs("socket", args, true)
+	if err != nil {
+		return err
 	}
-	return err
+	quarantine, closeFn, err := openQuarantine(cfg.rejectsPath)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	stats, runErr := cfg.socket.FilterJSONL(cfg.direction, cfg.source, in, out, quarantine)
+	return finishStream(errOut, stats, runErr)
+}
+
+func runRender(args []string, in io.Reader, out, errOut io.Writer) error {
+	cfg, err := parseContractArgs("render", args, false)
+	if err != nil {
+		return err
+	}
+	quarantine, closeFn, err := openQuarantine(cfg.rejectsPath)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	stats, runErr := recon.RenderJSONLInputs(cfg.socket, cfg.source, in, out, quarantine)
+	return finishStream(errOut, stats, runErr)
+}
+
+func runAdapt(args []string, in io.Reader, out, errOut io.Writer) error {
+	cfg, err := parseContractArgs("adapt", args, false)
+	if err != nil {
+		return err
+	}
+	quarantine, closeFn, err := openQuarantine(cfg.rejectsPath)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	stats, runErr := recon.AdaptToolOutput(cfg.socket, cfg.source, in, out, quarantine)
+	return finishStream(errOut, stats, runErr)
+}
+
+func openQuarantine(path string) (io.Writer, func(), error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, func() {}, nil
+	}
+	parent := filepath.Dir(path)
+	if parent != "." {
+		if err := os.MkdirAll(parent, 0o755); err != nil {
+			return nil, func() {}, fmt.Errorf("create quarantine directory: %w", err)
+		}
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("open quarantine file: %w", err)
+	}
+	return file, func() { _ = file.Close() }, nil
+}
+
+func finishStream(errOut io.Writer, stats recon.SocketStats, runErr error) error {
+	if statsErr := writeJSON(errOut, stats); statsErr != nil && runErr == nil {
+		return statsErr
+	}
+	return runErr
 }
 
 func writeJSON(w io.Writer, value any) error {
