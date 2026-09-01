@@ -61,20 +61,29 @@ func DefaultToolRegistry() ToolRegistry {
 
 		{Name: "naabu", Binary: "naabu", Consumes: []Kind{KindIP, KindCIDR}, Produces: []Kind{KindService}, Risk: RiskNetworkProbe, Description: "TCP port discovery"},
 		{Name: "masscan", Binary: "masscan", Consumes: []Kind{KindIP, KindCIDR}, Produces: []Kind{KindService}, Risk: RiskNetworkProbe, Description: "high-rate network port discovery"},
+		{Name: "nmap", Binary: "nmap", Consumes: []Kind{KindIP, KindCIDR, KindService}, Produces: []Kind{KindService, KindFinding}, Risk: RiskNetworkProbe, Description: "service discovery and explicitly selected NSE checks; adapter intentionally fail-closed until XML parsing is pinned"},
 
 		{Name: "httpx", Binary: "httpx", Consumes: []Kind{KindHostname, KindService, KindURL}, Produces: []Kind{KindHTTPTarget}, Risk: RiskHTTPProbe, Description: "HTTP service probing and normalization"},
 
 		{Name: "katana", Binary: "katana", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindURL}, Risk: RiskHTTPProbe, Description: "active web crawler"},
 		{Name: "gau", Binary: "gau", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindURL}, Risk: RiskPassiveOSINT, Description: "known/historical URL collection"},
 		{Name: "cariddi", Binary: "cariddi", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindURL}, Risk: RiskHTTPProbe, Description: "crawler and endpoint/secret discovery"},
+		{Name: "feroxbuster", Binary: "feroxbuster", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindURL}, Risk: RiskActiveFuzz, Description: "content discovery; adapter intentionally fail-closed until JSON output is pinned"},
+		{Name: "ffuf", Binary: "ffuf", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindURL, KindFinding}, Risk: RiskActiveFuzz, Description: "content and parameter fuzzing; adapter intentionally fail-closed until JSON output is pinned"},
+		{Name: "linkfinder", Binary: "linkfinder", Consumes: []Kind{KindURL}, Produces: []Kind{KindURL}, Risk: RiskHTTPProbe, Description: "JavaScript endpoint extraction; adapter intentionally fail-closed until machine output is pinned"},
+		{Name: "gowitness", Binary: "gowitness", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindHTTPTarget}, Risk: RiskHTTPProbe, Description: "web screenshot and metadata capture; evidence artifact import is not yet wired"},
 
 		{Name: "arjun", Binary: "arjun", Consumes: []Kind{KindURL}, Produces: []Kind{KindParameterizedURL}, Risk: RiskActiveFuzz, Description: "hidden HTTP parameter discovery"},
 		{Name: "gf", Binary: "gf", Consumes: []Kind{KindURL}, Produces: []Kind{KindParameterizedURL}, Risk: RiskLocalTransform, Description: "pattern-based URL/parameter classification"},
+		{Name: "paramspider", Binary: "paramspider", Consumes: []Kind{KindDomain, KindHostname, KindURL}, Produces: []Kind{KindParameterizedURL}, Risk: RiskPassiveOSINT, Description: "parameterized URL collection; adapter intentionally fail-closed until output handling is pinned"},
 
 		{Name: "dalfox", Binary: "dalfox", Consumes: []Kind{KindParameterizedURL}, Produces: []Kind{KindFinding}, Risk: RiskActiveFuzz, Description: "XSS parameter analysis and verification"},
 		{Name: "nuclei", Binary: "nuclei", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindFinding}, Risk: RiskActiveFuzz, Description: "template-driven vulnerability scanning"},
 		{Name: "corsy", Binary: "corsy", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindFinding}, Risk: RiskHTTPProbe, Description: "CORS checks"},
 		{Name: "crlfuzz", Binary: "crlfuzz", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindFinding}, Risk: RiskActiveFuzz, Description: "CRLF/header injection checks"},
+		{Name: "sqlmap", Binary: "sqlmap", Consumes: []Kind{KindParameterizedURL}, Produces: []Kind{KindFinding}, Risk: RiskActiveFuzz, Description: "SQL injection verification; execution and parsing require an explicit guarded profile"},
+		{Name: "wpscan", Binary: "wpscan", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindFinding}, Risk: RiskActiveFuzz, Description: "WordPress security scanner; adapter intentionally fail-closed until JSON output is pinned"},
+		{Name: "trufflehog", Binary: "trufflehog", Consumes: []Kind{KindURL}, Produces: []Kind{KindFinding}, Risk: RiskPassiveOSINT, Description: "secret discovery over explicitly configured sources; repository/source contracts are not yet modeled"},
 	}
 
 	m := make(map[string]ToolSpec, len(specs))
