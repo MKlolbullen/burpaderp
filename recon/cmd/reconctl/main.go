@@ -33,6 +33,8 @@ func main() {
 		err = runRender(os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
 	case "adapt":
 		err = runAdapt(os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
+	case "run":
+		err = runTool(os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
 	case "help", "-h", "--help":
 		usage(os.Stdout)
 		return
@@ -63,18 +65,20 @@ Usage:
   # actual machine-readable/raw tool stdout -> normalized Record JSONL
   reconctl adapt --tool dnsx --scope-domain example.com
 
+  # execute a pinned command profile between both contract sockets
+  reconctl run --tool subfinder --scope-domain example.com < domains.jsonl
+  reconctl run --tool naabu --scope-cidr 203.0.113.0/24 --allow-network < ips.jsonl
+  reconctl run --tool nuclei --scope-domain example.com --allow-active < urls.jsonl
+
 Shared stream flags:
   --scope-domain example.com        repeatable
   --scope-cidr 203.0.113.0/24      repeatable; use /32 or /128 for a single IP
   --allow-derived-ips              explicit override for DNS-derived network targets
   --rejects run/rejects.jsonl      append rejected records with reason/provenance
-  --source <label>                 quarantine provenance label
-  --max-line-bytes <n>
-  --max-records <n>
 
-The render/adapt commands are the two real contract sockets around a process.
-They deliberately do not build a shell pipeline or guess unsupported output
-formats.`)
+`run` additionally requires explicit --allow-network for network_probe tools and
+--allow-active for active-fuzz/vulnerability tools. No shell command string is
+constructed; pinned argument vectors are executed directly.`)
 }
 
 type doctorRow struct {
@@ -82,6 +86,7 @@ type doctorRow struct {
 	Binary   string          `json:"binary"`
 	Found    bool            `json:"found"`
 	Path     string          `json:"path,omitempty"`
+	Profiled bool            `json:"profiled"`
 	Consumes []recon.Kind    `json:"consumes"`
 	Produces []recon.Kind    `json:"produces"`
 	Risk     recon.RiskClass `json:"risk"`
@@ -92,8 +97,9 @@ func runDoctor(w io.Writer) error {
 	rows := make([]doctorRow, 0, len(registry.List()))
 	for _, spec := range registry.List() {
 		path, err := exec.LookPath(spec.Binary)
+		_, profiled := recon.CommandProfileFor(spec.Name)
 		rows = append(rows, doctorRow{
-			Name: spec.Name, Binary: spec.Binary, Found: err == nil, Path: path,
+			Name: spec.Name, Binary: spec.Binary, Found: err == nil, Path: path, Profiled: profiled,
 			Consumes: spec.Consumes, Produces: spec.Produces, Risk: spec.Risk,
 		})
 	}
@@ -102,10 +108,12 @@ func runDoctor(w io.Writer) error {
 
 func runPlan(w io.Writer) error {
 	plan := struct {
-		Tools    []recon.ToolSpec      `json:"tools"`
-		Payloads []recon.PayloadPolicy `json:"payload_policies"`
+		Tools    []recon.ToolSpec       `json:"tools"`
+		Profiles []recon.CommandProfile `json:"command_profiles"`
+		Payloads []recon.PayloadPolicy  `json:"payload_policies"`
 	}{
 		Tools: recon.DefaultToolRegistry().List(),
+		Profiles: recon.ListCommandProfiles(),
 		Payloads: recon.DefaultPayloadRouter().List(),
 	}
 	return writeJSON(w, plan)
