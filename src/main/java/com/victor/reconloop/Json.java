@@ -29,6 +29,16 @@ final class Json {
         return v;
     }
 
+    /** Parses exactly one complete JSON value, rejecting trailing non-whitespace data. */
+    static Object parseStrict(String text) {
+        Json p = new Json(text == null ? "" : text);
+        p.ws();
+        Object v = p.value();
+        p.ws();
+        if (p.i != p.s.length()) throw p.err("unexpected trailing content");
+        return v;
+    }
+
     @SuppressWarnings("unchecked")
     static Map<String, Object> asObject(Object o) {
         return o instanceof Map ? (Map<String, Object>) o : null;

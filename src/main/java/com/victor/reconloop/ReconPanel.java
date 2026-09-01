@@ -94,6 +94,8 @@ final class ReconPanel extends JPanel {
         JButton runActive = new JButton("Run active tests on in-scope site map");
         JButton runJwt = new JButton("Run JWT alg:none test");
         JButton runTakeover = new JButton("Subdomain takeover check");
+        JButton importSidecar = new JButton("Import reconctl JSONL…");
+        importSidecar.setToolTipText("Imports typed Go-sidecar results after re-checking every record against the current Burp scope. Does not launch a tool or send traffic.");
 
         JPanel activePanel = new JPanel();
         activePanel.setLayout(new BoxLayout(activePanel, BoxLayout.Y_AXIS));
@@ -121,6 +123,11 @@ final class ReconPanel extends JPanel {
         activeRow4.add(runTakeover);
         activeRow4.add(new JLabel("(opt-in — JWT replays GET/HEAD/OPTIONS; takeover fetches enumerated hosts)"));
         activePanel.add(activeRow4);
+
+        JPanel sidecarRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        sidecarRow.add(importSidecar);
+        sidecarRow.add(new JLabel("Import contract-validated reconctl JSONL (scope is checked again; no target traffic is sent)."));
+        activePanel.add(sidecarRow);
 
         // Corpus fuzz: fires the (otherwise-dormant) payloads/*.txt corpus in one or more encodings.
         JCheckBox encRaw = new JCheckBox("Raw", true);
@@ -241,6 +248,17 @@ final class ReconPanel extends JPanel {
         runActive.addActionListener(e -> controller.runActiveTests());
         runJwt.addActionListener(e -> controller.runJwtAttacks());
         runTakeover.addActionListener(e -> controller.runSubdomainTakeoverCheck());
+        importSidecar.addActionListener(e -> {
+            JFileChooser chooser = new JFileChooser();
+            chooser.setDialogTitle("Import reconctl JSONL");
+            if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
+            importSidecar.setEnabled(false);
+            controller.importSidecarJsonl(chooser.getSelectedFile().toPath(), summary -> {
+                importSidecar.setEnabled(true);
+                JOptionPane.showMessageDialog(this, summary, "reconctl import",
+                        summary.startsWith("[error]") ? JOptionPane.ERROR_MESSAGE : JOptionPane.INFORMATION_MESSAGE);
+            });
+        });
         runCorpusFuzz.addActionListener(e -> {
             Set<PayloadEncoder.Encoding> encodings = EnumSet.noneOf(PayloadEncoder.Encoding.class);
             if (encRaw.isSelected()) encodings.add(PayloadEncoder.Encoding.RAW);

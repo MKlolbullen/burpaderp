@@ -10,7 +10,7 @@
 ![Java](https://img.shields.io/badge/Java-21-c2410c)
 ![API](https://img.shields.io/badge/Burp-Montoya-db2777)
 
-[**Install**](#install) · [**Capabilities**](#capability-map) · [**CLI / CI mode**](#ci-native-scanning-no-burp-required) · [**How it works**](#what-it-does)
+[**Install**](#install) · [**Capabilities**](#capability-map) · [**Control plane**](docs/RUN_GOVERNANCE.md) · [**CLI / CI mode**](#ci-native-scanning-no-burp-required) · [**How it works**](#what-it-does)
 
 </div>
 
@@ -30,7 +30,7 @@ issue** (Dashboard / Target), not just a plugin tab.
 | 🩻 **Detect** | Secrets (RegexHound + `gf`), **SCA** for vulnerable JS libs, reflected-XSS surface, **DOM-XSS** source→sink, CORS/CSP/JWT hygiene, disclosure signals, exposed source maps |
 | 💥 **Exploit** | Collaborator-backed **SSRF/SSTI/XSS**, access-control/**IDOR**, **JWT** `alg:none` + weak-secret **forgery**, **GraphQL fuzzing**, **subdomain takeover**, open-redirect/CRLF |
 | 🧠 **AI** | Multi-provider **LLM JS bug-hunt** (PoC), cross-finding **exploit-chaining engine**, **Nuclei** AI templates + **ProjectDiscovery cloud** scans |
-| 📤 **Operate** | Native Burp issues + a passive **ScanCheck**, **SARIF + Markdown** export, per-project **persistence**, and a **headless CI scanner** (`java -jar`) |
+| 📤 **Operate** | Native Burp issues + a passive **ScanCheck**, **SARIF + Markdown** export, per-project **persistence**, a typed Go **`reconctl` sidecar import**, and a **headless CI scanner** (`java -jar`) |
 
 ## Install
 
@@ -80,6 +80,8 @@ The build accepts any installed JDK 21 or newer and always emits Java 21-compati
   **Export…** (writes `hosts.txt` / `ips.txt` / `assets.txt` to a chosen folder) and **Add all to
   scope** (adds every collected host/IP to Burp's target scope over http and https).
 - Indexes external payload `.txt` corpora without blindly auto-firing them.
+- Imports contract-validated `reconctl` JSONL through a bounded, scope-rechecking handoff — no tool is
+  launched and no request is sent merely by importing results. See [run governance](docs/RUN_GOVERNANCE.md).
 
 ### Passive XSS surface mapping
 
@@ -172,7 +174,7 @@ Enable it only against targets you are authorised to test.
   **alias amplification** (many aliases processed per request → rate-limit bypass / brute force), and
   **query batching** (an array of operations accepted per request). Each positive is a native issue.
 
-Results appear in the **Active tests** tab and, when confirmed, as Burp audit issues. Out-of-band
+Results appear in the **Active tests** tab and, when reproduced or stronger, as Burp audit issues. Out-of-band
 findings arrive asynchronously as the Collaborator poller correlates interactions.
 
 ### AI analysis (optional, manual)
@@ -287,6 +289,10 @@ Active discovery is:
 Payload execution and XSS vector firing are deliberately separate from discovery. Some corpora
 contain time-based, OOB, or destructive strings and should only be launched deliberately against
 authorized targets.
+
+The optional Go `reconctl` sidecar applies its own typed input/output contracts and keeps external
+network scans and active fuzzing behind explicit command flags. Burp re-checks scope when importing
+its JSONL output. See [run governance and the sidecar handoff](docs/RUN_GOVERNANCE.md).
 
 ## Build
 

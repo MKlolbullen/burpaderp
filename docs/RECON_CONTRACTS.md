@@ -90,13 +90,18 @@ This prevents a second implementation of Burp-specific state while giving the hi
 
 ## What still needs wiring after this foundation
 
+The first Java ↔ Go handoff is now available: `reconctl run` emits a UUID `run_id`, and Burp can import
+its canonical JSONL through a bounded, scope-rechecking **Import reconctl JSONL…** action. Imported
+findings flow into the existing `IssueReporter` as tentative native issues; imports never send target
+traffic or silently add scope.
+
 The contract module intentionally fails closed for output formats that are not yet machine-stable in the adapter layer. The next implementation tranche should add, in order:
 
-1. run-scoped Java <-> Go JSONL event bridge;
-2. command profiles for subfinder -> puredns -> dnsx -> httpx -> katana/gau -> Nuclei;
+1. launch sidecar stages directly from a run-scoped Burp coordinator (the current handoff deliberately imports an operator-selected JSONL artifact);
+2. a run-scoped DAG compositor over the existing subfinder -> puredns -> dnsx -> httpx -> katana/gau -> Nuclei command profiles;
 3. masscan document parser and rate/policy controls;
 4. Dalfox/Corsy/CRLFuzz machine-output adapters only after their exact supported formats are pinned/tested;
 5. durable per-run quarantine, assets, services, and findings imported into the existing Recon Hound models;
-6. scan-run IDs and request-policy decisions attached to every external event.
+6. scan-run IDs and request-policy decisions attached to every external event and quarantine record.
 
 The important part is that adding another tool after this point becomes an adapter + `ToolSpec` + tests, not another ad-hoc pipe in `ReconController`.

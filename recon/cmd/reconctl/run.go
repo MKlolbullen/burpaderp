@@ -30,6 +30,7 @@ func runTool(args []string, in io.Reader, out, errOut io.Writer) error {
 	allowDerived := fs.Bool("allow-derived-ips", false, "permit network probing DNS-derived IPs")
 	allowNetwork := fs.Bool("allow-network", false, "enable network_probe tools such as naabu")
 	allowActive := fs.Bool("allow-active", false, "enable active_fuzz/vulnerability tools such as nuclei")
+	runIDRaw := fs.String("run-id", "", "optional UUID used to correlate emitted records with a Burp scan run")
 	rejectsPath := fs.String("rejects", "", "quarantine JSONL path")
 	maxLine := fs.Int("max-line-bytes", 4<<20, "maximum normalized input record size")
 	maxRecords := fs.Int("max-records", 1_000_000, "maximum normalized input records")
@@ -38,6 +39,10 @@ func runTool(args []string, in io.Reader, out, errOut io.Writer) error {
 	}
 	if *toolName == "" {
 		return fmt.Errorf("--tool is required")
+	}
+	runID, err := recon.ResolveRunID(*runIDRaw)
+	if err != nil {
+		return err
 	}
 
 	registry := recon.DefaultToolRegistry()
@@ -78,7 +83,7 @@ func runTool(args []string, in io.Reader, out, errOut io.Writer) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	results, summary, runErr := recon.RunProfile(ctx, scope, spec.Name, inputs, policy, quarantine)
+	results, summary, runErr := recon.RunProfile(ctx, scope, spec.Name, inputs, policy, runID, quarantine)
 	enc := json.NewEncoder(out)
 	for _, record := range results {
 		if err := enc.Encode(record); err != nil {

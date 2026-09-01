@@ -73,6 +73,7 @@ Usage:
 Shared stream flags:
   --scope-domain example.com        repeatable
   --scope-cidr 203.0.113.0/24      repeatable; use /32 or /128 for a single IP
+  --run-id UUID                    optional execution ID on records emitted by run
   --allow-derived-ips              explicit override for DNS-derived network targets
   --rejects run/rejects.jsonl      append rejected records with reason/provenance
 
@@ -112,7 +113,7 @@ func runPlan(w io.Writer) error {
 		Profiles []recon.CommandProfile `json:"command_profiles"`
 		Payloads []recon.PayloadPolicy  `json:"payload_policies"`
 	}{
-		Tools: recon.DefaultToolRegistry().List(),
+		Tools:    recon.DefaultToolRegistry().List(),
 		Profiles: recon.ListCommandProfiles(),
 		Payloads: recon.DefaultPayloadRouter().List(),
 	}
