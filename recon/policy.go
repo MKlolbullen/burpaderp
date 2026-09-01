@@ -22,8 +22,8 @@ func DefaultRunPolicy() RunPolicy {
 		AllowLocalTransform: true,
 		AllowDNSProbe: true,
 		AllowHTTPProbe: true,
-		AllowNetworkProbe: true,
-		AllowActiveFuzz: true,
+		AllowNetworkProbe: false,
+		AllowActiveFuzz: false,
 	}
 }
 
