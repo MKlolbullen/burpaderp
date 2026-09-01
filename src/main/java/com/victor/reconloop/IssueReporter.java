@@ -14,6 +14,8 @@ import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
+import com.victor.reconloop.contracts.VerificationState;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static burp.api.montoya.scanner.audit.issues.AuditIssue.auditIssue;
@@ -36,12 +38,23 @@ final class IssueReporter {
 
     private final MontoyaApi api;
     private final Set<String> filed = ConcurrentHashMap.newKeySet();
+    private volatile UUID runId = UUID.randomUUID();
+    private volatile VerificationState defaultState = VerificationState.SIGNAL;
 
     IssueReporter(MontoyaApi api) {
         this.api = api;
     }
 
-    /** Maps the plugin's string severity labels onto Burp's severity enum. */
+    void setRunId(UUID runId) {
+        if (runId != null) this.runId = runId;
+    }
+
+    UUID runId() { return runId; }
+
+    void setDefaultState(VerificationState state) {
+        if (state != null) this.defaultState = state;
+    }
+
     static AuditIssueSeverity severity(String label) {
         if (label == null) return AuditIssueSeverity.INFORMATION;
         return switch (label.toUpperCase(Locale.ROOT)) {
@@ -52,7 +65,6 @@ final class IssueReporter {
         };
     }
 
-    /** Maps a string confidence label onto Burp's confidence enum. */
     static AuditIssueConfidence confidence(String label) {
         if (label == null) return AuditIssueConfidence.TENTATIVE;
         return switch (label.toUpperCase(Locale.ROOT)) {
@@ -62,10 +74,6 @@ final class IssueReporter {
         };
     }
 
-    /**
-     * Stable, persistence-safe fingerprint for a caller-supplied dedupe key. Existing fingerprints
-     * are returned unchanged so state can be loaded and saved repeatedly without double hashing.
-     */
     static String fingerprintKey(String dedupeKey) {
         if (dedupeKey == null) return null;
         String normalized = dedupeKey.replace('\n', ' ').replace('\r', ' ');
@@ -83,21 +91,15 @@ final class IssueReporter {
         }
     }
 
-    /** True once a finding with this dedupe key has been filed. */
     boolean alreadyFiled(String dedupeKey) {
         String fingerprint = fingerprintKey(dedupeKey);
         return fingerprint != null && filed.contains(fingerprint);
     }
 
-    /** Snapshot of fingerprinted dedupe keys filed so far (for persistence across sessions). */
     Set<String> filedSnapshot() {
         return new java.util.HashSet<>(filed);
     }
 
-    /**
-     * Re-seeds the dedupe set from persisted keys so a reloaded session won't re-file old findings.
-     * Legacy raw keys are fingerprinted during migration; already-fingerprinted keys remain unchanged.
-     */
     void restore(java.util.Collection<String> keys) {
         if (keys == null) return;
         for (String key : keys) {
@@ -106,16 +108,10 @@ final class IssueReporter {
         }
     }
 
-    /** Clears the dedupe set (used on Reset so findings can be re-filed after the site map is cleared). */
     void clearFiled() {
         filed.clear();
     }
 
-    /**
-     * Returns {@code rr} with a response marker highlighting bytes {@code [start, end)}, or unchanged
-     * when the bounds are invalid / there is no response. Bounds are clamped to the message length so
-     * an out-of-range offset can never produce an invalid marker at runtime.
-     */
     static HttpRequestResponse withResponseEvidence(HttpRequestResponse rr, int start, int end) {
         if (rr == null || !rr.hasResponse() || start < 0 || end <= start) return rr;
         try {
@@ -128,7 +124,6 @@ final class IssueReporter {
         }
     }
 
-    /** Request-side twin of {@link #withResponseEvidence}. */
     static HttpRequestResponse withRequestEvidence(HttpRequestResponse rr, int start, int end) {
         if (rr == null || rr.request() == null || start < 0 || end <= start) return rr;
         try {
@@ -141,14 +136,6 @@ final class IssueReporter {
         }
     }
 
-    /**
-     * Files a finding as a native Burp audit issue, deduplicated on
-     * {@code dedupeKey}. Any {@code null} evidence entries are dropped so a
-     * caller can pass a possibly-null request/response without special-casing.
-     *
-     * @return {@code true} if newly filed, {@code false} if a matching issue
-     *         was already registered or filing failed.
-     */
     boolean report(String dedupeKey,
                    String title,
                    String detailHtml,
@@ -166,11 +153,6 @@ final class IssueReporter {
         return true;
     }
 
-    /**
-     * Builds a deduplicated audit issue but does NOT add it to the site map — for use inside a
-     * {@code ScanCheck.passiveAudit}, where Burp's scanner owns issue registration and consolidation.
-     * Returns {@code null} if a matching issue was already filed/built or construction failed.
-     */
     AuditIssue buildIfNew(String dedupeKey,
                           String title,
                           String detailHtml,
@@ -188,24 +170,27 @@ final class IssueReporter {
                     .filter(Objects::nonNull)
                     .toArray(HttpRequestResponse[]::new);
             String name = title.startsWith("Recon Hound") ? title : "Recon Hound: " + title;
+            String annotated = annotate(detailHtml);
             return auditIssue(
-                    name, detailHtml, remediationHtml, url,
+                    name, annotated, remediationHtml, url,
                     severity, confidence, background, remediationBackground,
                     severity, cleaned);
         } catch (Exception e) {
-            // Reservation must be rolled back: otherwise a transient construction failure permanently
-            // suppresses this finding for the rest of the project session and after persistence.
             if (fingerprint != null) filed.remove(fingerprint);
             api.logging().logToError("Failed to build audit issue: " + title, e);
             return null;
         }
     }
 
-    /** Convenience overload that maps a string severity label. */
     boolean report(String dedupeKey, String title, String detailHtml, String remediationHtml,
                    String url, String severityLabel, AuditIssueConfidence confidence,
                    String background, String remediationBackground, HttpRequestResponse... evidence) {
         return report(dedupeKey, title, detailHtml, remediationHtml, url,
                 severity(severityLabel), confidence, background, remediationBackground, evidence);
+    }
+
+    private String annotate(String detailHtml) {
+        String body = detailHtml == null ? "" : detailHtml;
+        return "<p><b>Run</b> " + runId + " &nbsp; <b>Verification</b> " + defaultState + "</p>" + body;
     }
 }
