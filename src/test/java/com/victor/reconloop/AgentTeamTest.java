@@ -7,6 +7,9 @@ import java.util.Optional;
 
 import static org.junit.Assert.*;
 
+/**
+ * Tests for {@link AgentTeam} roster logic and leader election.
+ */
 public class AgentTeamTest {
 
     private static AgentTeam.AgentSpec spec(AgentRole role, LlmProvider provider, ReasoningEffort effort, int budget) {
@@ -15,6 +18,7 @@ public class AgentTeamTest {
 
     // ---- AgentRole defaults ----
 
+    /** Verifies that each LLM provider maps to its intended default role. */
     @Test
     public void eachProviderMapsToItsDefaultRole() {
         assertEquals(AgentRole.LEADER, AgentRole.defaultRoleFor(LlmProvider.ANTHROPIC));
@@ -24,6 +28,7 @@ public class AgentTeamTest {
         assertEquals(AgentRole.UNCENSORED, AgentRole.defaultRoleFor(LlmProvider.VENICE));
     }
 
+    /** Verifies that only exploit drafter and uncensored roles are marked as sensitive. */
     @Test
     public void onlyExploitDrafterAndUncensoredAreSensitive() {
         assertTrue(AgentRole.EXPLOIT_DRAFTER.sensitive());
@@ -35,12 +40,14 @@ public class AgentTeamTest {
 
     // ---- electLeader ----
 
+    /** Verifies that an empty or null roster yields no elected leader. */
     @Test
     public void emptyOrNullRosterElectsNoLeader() {
         assertEquals(Optional.empty(), AgentTeam.electLeader(List.of()));
         assertEquals(Optional.empty(), AgentTeam.electLeader(null));
     }
 
+    /** Verifies that an explicit LEADER role wins election even with lower power score. */
     @Test
     public void anExplicitLeaderRoleWinsEvenWithLowerPower() {
         AgentTeam.AgentSpec explicitLeader = spec(AgentRole.LEADER, LlmProvider.ANTHROPIC, ReasoningEffort.LOW, 1000);
@@ -50,6 +57,7 @@ public class AgentTeamTest {
                 AgentTeam.electLeader(List.of(strongerButNotLeader, explicitLeader)));
     }
 
+    /** Verifies that without an explicit leader, the highest power score wins. */
     @Test
     public void withoutAnExplicitLeaderTheMostPowerfulMemberLeads() {
         AgentTeam.AgentSpec weak = spec(AgentRole.RECON, LlmProvider.GEMINI, ReasoningEffort.LOW, 2000);
@@ -58,6 +66,7 @@ public class AgentTeamTest {
         assertEquals(Optional.of(strong), AgentTeam.electLeader(List.of(weak, strong)));
     }
 
+    /** Verifies that reasoning effort dominates token budget in power score calculation. */
     @Test
     public void effortDominatesBudgetInPowerScore() {
         AgentTeam.AgentSpec highEffortSmallBudget = spec(AgentRole.RECON, LlmProvider.OPENAI, ReasoningEffort.HIGH, 1);
@@ -67,6 +76,7 @@ public class AgentTeamTest {
                 AgentTeam.electLeader(List.of(lowEffortHugeBudget, highEffortSmallBudget)));
     }
 
+    /** Verifies that power score ties are broken by configuration order. */
     @Test
     public void tiesAreBrokenByConfigurationOrder() {
         AgentTeam.AgentSpec first = spec(AgentRole.RECON, LlmProvider.OPENAI, ReasoningEffort.HIGH, 5000);
@@ -77,6 +87,7 @@ public class AgentTeamTest {
 
     // ---- plan / describe / hasSensitiveMember ----
 
+    /** Verifies that plan preserves member order and correctly elects the leader. */
     @Test
     public void planPreservesMemberOrderAndElectsLeader() {
         AgentTeam.AgentSpec leader = spec(AgentRole.LEADER, LlmProvider.ANTHROPIC, ReasoningEffort.MAX, 8000);
@@ -87,6 +98,7 @@ public class AgentTeamTest {
         assertSame(leader, plan.leader());
     }
 
+    /** Verifies that describe output marks the leader with a star and lists all members. */
     @Test
     public void describeStarsTheLeaderAndNamesEveryMember() {
         AgentTeam.AgentSpec leader = spec(AgentRole.LEADER, LlmProvider.ANTHROPIC, ReasoningEffort.MAX, 8000);
@@ -98,6 +110,7 @@ public class AgentTeamTest {
         assertTrue(description.contains("escalates to a human"));
     }
 
+    /** Verifies that describe uses the provider's default model when none is configured. */
     @Test
     public void describeUsesTheProviderDefaultModelWhenNoneIsConfigured() {
         AgentTeam.AgentSpec recon = new AgentTeam.AgentSpec(
@@ -106,12 +119,14 @@ public class AgentTeamTest {
                 .contains(LlmProvider.GEMINI.defaultModel()));
     }
 
+    /** Verifies that an empty plan is described as having no agents. */
     @Test
     public void emptyPlanDescribesAsNoAgents() {
         assertEquals("No agents enabled.", AgentTeam.describe(AgentTeam.plan(List.of())));
         assertEquals("No agents enabled.", AgentTeam.describe(null));
     }
 
+    /** Verifies that hasSensitiveMember correctly detects presence of sensitive roles. */
     @Test
     public void hasSensitiveMemberReflectsRoles() {
         AgentTeam.AgentSpec recon = spec(AgentRole.RECON, LlmProvider.GEMINI, ReasoningEffort.LOW, 2000);

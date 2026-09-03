@@ -17,6 +17,7 @@ final class ActionGate {
     /** A proposed agent action, coarsely classified by risk. */
     enum ActionKind { PASSIVE_ANALYSIS, DRAFT_POC, ACTIVE_PROBE, EXECUTE_POC, DESTRUCTIVE, UNKNOWN }
 
+    /** The gate's ruling: whether an action may proceed automatically or requires explicit human approval. */
     enum GateDecision { AUTO_APPROVED, REQUIRES_HUMAN }
 
     private ActionGate() {}
@@ -33,6 +34,12 @@ final class ActionGate {
         };
     }
 
+    /**
+     * Returns true if the given action kind requires human approval before execution.
+     *
+     * @param kind the action kind to check
+     * @return true if human approval is required, false otherwise
+     */
     static boolean requiresHuman(ActionKind kind) {
         return decisionFor(kind) == GateDecision.REQUIRES_HUMAN;
     }
