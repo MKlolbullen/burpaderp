@@ -16,7 +16,8 @@ enum LlmProvider {
     ANTHROPIC("Anthropic (Claude)", "claude-opus-4-8", "ANTHROPIC_API_KEY", "text"),
     OPENAI("OpenAI", "gpt-4o", "OPENAI_API_KEY", "content"),
     XAI("xAI (Grok)", "grok-2-latest", "XAI_API_KEY", "content"),
-    GEMINI("Google Gemini", "gemini-1.5-pro", "GEMINI_API_KEY", "text");
+    GEMINI("Google Gemini", "gemini-1.5-pro", "GEMINI_API_KEY", "text"),
+    VENICE("Venice.ai", "venice-uncensored", "VENICE_API_KEY", "content");
 
     private final String label;
     private final String defaultModel;
@@ -41,6 +42,7 @@ enum LlmProvider {
             case ANTHROPIC -> "https://api.anthropic.com/v1/messages";
             case OPENAI -> "https://api.openai.com/v1/chat/completions";
             case XAI -> "https://api.x.ai/v1/chat/completions";
+            case VENICE -> "https://api.venice.ai/api/v1/chat/completions";
             case GEMINI -> "https://generativelanguage.googleapis.com/v1beta/models/"
                     + URLEncoder.encode(model, StandardCharsets.UTF_8)
                     + ":generateContent?key=" + URLEncoder.encode(apiKey, StandardCharsets.UTF_8);
@@ -54,7 +56,7 @@ enum LlmProvider {
                     {"content-type", "application/json"},
                     {"x-api-key", apiKey},
                     {"anthropic-version", "2023-06-01"}};
-            case OPENAI, XAI -> new String[][]{
+            case OPENAI, XAI, VENICE -> new String[][]{
                     {"content-type", "application/json"},
                     {"authorization", "Bearer " + apiKey}};
             case GEMINI -> new String[][]{
@@ -69,7 +71,7 @@ enum LlmProvider {
         return switch (this) {
             case ANTHROPIC -> "{\"model\":\"" + mdl + "\",\"max_tokens\":" + maxTokens
                     + ",\"system\":\"" + sys + "\",\"messages\":[{\"role\":\"user\",\"content\":\"" + usr + "\"}]}";
-            case OPENAI, XAI -> "{\"model\":\"" + mdl + "\",\"max_tokens\":" + maxTokens
+            case OPENAI, XAI, VENICE -> "{\"model\":\"" + mdl + "\",\"max_tokens\":" + maxTokens
                     + ",\"messages\":[{\"role\":\"system\",\"content\":\"" + sys + "\"},"
                     + "{\"role\":\"user\",\"content\":\"" + usr + "\"}]}";
             case GEMINI -> "{\"systemInstruction\":{\"parts\":[{\"text\":\"" + sys + "\"}]},"
