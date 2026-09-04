@@ -159,6 +159,29 @@ public class AgentOrchestratorTest {
     }
 
     @Test
+    public void aFailedLeaderRequestHoldsRatherThanProceeding() {
+        // LlmClient.complete returns these non-blank sentinels on failure; none may read as PROCEED.
+        for (String errorOutput : List.of(
+                "[error] Request failed: connection reset",
+                "[HTTP 429] rate limited",
+                "[warning] Could not parse response:\n{...}")) {
+            AgentOrchestrator.Outcome outcome = AgentOrchestrator.decide(List.of(), errorOutput);
+            assertEquals("error sentinel must HOLD: " + errorOutput,
+                    AgentOrchestrator.OrchestrationDecision.HOLD, outcome.decision());
+            assertTrue(outcome.escalations().isEmpty());
+            assertEquals("", outcome.leaderSynthesis());
+        }
+    }
+
+    @Test
+    public void aLeadingErrorSentinelIsNotSalvagedByLaterProposedActionLines() {
+        // Even if the failed body happens to contain a PROPOSED ACTION line, it must still HOLD.
+        String errorOutput = "[error] Request failed\nPROPOSED ACTION: summarise the auth flow";
+        assertEquals(AgentOrchestrator.OrchestrationDecision.HOLD,
+                AgentOrchestrator.decide(List.of(), errorOutput).decision());
+    }
+
+    @Test
     public void decidePreservesTheRoundsAndTrimmedSynthesis() {
         List<AgentOrchestrator.RoundResult> rounds = List.of(round(AgentRole.LEADER, LlmProvider.ANTHROPIC, "x"));
         AgentOrchestrator.Outcome outcome = AgentOrchestrator.decide(rounds, "  synthesis text  ");

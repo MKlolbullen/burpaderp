@@ -127,11 +127,14 @@ final class AgentOrchestrator {
     /**
      * The leader's decision. Every proposed action is run through the {@link ActionGate}; those needing
      * a human become escalations. ESCALATE if any escalation exists, PROCEED if the leader synthesised
-     * with no gated action, HOLD when there is no leader synthesis at all.
+     * with no gated action, HOLD when there is no usable leader synthesis — either none at all, or a
+     * failed provider response ({@link LlmClient#complete} returns non-blank {@code [error]}/{@code
+     * [HTTP …]}/{@code [warning]} sentinels on failure, which must never be read as a clean PROCEED).
      */
     static Outcome decide(List<RoundResult> rounds, String leaderOutput) {
         List<RoundResult> safeRounds = rounds == null ? List.of() : List.copyOf(rounds);
-        if (leaderOutput == null || leaderOutput.isBlank()) {
+        String synthesis = leaderOutput == null ? "" : leaderOutput.strip();
+        if (synthesis.isEmpty() || isProviderError(synthesis)) {
             return new Outcome(safeRounds, "", OrchestrationDecision.HOLD, List.of());
         }
         List<String> escalations = new ArrayList<>();
@@ -140,7 +143,12 @@ final class AgentOrchestrator {
         }
         OrchestrationDecision decision = escalations.isEmpty()
                 ? OrchestrationDecision.PROCEED : OrchestrationDecision.ESCALATE;
-        return new Outcome(safeRounds, leaderOutput.strip(), decision, List.copyOf(escalations));
+        return new Outcome(safeRounds, synthesis, decision, List.copyOf(escalations));
+    }
+
+    /** True if a leader output is one of {@link LlmClient#complete}'s failure sentinels, not a synthesis. */
+    private static boolean isProviderError(String synthesis) {
+        return synthesis.startsWith("[error]") || synthesis.startsWith("[HTTP ") || synthesis.startsWith("[warning]");
     }
 
     private static int indexOfIgnoreCase(String haystack, String needle) {
