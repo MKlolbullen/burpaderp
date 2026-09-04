@@ -27,6 +27,14 @@ final class ReconPanel extends JPanel {
     private JTextArea aiOutput;
     private JButton aiAnalyze;
 
+    // Agent-team activity tab
+    private Component agentTeamTab;
+    private ReconModel.AgentActivityTableModel agentActivityModel;
+    private JLabel agentDecision;
+    private JTextArea agentSynthesis;
+    private JTextArea agentEscalations;
+    private JLabel agentUsage;
+
     ReconPanel(MontoyaApi api, ReconController controller,
                ReconModel.FindingTableModel findingModel,
                ReconModel.DiscoveryTableModel discoveryModel,
@@ -229,6 +237,8 @@ final class ReconPanel extends JPanel {
         tabs.addTab("XSS vector library", new JScrollPane(vectorTable));
         aiTab = buildAiPanel(controller);
         tabs.addTab("AI analysis", aiTab);
+        agentTeamTab = buildAgentTeamPanel();
+        tabs.addTab("Agent team", agentTeamTab);
         tabs.addTab("Nuclei templates (AI)", buildNucleiPanel(controller));
         add(tabs, BorderLayout.CENTER);
 
@@ -466,16 +476,37 @@ final class ReconPanel extends JPanel {
         runTeam.addActionListener(e -> {
             List<AgentTeam.AgentSpec> specs = enabledAgentSpecs();
             if (specs.isEmpty()) { output.setText("[enable an LLM provider and set its key above]"); return; }
-            output.setText("Agent team starting over the in-scope finding inventory across " + specs.size()
-                    + " provider(s)... this makes LLM calls only; no target traffic is sent.");
+            output.setText("Agent team started across " + specs.size()
+                    + " provider(s) — see the \"Agent team\" tab. LLM calls only; no target traffic is sent.");
+            agentActivityModel.clear();
+            agentDecision.setText("Agent team running over the in-scope finding inventory across " + specs.size() + " provider(s)…");
+            agentSynthesis.setText("");
+            agentEscalations.setText("");
+            agentUsage.setText(" ");
+            if (agentTeamTab != null) tabs.setSelectedComponent(agentTeamTab);
             runTeam.setEnabled(false);
             analyze.setEnabled(false);
-            controller.runAgentTeam(specs, 60, summary -> {
-                output.setText(summary);
-                output.setCaretPosition(0);
-                runTeam.setEnabled(true);
-                analyze.setEnabled(true);
-            });
+            controller.runAgentTeam(specs, 60,
+                    entry -> agentActivityModel.add(new ReconModel.AgentActivityRow(
+                            entry.role().title(), entry.provider().label(), entry.model(), entry.status(),
+                            Long.toString(entry.estInputTokens()), Long.toString(entry.estOutputTokens()), entry.summary())),
+                    summary -> {
+                        agentDecision.setText("Decision: " + summary.decision());
+                        agentSynthesis.setText(summary.synthesis());
+                        agentSynthesis.setCaretPosition(0);
+                        if (summary.escalations().isEmpty()) {
+                            agentEscalations.setText("No proposed action needs to touch the target; nothing was sent.");
+                        } else {
+                            StringBuilder sb = new StringBuilder(summary.escalations().size()
+                                    + " proposed action(s) require human approval before any target traffic:\n");
+                            for (String esc : summary.escalations()) sb.append("  • ").append(esc).append('\n');
+                            agentEscalations.setText(sb.toString());
+                        }
+                        agentEscalations.setCaretPosition(0);
+                        agentUsage.setText(summary.usageText());
+                        runTeam.setEnabled(true);
+                        analyze.setEnabled(true);
+                    });
         });
         analyze.addActionListener(e -> {
             String text = input.getText();
@@ -491,6 +522,48 @@ final class ReconPanel extends JPanel {
                         analyze.setEnabled(true);
                     });
         });
+        return panel;
+    }
+
+    /**
+     * The "Agent team" tab: a curated live view of a multi-agent run — the per-round table (fed live as
+     * each provider finishes), the leader's decision and synthesis, the human-approval escalation queue,
+     * and an estimated-usage meter. Populated by {@link ReconController#runAgentTeam} via the
+     * "Run agent team (findings)" button in the AI tab; it makes LLM calls only and sends no target traffic.
+     */
+    private JComponent buildAgentTeamPanel() {
+        JPanel panel = new JPanel(new BorderLayout(6, 6));
+
+        agentDecision = new JLabel("No agent-team run yet. Enable providers in the AI tab and click \"Run agent team (findings)\".");
+        agentUsage = new JLabel(" ");
+        JPanel top = new JPanel();
+        top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
+        top.add(agentDecision);
+        top.add(agentUsage);
+
+        agentActivityModel = new ReconModel.AgentActivityTableModel();
+        JTable rounds = new JTable(agentActivityModel);
+        rounds.setAutoCreateRowSorter(false); // preserve execution order (recon → drafter → verifier → leader)
+
+        agentSynthesis = new JTextArea(12, 80);
+        agentSynthesis.setEditable(false); agentSynthesis.setLineWrap(true); agentSynthesis.setWrapStyleWord(true);
+        JPanel synthPanel = new JPanel(new BorderLayout(4, 4));
+        synthPanel.add(new JLabel("Leader synthesis:"), BorderLayout.NORTH);
+        synthPanel.add(new JScrollPane(agentSynthesis), BorderLayout.CENTER);
+
+        agentEscalations = new JTextArea(6, 80);
+        agentEscalations.setEditable(false); agentEscalations.setLineWrap(true); agentEscalations.setWrapStyleWord(true);
+        JPanel escPanel = new JPanel(new BorderLayout(4, 4));
+        escPanel.add(new JLabel("Human-approval queue — proposed steps the team may NOT run itself:"), BorderLayout.NORTH);
+        escPanel.add(new JScrollPane(agentEscalations), BorderLayout.CENTER);
+
+        JSplitPane lower = new JSplitPane(JSplitPane.VERTICAL_SPLIT, synthPanel, escPanel);
+        lower.setResizeWeight(0.65);
+        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, new JScrollPane(rounds), lower);
+        split.setResizeWeight(0.4);
+
+        panel.add(top, BorderLayout.NORTH);
+        panel.add(split, BorderLayout.CENTER);
         return panel;
     }
 

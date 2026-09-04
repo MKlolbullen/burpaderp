@@ -2041,14 +2041,22 @@ final class ReconController implements HttpHandler {
      * filed as a human-approval escalation. This method sends NO target traffic — only LLM calls.
      */
     void runAgentTeam(List<AgentTeam.AgentSpec> specs, int maxFindings,
-                      java.util.function.Consumer<String> onDone) {
-        java.util.function.Consumer<String> ui = s -> SwingUtilities.invokeLater(() -> onDone.accept(s));
+                      java.util.function.Consumer<AgentActivity.RunEntry> onRound,
+                      java.util.function.Consumer<AgentActivity.RunSummary> onDone) {
+        java.util.function.Consumer<AgentActivity.RunEntry> round =
+                e -> SwingUtilities.invokeLater(() -> onRound.accept(e));
+        java.util.function.Consumer<AgentActivity.RunSummary> done =
+                s -> SwingUtilities.invokeLater(() -> onDone.accept(s));
         if (specs == null || specs.isEmpty()) {
-            ui.accept("[error] No LLM provider enabled — check a provider's box and set its key.");
+            done.accept(new AgentActivity.RunSummary("HOLD",
+                    "[error] No LLM provider enabled — check a provider's box and set its key.", List.of(), ""));
             return;
         }
         AgentTeam.Plan plan = AgentTeam.plan(specs);
-        if (plan.leader() == null) { ui.accept("[error] No agent could be elected leader."); return; }
+        if (plan.leader() == null) {
+            done.accept(new AgentActivity.RunSummary("HOLD", "[error] No agent could be elected leader.", List.of(), ""));
+            return;
+        }
 
         llmWorker.submit(() -> {
             List<AuditIssue> issues = api.siteMap().issues().stream()
@@ -2061,7 +2069,11 @@ final class ReconController implements HttpHandler {
                     .sorted(java.util.Comparator.comparingInt(ReconController::severityRank))
                     .limit(Math.max(1, maxFindings))
                     .toList();
-            if (issues.isEmpty()) { ui.accept("[no in-scope findings — run a crawl/scan first]"); return; }
+            if (issues.isEmpty()) {
+                done.accept(new AgentActivity.RunSummary("HOLD",
+                        "[no in-scope findings — run a crawl/scan first]", List.of(), ""));
+                return;
+            }
 
             StringBuilder inv = new StringBuilder("FINDINGS INVENTORY (" + issues.size() + "):\n");
             int n = 1;
@@ -2074,50 +2086,51 @@ final class ReconController implements HttpHandler {
             String inventory = inv.toString();
 
             List<AgentOrchestrator.RoundResult> rounds = new ArrayList<>();
-            ui.accept("Agent team running over " + issues.size() + " finding(s): "
-                    + AgentTeam.describe(plan).replace("\n", " | "));
+            List<AgentActivity.RunEntry> entries = new ArrayList<>();
 
             for (AgentTeam.AgentSpec spec : AgentOrchestrator.workerOrder(plan)) {
-                String out = llmClient.complete(spec.provider(), spec.resolvedModel(), spec.apiKey(),
-                        AgentOrchestrator.systemPromptFor(spec.role()),
-                        AgentOrchestrator.userPromptFor(spec.role(), inventory, rounds));
+                String system = AgentOrchestrator.systemPromptFor(spec.role());
+                String user = AgentOrchestrator.userPromptFor(spec.role(), inventory, rounds);
+                String out = llmClient.complete(spec.provider(), spec.resolvedModel(), spec.apiKey(), system, user);
                 rounds.add(new AgentOrchestrator.RoundResult(spec.role(), spec.provider(), out));
+                AgentActivity.RunEntry entry = new AgentActivity.RunEntry(spec.role(), spec.provider(),
+                        spec.resolvedModel(), agentRoundStatus(out),
+                        AgentActivity.estimateTokens(system + "\n" + user), AgentActivity.estimateTokens(out),
+                        firstLine(out));
+                entries.add(entry);
+                round.accept(entry);
             }
 
             AgentTeam.AgentSpec leader = plan.leader();
+            String leaderSystem = AgentOrchestrator.systemPromptFor(AgentRole.LEADER);
+            String leaderUser = AgentOrchestrator.userPromptFor(AgentRole.LEADER, inventory, rounds);
             String leaderOut = llmClient.complete(leader.provider(), leader.resolvedModel(), leader.apiKey(),
-                    AgentOrchestrator.systemPromptFor(AgentRole.LEADER),
-                    AgentOrchestrator.userPromptFor(AgentRole.LEADER, inventory, rounds));
+                    leaderSystem, leaderUser);
             rounds.add(new AgentOrchestrator.RoundResult(AgentRole.LEADER, leader.provider(), leaderOut));
+            AgentActivity.RunEntry leaderEntry = new AgentActivity.RunEntry(AgentRole.LEADER, leader.provider(),
+                    leader.resolvedModel(), agentRoundStatus(leaderOut),
+                    AgentActivity.estimateTokens(leaderSystem + "\n" + leaderUser), AgentActivity.estimateTokens(leaderOut),
+                    firstLine(leaderOut));
+            entries.add(leaderEntry);
+            round.accept(leaderEntry);
 
             AgentOrchestrator.Outcome outcome = AgentOrchestrator.decide(rounds, leaderOut);
-
-            String url = issues.get(0).baseUrl();
-            for (AgentOrchestrator.RoundResult r : rounds) {
-                addActiveRow("INFO", "Agent-" + r.role().name(), r.provider().label(), "analysis",
-                        firstLine(r.output()), url);
-            }
-            for (String escalation : outcome.escalations()) {
-                addActiveRow("MEDIUM", "Agent-ESCALATION", "human approval", "awaiting human",
-                        truncate(escalation, 300), url);
-            }
-
-            StringBuilder report = new StringBuilder();
-            report.append("=== Agent team leader synthesis (").append(leader.provider().label()).append(") ===\n\n");
-            report.append(outcome.leaderSynthesis().isBlank() ? "(no synthesis produced)" : outcome.leaderSynthesis());
-            report.append("\n\n=== Decision: ").append(outcome.decision()).append(" ===\n");
-            if (!outcome.escalations().isEmpty()) {
-                report.append(outcome.escalations().size())
-                        .append(" proposed action(s) require human approval before any target traffic:\n");
-                for (String e : outcome.escalations()) report.append("  • ").append(e).append("\n");
-            } else {
-                report.append("No proposed action needs to touch the target; nothing was sent.\n");
-            }
+            String synthesis = outcome.leaderSynthesis().isBlank()
+                    ? "(no synthesis produced — the leader request may have failed; see the round table)"
+                    : outcome.leaderSynthesis();
             api.logging().logToOutput("[Recon Hound] Agent team run complete: " + outcome.decision()
                     + ", " + outcome.escalations().size() + " escalation(s).");
-            ui.accept(report.toString());
+            done.accept(new AgentActivity.RunSummary(outcome.decision().name(), synthesis,
+                    outcome.escalations(), AgentActivity.formatUsage(entries)));
             publishStatus();
         });
+    }
+
+    /** Round status for the activity table: an LlmClient failure sentinel reads as "error", else "ok". */
+    private static String agentRoundStatus(String output) {
+        if (output == null) return "error";
+        return (output.startsWith("[error]") || output.startsWith("[HTTP ") || output.startsWith("[warning]"))
+                ? "error" : "ok";
     }
 
     private static int severityRank(AuditIssue issue) {
