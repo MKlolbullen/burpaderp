@@ -13,7 +13,7 @@ import java.nio.charset.StandardCharsets;
  */
 enum LlmProvider {
 
-    ANTHROPIC("Anthropic (Claude)", "claude-opus-4-8", "ANTHROPIC_API_KEY", "text"),
+    ANTHROPIC("Anthropic (Claude)", "claude-opus-5", "ANTHROPIC_API_KEY", "text"),
     OPENAI("OpenAI", "gpt-4o", "OPENAI_API_KEY", "content"),
     XAI("xAI (Grok)", "grok-2-latest", "XAI_API_KEY", "content"),
     GEMINI("Google Gemini", "gemini-1.5-pro", "GEMINI_API_KEY", "text"),
