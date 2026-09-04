@@ -18,6 +18,8 @@ final class ReconModel {
     record ActiveRow(String severity, String testClass, String parameter, String status,
                      String evidence, String url) {}
     record AssetRow(String type, String value, String source) {}
+    record AgentActivityRow(String round, String provider, String model, String status,
+                            String estInput, String estOutput, String summary) {}
 
     static final class FindingTableModel extends AbstractTableModel {
         private final String[] columns = {"Severity", "Provider", "Rule", "Location", "Value", "URL", "AI Triage"};
@@ -150,5 +152,25 @@ final class ReconModel {
         void add(AssetRow row) { rows.add(0, row); fireTableRowsInserted(0, 0); }
         void clear() { int n = rows.size(); rows.clear(); if (n > 0) fireTableDataChanged(); }
         List<AssetRow> snapshot() { return new ArrayList<>(rows); }
+    }
+
+    /** Rounds of a single agent-team run, in execution order (recon → drafter → verifier → leader). */
+    static final class AgentActivityTableModel extends AbstractTableModel {
+        private final String[] columns = {"Round", "Provider", "Model", "Status", "~In tok", "~Out tok", "Summary"};
+        private final List<AgentActivityRow> rows = new ArrayList<>();
+        @Override public int getRowCount() { return rows.size(); }
+        @Override public int getColumnCount() { return columns.length; }
+        @Override public String getColumnName(int column) { return columns[column]; }
+        @Override public Object getValueAt(int row, int col) {
+            AgentActivityRow r = rows.get(row);
+            return switch (col) {
+                case 0 -> r.round(); case 1 -> r.provider(); case 2 -> r.model();
+                case 3 -> r.status(); case 4 -> r.estInput(); case 5 -> r.estOutput();
+                default -> r.summary();
+            };
+        }
+        // Appends (rounds arrive in execution order), unlike the prepend-newest tables above.
+        void add(AgentActivityRow row) { rows.add(row); int i = rows.size() - 1; fireTableRowsInserted(i, i); }
+        void clear() { int n = rows.size(); rows.clear(); if (n > 0) fireTableDataChanged(); }
     }
 }
