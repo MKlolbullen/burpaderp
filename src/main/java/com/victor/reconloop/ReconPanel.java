@@ -335,6 +335,21 @@ final class ReconPanel extends JPanel {
         return out;
     }
 
+    /**
+     * Derives an {@link AgentTeam.AgentSpec} per enabled provider using default role/effort/budget:
+     * each provider takes the role it is the natural default for, high effort, and a standard token
+     * budget. The richer per-provider role/effort/budget UI is a later slice; this lets the team run
+     * on the existing credential rows today.
+     */
+    private List<AgentTeam.AgentSpec> enabledAgentSpecs() {
+        List<AgentTeam.AgentSpec> out = new ArrayList<>();
+        for (LlmClient.LlmCredential cred : enabledCredentials()) {
+            out.add(new AgentTeam.AgentSpec(AgentRole.defaultRoleFor(cred.provider()), cred.provider(),
+                    cred.model(), cred.apiKey(), ReasoningEffort.HIGH, 8000));
+        }
+        return out;
+    }
+
     private JPanel buildAiPanel(ReconController controller) {
         JPanel panel = new JPanel(new BorderLayout(6, 6));
 
@@ -348,6 +363,11 @@ final class ReconPanel extends JPanel {
         JButton analyzeChains = new JButton("Chain findings → exploit chains");
         analyzeChains.setToolTipText("Sends the in-scope finding inventory (all audit issues) to the first enabled LLM provider "
                 + "and files ranked exploit chains (writeup + reproducible steps) as native Burp issues.");
+        JButton runTeam = new JButton("Run agent team (findings)");
+        runTeam.setToolTipText("Runs the enabled providers as a team over the in-scope finding inventory: recon "
+                + "prioritises, a drafter reasons a PoC on paper, a different-provider verifier attacks it, and the "
+                + "most powerful provider leads and synthesises. Anything that would touch the target is held as a "
+                + "human-approval escalation. Makes LLM calls only — no target traffic is sent.");
         this.aiAnalyze = analyze;
 
         List<CredentialRow> rows = new ArrayList<>();
@@ -380,6 +400,7 @@ final class ReconPanel extends JPanel {
         jsBar.add(jsBudget);
         jsBar.add(analyzeJs);
         jsBar.add(analyzeChains);
+        jsBar.add(runTeam);
         jsBar.add(new JLabel("(on-demand; results become native Burp issues)"));
 
         JTextArea system = new JTextArea(LlmClient.DEFAULT_JS_SYSTEM_PROMPT, 3, 80);
@@ -441,6 +462,20 @@ final class ReconPanel extends JPanel {
                         analyzeChains.setEnabled(true);
                         analyze.setEnabled(true);
                     });
+        });
+        runTeam.addActionListener(e -> {
+            List<AgentTeam.AgentSpec> specs = enabledAgentSpecs();
+            if (specs.isEmpty()) { output.setText("[enable an LLM provider and set its key above]"); return; }
+            output.setText("Agent team starting over the in-scope finding inventory across " + specs.size()
+                    + " provider(s)... this makes LLM calls only; no target traffic is sent.");
+            runTeam.setEnabled(false);
+            analyze.setEnabled(false);
+            controller.runAgentTeam(specs, 60, summary -> {
+                output.setText(summary);
+                output.setCaretPosition(0);
+                runTeam.setEnabled(true);
+                analyze.setEnabled(true);
+            });
         });
         analyze.addActionListener(e -> {
             String text = input.getText();

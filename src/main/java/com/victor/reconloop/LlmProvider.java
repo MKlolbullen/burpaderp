@@ -17,6 +17,7 @@ enum LlmProvider {
     OPENAI("OpenAI", "gpt-4o", "OPENAI_API_KEY", "content"),
     XAI("xAI (Grok)", "grok-2-latest", "XAI_API_KEY", "content"),
     GEMINI("Google Gemini", "gemini-1.5-pro", "GEMINI_API_KEY", "text"),
+    /** Venice.ai provider for uncensored content generation that mainstream models refuse. */
     VENICE("Venice.ai", "venice-uncensored", "VENICE_API_KEY", "content");
 
     private final String label;

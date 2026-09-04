@@ -2033,6 +2033,93 @@ final class ReconController implements HttpHandler {
         });
     }
 
+    /**
+     * Opt-in multi-agent run over the in-scope finding inventory. Runs the configured team — recon
+     * prioritises, the exploit drafter reasons a PoC on paper, a different-provider verifier attacks
+     * it, and the elected leader synthesises and proposes next steps. Every proposed step is classified
+     * by {@link ActionGate}: passive/drafting is reported, anything that would touch the target is
+     * filed as a human-approval escalation. This method sends NO target traffic — only LLM calls.
+     */
+    void runAgentTeam(List<AgentTeam.AgentSpec> specs, int maxFindings,
+                      java.util.function.Consumer<String> onDone) {
+        java.util.function.Consumer<String> ui = s -> SwingUtilities.invokeLater(() -> onDone.accept(s));
+        if (specs == null || specs.isEmpty()) {
+            ui.accept("[error] No LLM provider enabled — check a provider's box and set its key.");
+            return;
+        }
+        AgentTeam.Plan plan = AgentTeam.plan(specs);
+        if (plan.leader() == null) { ui.accept("[error] No agent could be elected leader."); return; }
+
+        llmWorker.submit(() -> {
+            List<AuditIssue> issues = api.siteMap().issues().stream()
+                    .filter(Objects::nonNull)
+                    .filter(i -> { try { return api.scope().isInScope(i.baseUrl()); } catch (Exception e) { return false; } })
+                    .filter(i -> !i.name().startsWith("Recon Hound: Chain:"))
+                    .collect(java.util.stream.Collectors.toMap(
+                            i -> i.name() + "\0" + i.baseUrl(), i -> i, (a, b) -> a, LinkedHashMap::new))
+                    .values().stream()
+                    .sorted(java.util.Comparator.comparingInt(ReconController::severityRank))
+                    .limit(Math.max(1, maxFindings))
+                    .toList();
+            if (issues.isEmpty()) { ui.accept("[no in-scope findings — run a crawl/scan first]"); return; }
+
+            StringBuilder inv = new StringBuilder("FINDINGS INVENTORY (" + issues.size() + "):\n");
+            int n = 1;
+            for (AuditIssue i : issues) {
+                inv.append(n++).append(". [").append(i.severity()).append("] ").append(i.name())
+                        .append(" — ").append(i.baseUrl()).append("\n");
+                String d = htmlToText(i.detail());
+                if (!d.isBlank()) inv.append("   ").append(d.length() > 300 ? d.substring(0, 297) + "..." : d).append("\n");
+            }
+            String inventory = inv.toString();
+
+            List<AgentOrchestrator.RoundResult> rounds = new ArrayList<>();
+            ui.accept("Agent team running over " + issues.size() + " finding(s): "
+                    + AgentTeam.describe(plan).replace("\n", " | "));
+
+            for (AgentTeam.AgentSpec spec : AgentOrchestrator.workerOrder(plan)) {
+                String out = llmClient.complete(spec.provider(), spec.resolvedModel(), spec.apiKey(),
+                        AgentOrchestrator.systemPromptFor(spec.role()),
+                        AgentOrchestrator.userPromptFor(spec.role(), inventory, rounds));
+                rounds.add(new AgentOrchestrator.RoundResult(spec.role(), spec.provider(), out));
+            }
+
+            AgentTeam.AgentSpec leader = plan.leader();
+            String leaderOut = llmClient.complete(leader.provider(), leader.resolvedModel(), leader.apiKey(),
+                    AgentOrchestrator.systemPromptFor(AgentRole.LEADER),
+                    AgentOrchestrator.userPromptFor(AgentRole.LEADER, inventory, rounds));
+            rounds.add(new AgentOrchestrator.RoundResult(AgentRole.LEADER, leader.provider(), leaderOut));
+
+            AgentOrchestrator.Outcome outcome = AgentOrchestrator.decide(rounds, leaderOut);
+
+            String url = issues.get(0).baseUrl();
+            for (AgentOrchestrator.RoundResult r : rounds) {
+                addActiveRow("INFO", "Agent-" + r.role().name(), r.provider().label(), "analysis",
+                        firstLine(r.output()), url);
+            }
+            for (String escalation : outcome.escalations()) {
+                addActiveRow("MEDIUM", "Agent-ESCALATION", "human approval", "awaiting human",
+                        truncate(escalation, 300), url);
+            }
+
+            StringBuilder report = new StringBuilder();
+            report.append("=== Agent team leader synthesis (").append(leader.provider().label()).append(") ===\n\n");
+            report.append(outcome.leaderSynthesis().isBlank() ? "(no synthesis produced)" : outcome.leaderSynthesis());
+            report.append("\n\n=== Decision: ").append(outcome.decision()).append(" ===\n");
+            if (!outcome.escalations().isEmpty()) {
+                report.append(outcome.escalations().size())
+                        .append(" proposed action(s) require human approval before any target traffic:\n");
+                for (String e : outcome.escalations()) report.append("  • ").append(e).append("\n");
+            } else {
+                report.append("No proposed action needs to touch the target; nothing was sent.\n");
+            }
+            api.logging().logToOutput("[Recon Hound] Agent team run complete: " + outcome.decision()
+                    + ", " + outcome.escalations().size() + " escalation(s).");
+            ui.accept(report.toString());
+            publishStatus();
+        });
+    }
+
     private static int severityRank(AuditIssue issue) {
         return switch (issue.severity()) {
             case HIGH -> 0;

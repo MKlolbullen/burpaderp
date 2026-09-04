@@ -12,7 +12,16 @@ import java.util.Locale;
  * consumes these is the single place to adjust when a provider changes its API.
  */
 enum ReasoningEffort {
-    LOW, MEDIUM, HIGH, XHIGH, MAX;
+    /** Low reasoning effort: minimal deliberation, fastest response. */
+    LOW,
+    /** Medium reasoning effort: balanced deliberation and speed. */
+    MEDIUM,
+    /** High reasoning effort: thorough analysis, default level. */
+    HIGH,
+    /** Extra-high reasoning effort: deep deliberation for complex problems. */
+    XHIGH,
+    /** Maximum reasoning effort: exhaustive analysis, slowest but most thorough. */
+    MAX;
 
     /** Anthropic {@code output_config.effort} value (low|medium|high|xhigh|max). */
     String anthropicEffort() {

@@ -20,12 +20,22 @@ final class AgentTeam {
     record AgentSpec(AgentRole role, LlmProvider provider, String model, String apiKey,
                      ReasoningEffort effort, int tokenBudget) {
 
-        /** "Most powerful" score used for leader election when no role is explicitly LEADER. */
+        /**
+         * Returns the "most powerful" score for leader election when no role is explicitly LEADER.
+         * Score is based on reasoning effort (dominant factor) and token budget (tiebreaker).
+         *
+         * @return the power score, higher values indicate more capable agents
+         */
         long powerScore() {
             ReasoningEffort e = effort == null ? ReasoningEffort.HIGH : effort;
             return (long) e.ordinal() * 1_000_000L + Math.max(0, tokenBudget);
         }
 
+        /**
+         * Returns the effective model name, using the provider's default if none is explicitly configured.
+         *
+         * @return the resolved model name
+         */
         String resolvedModel() {
             return model == null || model.isBlank() ? provider.defaultModel() : model.trim();
         }
