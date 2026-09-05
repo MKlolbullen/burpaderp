@@ -2028,7 +2028,8 @@ final class ReconController implements HttpHandler {
                     credential.provider(), credential.model(), credential.apiKey(), inv.toString());
             long chainInTokens = AgentActivity.estimateTokens(inv.toString());
             if (analysis.chains().isEmpty()) {
-                boolean chainErr = analysis.error() != null && analysis.error().startsWith("[error");
+                boolean chainErr = analysis.error() != null
+                        && AiFeed.outcomeFor(analysis.error()) == AiFeed.Outcome.ERROR;
                 emitAiFeed(AiFeed.Kind.CHAIN_ANALYSIS, credential.provider(), credential.model(),
                         chainErr ? AiFeed.Outcome.ERROR : AiFeed.Outcome.OK, chainInTokens, 0,
                         "Chain analysis: " + issues.size() + " finding(s)",
@@ -2149,7 +2150,9 @@ final class ReconController implements HttpHandler {
                 case PROCEED -> AiFeed.Outcome.OK;
                 case ESCALATE, HOLD -> AiFeed.Outcome.HELD;
             };
-            emitAiFeed(AiFeed.Kind.GATE_DECISION, leader.provider(), leader.resolvedModel(), decisionOutcome,
+            // The gate decision is computed locally, not by an LLM call, so it carries no provider/model
+            // (AiFeed.aggregate must not count it as a provider call).
+            emitAiFeed(AiFeed.Kind.GATE_DECISION, null, null, decisionOutcome,
                     0, 0, "Leader decision: " + outcome.decision(), firstLine(synthesis));
             for (String esc : outcome.escalations()) {
                 emitAiFeed(AiFeed.Kind.ESCALATION, null, null, AiFeed.Outcome.HELD, 0, 0,

@@ -182,6 +182,9 @@ final class ReconModel {
     static final class AiFeedTableModel extends AbstractTableModel {
         private final String[] columns = {"Time", "Kind", "Provider", "Model", "Outcome", "~In tok", "~Out tok", "Detail"};
         private final List<AiFeed.Event> rows = new ArrayList<>();
+        /** Mirror the feed store's cap so the table and the usage meter (fed from the capped snapshot)
+         *  never diverge: rows are newest-first, so the oldest — the one the store evicted — is the last. */
+        private static final int CAP = AiFeed.Store.DEFAULT_CAP;
         private static final java.time.format.DateTimeFormatter TIME =
                 java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss").withZone(java.time.ZoneId.systemDefault());
 
@@ -201,7 +204,15 @@ final class ReconModel {
                 default -> e.detail().isBlank() ? e.title() : e.title() + " — " + e.detail();
             };
         }
-        void add(AiFeed.Event event) { rows.add(0, event); fireTableRowsInserted(0, 0); }
+        void add(AiFeed.Event event) {
+            rows.add(0, event);
+            fireTableRowsInserted(0, 0);
+            if (rows.size() > CAP) {
+                int last = rows.size() - 1;
+                rows.remove(last);
+                fireTableRowsDeleted(last, last);
+            }
+        }
         void clear() { int n = rows.size(); rows.clear(); if (n > 0) fireTableDataChanged(); }
     }
 }
