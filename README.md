@@ -155,6 +155,14 @@ An opt-in **Active testing** panel adds discovery and confirmation that require 
 traffic. It is **disabled by default**, scope-checked per request, throttled, and request-capped.
 Enable it only against targets you are authorised to test.
 
+Every parameter-level probe below injects through a shared **insertion-point model** (`InsertionPoint`)
+rather than query/body parameters alone — so SQLi, NoSQLi, SSTI, path traversal, reflected/blind XSS,
+command injection, open-redirect and CRLF are all exercised against a curated allow-list of **fuzzable
+request headers** too (`X-Forwarded-For`/`-Host`, `Referer`, `User-Agent`, client-IP and URL-override
+headers, …). Cookies and transport/auth headers (`Host`, `Authorization`, …) are never mutated, so a
+probe can't malform the request or drop the session. (Path segments and JSON body values are the next
+extension of the same model.)
+
 - **crt.sh subdomain enumeration** — passive OSINT against the certificate-transparency log
   (`crt.sh`, never the target). Discovered hosts feed the normal discovery/scope pipeline.
 - **Arjun-style parameter discovery** — probes a built-in wordlist (extendable via
