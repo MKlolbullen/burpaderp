@@ -79,6 +79,23 @@ final class ActiveTestEngine {
             "'; WAITFOR DELAY '0:0:5'-- -"); // MSSQL
     private static final int SQLI_TIME_DELAY_SECONDS = 5;
 
+    // NoSQL injection: values that break a Mongo-style query or its $where JavaScript so the datastore
+    // surfaces a parser/driver error. Detection is error-based and baseline-differenced (like SQLi) —
+    // a NoSQL error signature that appears only after injection, never a response-length heuristic that
+    // would false-positive on ordinary dynamic content. The strings double as operator/$where probes.
+    private static final List<String> NOSQL_PAYLOADS = List.of(
+            "'\"",                         // mismatched quotes: breaks string context
+            "'; return true; var x='",      // $where JavaScript injection
+            "\" || \"1\"==\"1",            // $where boolean-OR injection
+            "{\"$gt\":\"\"}",              // operator object supplied where a scalar is expected
+            "[$ne]",                        // bracket-operator key fragment
+            "\\");                          // trailing backslash: unterminated escape
+    private static final Pattern NOSQL_ERROR = Pattern.compile(
+            "(?i)mongoerror|mongonetworkerror|mongoserverror|mongoose|bsonerror|\\bbson\\b|"
+                    + "e11000 duplicate key|cast to objectid failed|casterror|"
+                    + "\\$where|\\$regex|unterminated string|couchdberror|"
+                    + "unexpected token .* in json|error parsing (bson|json)");
+
     // Path traversal / LFI: read a well-known OS file through the parameter, across depth, separator,
     // and encoding variants that defeat naive filters. A hit is confirmed only when a file's canary
     // appears in the payload response but NOT in the baseline (so a page that always mentions "root:"
@@ -166,6 +183,7 @@ final class ActiveTestEngine {
                 if (!budget.exhausted()) testOpenRedirect(base, parameter, findings);
                 if (!budget.exhausted()) testCrlf(base, parameter, findings);
                 if (!budget.exhausted()) testSqli(base, parameter, findings);
+                if (!budget.exhausted()) testNoSqlInjection(base, parameter, findings);
                 if (!budget.exhausted()) testPathTraversal(base, parameter, findings);
             }
             if (!budget.exhausted()) testHostHeaderInjection(base, findings);
@@ -321,6 +339,31 @@ final class ActiveTestEngine {
                 out.add(new ActiveFinding("HIGH", "SQLi", parameter.name(),
                         "Time-based blind: response time increased by ~" + SQLI_TIME_DELAY_SECONDS
                                 + "s in response to payload " + payload, true, base.url()));
+                break;
+            }
+        }
+        return budgetUsed() - before;
+    }
+
+    /**
+     * NoSQL injection (error-based): sends a baseline, then values that break a Mongo-style query or its
+     * {@code $where} JavaScript, and reports HIGH when a NoSQL driver/parser error signature appears that
+     * was absent from the baseline. Baseline-differencing keeps it specific — an app whose normal output
+     * already carries such a signature is skipped rather than mis-flagged.
+     */
+    private int testNoSqlInjection(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
+        int before = budgetUsed();
+        HttpResponse baseline = sendMutated(base, parameter, parameter.value());
+        if (baseline == null || budgetExhausted()) return budgetUsed() - before;
+        if (containsNoSqlError(baseline.bodyToString())) return budgetUsed() - before;
+        for (String payload : NOSQL_PAYLOADS) {
+            if (budgetExhausted()) break;
+            HttpResponse response = sendMutated(base, parameter, payload);
+            if (response == null) continue;
+            if (containsNoSqlError(response.bodyToString())) {
+                out.add(new ActiveFinding("HIGH", "NoSQLi", parameter.name(),
+                        "Injecting " + payload + " produced a NoSQL datastore error signature not present "
+                                + "in the baseline response", true, base.url()));
                 break;
             }
         }
@@ -679,6 +722,11 @@ final class ActiveTestEngine {
     /** True if {@code body} contains a recognizable database-error signature. */
     static boolean containsSqlError(String body) {
         return body != null && !body.isEmpty() && SQL_ERROR.matcher(body).find();
+    }
+
+    /** True when a NoSQL (Mongo-style) driver/parser error signature is present. */
+    static boolean containsNoSqlError(String body) {
+        return body != null && !body.isEmpty() && NOSQL_ERROR.matcher(body).find();
     }
 
     /**

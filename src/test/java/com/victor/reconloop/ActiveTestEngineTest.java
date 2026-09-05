@@ -391,4 +391,33 @@ public class ActiveTestEngineTest {
         assertTrue(ActiveTestEngine.detectPathTraversal(
                 "The root cause of the issue was a misconfiguration.", "").isEmpty());
     }
+
+    // ---- containsNoSqlError ----
+
+    @Test
+    public void mongoDriverErrorsAreRecognised() {
+        assertTrue(ActiveTestEngine.containsNoSqlError("MongoError: unknown operator: $wheree"));
+        assertTrue(ActiveTestEngine.containsNoSqlError("MongoServerError: E11000 duplicate key error collection"));
+        assertTrue(ActiveTestEngine.containsNoSqlError("CastError: Cast to ObjectId failed for value \"x\""));
+        assertTrue(ActiveTestEngine.containsNoSqlError("Uncaught BSONError: bad BSON document"));
+        assertTrue(ActiveTestEngine.containsNoSqlError("ValidationError from Mongoose schema"));
+    }
+
+    @Test
+    public void reflectedWhereOperatorCountsAsANoSqlSignature() {
+        assertTrue(ActiveTestEngine.containsNoSqlError("SyntaxError in $where clause near return true"));
+    }
+
+    @Test
+    public void cleanOrEmptyBodyIsNotANoSqlError() {
+        assertFalse(ActiveTestEngine.containsNoSqlError("Welcome back, your dashboard is ready."));
+        assertFalse(ActiveTestEngine.containsNoSqlError(""));
+        assertFalse(ActiveTestEngine.containsNoSqlError(null));
+    }
+
+    @Test
+    public void aPlainSqlErrorIsNotMistakenForNoSql() {
+        assertFalse(ActiveTestEngine.containsNoSqlError("ORA-00933: SQL command not properly ended"));
+        assertFalse(ActiveTestEngine.containsNoSqlError("You have an error in your SQL syntax"));
+    }
 }
