@@ -29,7 +29,7 @@ and nothing that touches the target happens without a human first.
 | --- | --- |
 | 🔎 **Discover** | Crawl + redirect chains, **webpack-chunk reconstruction**, source-map mining, OpenAPI/GraphQL ingest, crt.sh subdomains, Arjun param discovery, host/IP inventory |
 | 🩻 **Detect** | Secrets (RegexHound + `gf`), **SCA** for vulnerable JS libs, reflected-XSS surface, **DOM-XSS** source→sink, CORS/CSP/JWT hygiene, **session-cookie & CSRF** hygiene, **excessive data exposure / mass assignment**, **OAuth/OIDC** & **SAML** flaws, debug-endpoint & **BFLA** candidates, disclosure signals, exposed source maps |
-| 💥 **Exploit** | Collaborator-backed **SSRF/SSTI/blind-XSS/CMDi**, native **SQLi** (error/boolean/time-based) + optional **sqlmap** hand-off, canary-confirmed **path traversal / LFI**, active **CORS** origin-bypass confirmation, **rate-limit** & **file-upload** probes, access-control/**IDOR**, **JWT** `alg:none` + weak-secret **forgery**, **GraphQL fuzzing**, **subdomain takeover**, open-redirect/CRLF, opt-in **encoded corpus fuzzing** |
+| 💥 **Exploit** | Collaborator-backed **SSRF/SSTI/blind-XSS/CMDi**, native **SQLi** (error/boolean/time-based) + optional **sqlmap** hand-off, canary-confirmed **path traversal / LFI**, in-band & OOB **XXE**, active **CORS** origin-bypass confirmation, **rate-limit** & **file-upload** probes, access-control/**IDOR**, **JWT** `alg:none` + weak-secret **forgery**, **GraphQL fuzzing**, **subdomain takeover**, open-redirect/CRLF, opt-in **encoded corpus fuzzing** |
 | 🤖 **Agents** | A configurable multi-provider **AI agent team** over the finding inventory — recon → PoC drafter → adversarial verifier → leader — behind a **fail-closed human-approval gate**: it reasons, it never touches the target on its own |
 | 🧠 **AI** | Five providers run together — **LLM JS bug-hunt** (PoC), cross-finding **exploit-chaining**, cross-provider **false-positive triage** (majority vote), **Nuclei** AI templates + **ProjectDiscovery cloud** scans |
 | 👁️ **Observe** | A single **AI feed** streams every LLM touchpoint — triage, JS review, chaining, Nuclei authoring, agent rounds, and every gate decision — newest-first, with an estimated-usage meter, in-memory and never persisted |
@@ -174,6 +174,11 @@ Enable it only against targets you are authorised to test.
   and `..%5c`, absolute paths). Confirmed HIGH only when a target-file canary (a `/etc/passwd` root
   line pinned to UID:GID `0:0`, or `win.ini` section markers) appears in the payload response but was
   **absent from the baseline** — so a page that legitimately contains such text is never mis-flagged.
+- **XXE** (`XxeEngine`) — only for requests that already carry an XML body. Replaces the body with a
+  minimal document declaring an external entity: an **in-band file-read** variant, confirmed HIGH by
+  the same `/etc/passwd`/`win.ini` baseline-differenced canaries; and, when a Collaborator is
+  configured, an **out-of-band** external-entity payload whose callback the poller correlates
+  asynchronously.
 - **Reflected-XSS confirmation** — a metacharacter canary reveals which of `< > " '` survive
   unencoded at the sink.
 - **Active CORS confirmation** — replays requests with crafted attacker `Origin` headers (arbitrary
