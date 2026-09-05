@@ -347,4 +347,48 @@ public class ActiveTestEngineTest {
         assertFalse(ActiveTestEngine.anyRateLimited(List.of(), List.of(), List.of()));
         assertFalse(ActiveTestEngine.anyRateLimited(null, null, null));
     }
+
+    // ---- detectPathTraversal ----
+
+    @Test
+    public void unixPasswdCanaryAbsentFromBaselineIsReported() {
+        String body = "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\n";
+        Optional<String> hit = ActiveTestEngine.detectPathTraversal(body, "Welcome, please log in.");
+        assertTrue(hit.isPresent());
+        assertTrue(hit.get().contains("/etc/passwd"));
+    }
+
+    @Test
+    public void passwdLineWithShadowedPasswordStillMatches() {
+        // The password field may be "x", "*", or a hash; the UID:GID 0:0 pin is what confirms root.
+        assertTrue(ActiveTestEngine.detectPathTraversal("root:*:0:0:Charlie &:/root:/bin/csh", "").isPresent());
+    }
+
+    @Test
+    public void windowsWinIniCanaryIsReportedCaseInsensitively() {
+        Optional<String> hit = ActiveTestEngine.detectPathTraversal("; for 16-bit app support\n[FONTS]\n", "home page");
+        assertTrue(hit.isPresent());
+        assertTrue(hit.get().contains("win.ini"));
+    }
+
+    @Test
+    public void canaryPresentInBaselineIsNotReported() {
+        // A page that legitimately contains a passwd-looking line must not be flagged as a file read.
+        String same = "example config: root:x:0:0:svc account\n";
+        assertTrue(ActiveTestEngine.detectPathTraversal(same, same).isEmpty());
+    }
+
+    @Test
+    public void noCanaryOrEmptyBodyIsNotReported() {
+        assertTrue(ActiveTestEngine.detectPathTraversal("nothing sensitive here", "baseline").isEmpty());
+        assertTrue(ActiveTestEngine.detectPathTraversal("", "baseline").isEmpty());
+        assertTrue(ActiveTestEngine.detectPathTraversal(null, "baseline").isEmpty());
+    }
+
+    @Test
+    public void ordinaryTextContainingTheWordRootIsNotAFalsePositive() {
+        // "root" as a word, without the UID:GID 0:0 structure, must not match.
+        assertTrue(ActiveTestEngine.detectPathTraversal(
+                "The root cause of the issue was a misconfiguration.", "").isEmpty());
+    }
 }

