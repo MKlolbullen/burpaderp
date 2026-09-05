@@ -172,6 +172,7 @@ final class ActiveTestEngine {
             if (!budget.exhausted()) testCors(base, findings);
             if (!budget.exhausted()) testRateLimit(base, findings);
             if (!budget.exhausted()) testFileUploadBypass(base, findings);
+            if (!budget.exhausted()) testXxe(base, findings);
             return findings;
         } finally {
             requestBudget.remove();
@@ -356,6 +357,61 @@ final class ActiveTestEngine {
         long start = System.currentTimeMillis();
         sendMutated(base, parameter, value);
         return System.currentTimeMillis() - start;
+    }
+
+    /**
+     * XML External Entity: only for requests that already carry an XML body. Sends the original body as
+     * a baseline, then an in-band file-read payload — confirmed HIGH via the shared file canaries when a
+     * leaked {@code /etc/passwd} / {@code win.ini} marker appears that was absent from the baseline — and,
+     * if a Collaborator is configured, an out-of-band external-entity payload whose callback the poller
+     * correlates asynchronously. Runs once per request (the body is the injection point, not a parameter).
+     */
+    private int testXxe(HttpRequest base, List<ActiveFinding> out) {
+        if (budgetExhausted()) return 0;
+        String body = base.bodyToString();
+        if (!XxeEngine.isXmlBody(base.headerValue("Content-Type"), body)) return 0;
+
+        int before = budgetUsed();
+        HttpResponse baseline = sendBody(base, body);
+        if (baseline == null || budgetExhausted()) return budgetUsed() - before;
+        String baselineBody = baseline.bodyToString();
+
+        for (String payload : XxeEngine.fileReadPayloads()) {
+            if (budgetExhausted()) break;
+            HttpResponse response = sendBody(base, payload);
+            if (response == null) continue;
+            Optional<String> hit = detectPathTraversal(response.bodyToString(), baselineBody);
+            if (hit.isPresent()) {
+                out.add(new ActiveFinding("HIGH", "XXE", "(request body)",
+                        "In-band XXE: an external entity returned " + hit.get() + " that was absent from "
+                                + "the baseline response", true, base.url()));
+                return budgetUsed() - before;
+            }
+        }
+
+        CollaboratorClient client = collaborator;
+        if (client != null && !budgetExhausted()) {
+            String correlation = encodeCorrelation("XXE", "(body)", base.url());
+            CollaboratorPayload payload = client.generatePayload(correlation);
+            HttpResponse response = sendBody(base, XxeEngine.buildOobPayload("http://" + payload + "/xxe"));
+            if (response != null) {
+                out.add(new ActiveFinding("INFO", "XXE", "(request body)",
+                        "External-entity OOB payload sent to " + payload + "; awaiting Collaborator callback",
+                        false, base.url()));
+            }
+        }
+        return budgetUsed() - before;
+    }
+
+    /** Sends {@code base} with its body replaced by {@code body}, through the scope/budget gate. */
+    private HttpResponse sendBody(HttpRequest base, String body) {
+        try {
+            HttpRequestResponse rr = sendRequest(base.withBody(body));
+            return rr == null ? null : rr.response();
+        } catch (Exception e) {
+            api.logging().logToError("XXE probe failed for " + base.url(), e);
+            return null;
+        }
     }
 
     private int testHostHeaderInjection(HttpRequest base, List<ActiveFinding> out) {
