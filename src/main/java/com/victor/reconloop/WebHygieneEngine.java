@@ -37,6 +37,18 @@ final class WebHygieneEngine {
         analyzeCsp(response.headerValue("Content-Security-Policy"),
                 isHtml(response.headerValue("Content-Type")), notes);
 
+        analyzeSecurityHeaders(
+                isHtml(response.headerValue("Content-Type")),
+                request != null && request.url() != null
+                        && request.url().toLowerCase(Locale.ROOT).startsWith("https"),
+                response.headerValue("X-Frame-Options"),
+                response.headerValue("Content-Security-Policy"),
+                response.headerValue("Strict-Transport-Security"),
+                response.headerValue("X-Content-Type-Options"),
+                response.headerValue("Referrer-Policy"),
+                response.headerValue("Permissions-Policy"),
+                notes);
+
         for (HttpHeader header : response.headers()) {
             if (header.name().equalsIgnoreCase("Set-Cookie")) analyzeCookie(header.value(), notes);
         }
@@ -106,6 +118,53 @@ final class WebHygieneEngine {
         if (!lower.contains("base-uri"))
             notes.add(new Note("LOW", "CSP missing base-uri",
                     "No base-uri directive; <base> injection can redirect relative script loads."));
+    }
+
+    /**
+     * Response security-header hygiene beyond CSP: clickjacking (framing) protection, HSTS on HTTPS,
+     * MIME-sniffing protection, and the referrer/permissions policies. Header-only checks — everything
+     * here observes response metadata the target already returned; nothing is injected. The
+     * clickjacking finding treats a CSP {@code frame-ancestors} directive as equivalent to
+     * {@code X-Frame-Options}, since either one stops the page being framed.
+     */
+    static void analyzeSecurityHeaders(boolean htmlResponse, boolean httpsRequest,
+                                       String xFrameOptions, String csp, String hsts,
+                                       String xContentTypeOptions, String referrerPolicy,
+                                       String permissionsPolicy, List<Note> notes) {
+        if (htmlResponse) {
+            boolean frameProtected = present(xFrameOptions)
+                    || (csp != null && csp.toLowerCase(Locale.ROOT).contains("frame-ancestors"));
+            if (!frameProtected) {
+                notes.add(new Note("MEDIUM", "Clickjacking: no framing protection",
+                        "HTML response sets neither X-Frame-Options nor a CSP frame-ancestors directive, "
+                                + "so the page can be framed by any origin (clickjacking / UI-redress surface)."));
+            }
+            if (xContentTypeOptions == null
+                    || !xContentTypeOptions.toLowerCase(Locale.ROOT).contains("nosniff")) {
+                notes.add(new Note("LOW", "Missing X-Content-Type-Options: nosniff",
+                        "Response does not send nosniff; a browser may MIME-sniff the body and execute it as "
+                                + "an unintended content type."));
+            }
+            if (!present(referrerPolicy)) {
+                notes.add(new Note("INFO", "Missing Referrer-Policy",
+                        "No Referrer-Policy header; full URLs (with any sensitive path/query) can leak to "
+                                + "third parties through the Referer header."));
+            }
+            if (!present(permissionsPolicy)) {
+                notes.add(new Note("INFO", "Missing Permissions-Policy",
+                        "No Permissions-Policy header; powerful browser features (camera, geolocation, …) "
+                                + "are left unrestricted."));
+            }
+        }
+        if (httpsRequest && !present(hsts)) {
+            notes.add(new Note("LOW", "Missing Strict-Transport-Security",
+                    "HTTPS response carries no HSTS header; a client may be downgraded to http or accept a "
+                            + "stripped connection on a later visit."));
+        }
+    }
+
+    private static boolean present(String headerValue) {
+        return headerValue != null && !headerValue.isBlank();
     }
 
     /** Cookie names that suggest session/authentication state, not general preferences. */
