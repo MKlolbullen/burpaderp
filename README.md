@@ -236,6 +236,14 @@ malform the request or drop the session.
 Results appear in the **Active tests** tab and, when reproduced or stronger, as Burp audit issues.
 Out-of-band findings arrive asynchronously as the Collaborator poller correlates interactions.
 
+**Runnable PoC on the issue.** When an in-band class is confirmed at a query parameter (SQLi, NoSQLi,
+SSTI, path traversal, open-redirect, CRLF, reflected XSS), the filed Burp issue carries a
+**deterministically generated, runnable Nuclei v3 template** (`NucleiTemplateBuilder`) that re-proves
+it — the exact payload placed at the parameter plus the in-band matcher that confirmed it. Unlike the
+LLM template feature it involves no model call; it is a portable, CI-runnable artifact you can drop
+straight into a `nuclei -t` run against an authorised target. (Header/path/JSON insertion points and
+out-of-band classes are planned extensions.)
+
 ## The AI layer
 
 Five LLM providers are supported and **run together** when more than one is enabled: **Anthropic
