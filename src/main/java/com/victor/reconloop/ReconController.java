@@ -44,6 +44,9 @@ final class ReconController implements HttpHandler {
     private final WebHygieneEngine webHygiene = new WebHygieneEngine();
     private final DependencyVulnEngine scaEngine = new DependencyVulnEngine();
     private final LlmClient llmClient = new LlmClient();
+    /** Global AI-activity feed: capped, in-memory, EDT-confined (every read/write is marshalled). */
+    private final AiFeed.Store aiFeed = new AiFeed.Store();
+    private volatile java.util.function.Consumer<AiFeed.Event> aiFeedListener;
     private final CertificateTransparencyClient ctClient;
     private final ParameterDiscoveryEngine parameterDiscovery;
     private final ActiveTestEngine activeTestEngine;
@@ -1752,6 +1755,11 @@ final class ReconController implements HttpHandler {
                                 fileLlmFinding(finding, url, rr);
                             }
                         }
+                        emitAiFeed(AiFeed.Kind.JS_REVIEW, credential.provider(), credential.model(),
+                                transportError ? AiFeed.Outcome.ERROR : AiFeed.Outcome.OK,
+                                AgentActivity.estimateTokens(body), 0, "JS review",
+                                url + " — " + (transportError ? firstLine(analysis.error())
+                                        : analysis.findings().size() + " finding(s)"));
                         publishStatus();
                     } catch (Exception e) {
                         errors.incrementAndGet();
@@ -1923,6 +1931,9 @@ final class ReconController implements HttpHandler {
                 result = "[error] " + e.getMessage();
             }
             String finalResult = result;
+            emitAiFeed(AiFeed.Kind.NUCLEI_TEMPLATE, credential.provider(), credential.model(),
+                    AiFeed.outcomeFor(finalResult), AgentActivity.estimateTokens(description),
+                    AgentActivity.estimateTokens(finalResult), "Nuclei template", firstLine(description));
             SwingUtilities.invokeLater(() -> onResult.accept(finalResult));
         });
     }
@@ -2015,8 +2026,14 @@ final class ReconController implements HttpHandler {
             ui.accept("Analyzing " + issues.size() + " finding(s) for exploit chains with " + credential.provider().label() + "...");
             LlmClient.ChainAnalysis analysis = llmClient.analyzeChains(
                     credential.provider(), credential.model(), credential.apiKey(), inv.toString());
+            long chainInTokens = AgentActivity.estimateTokens(inv.toString());
             if (analysis.chains().isEmpty()) {
-                ui.accept(analysis.error() != null && analysis.error().startsWith("[error")
+                boolean chainErr = analysis.error() != null && analysis.error().startsWith("[error");
+                emitAiFeed(AiFeed.Kind.CHAIN_ANALYSIS, credential.provider(), credential.model(),
+                        chainErr ? AiFeed.Outcome.ERROR : AiFeed.Outcome.OK, chainInTokens, 0,
+                        "Chain analysis: " + issues.size() + " finding(s)",
+                        chainErr ? firstLine(analysis.error()) : "no chains identified");
+                ui.accept(chainErr
                         ? "Chaining failed: " + firstLine(analysis.error())
                         : "No exploit chains identified across " + issues.size() + " finding(s).");
                 return;
@@ -2025,6 +2042,8 @@ final class ReconController implements HttpHandler {
             for (LlmClient.LlmChain chain : analysis.chains()) {
                 if (fileChainIssue(chain, issues)) filed++;
             }
+            emitAiFeed(AiFeed.Kind.CHAIN_ANALYSIS, credential.provider(), credential.model(), AiFeed.Outcome.OK,
+                    chainInTokens, 0, "Chain analysis: " + issues.size() + " finding(s)", filed + " chain(s) filed");
             String summary = "Chaining complete: " + filed + " exploit chain(s) filed as native Burp issues from "
                     + issues.size() + " finding(s). See Burp Issues / the Active tab.";
             api.logging().logToOutput("[Recon Hound] " + summary);
@@ -2099,6 +2118,9 @@ final class ReconController implements HttpHandler {
                         firstLine(out));
                 entries.add(entry);
                 round.accept(entry);
+                emitAiFeed(AiFeed.Kind.AGENT_ROUND, spec.provider(), spec.resolvedModel(),
+                        AiFeed.outcomeFor(out), entry.estInputTokens(), entry.estOutputTokens(),
+                        spec.role().title() + " round", entry.summary());
             }
 
             AgentTeam.AgentSpec leader = plan.leader();
@@ -2113,6 +2135,9 @@ final class ReconController implements HttpHandler {
                     firstLine(leaderOut));
             entries.add(leaderEntry);
             round.accept(leaderEntry);
+            emitAiFeed(AiFeed.Kind.AGENT_ROUND, leader.provider(), leader.resolvedModel(),
+                    AiFeed.outcomeFor(leaderOut), leaderEntry.estInputTokens(), leaderEntry.estOutputTokens(),
+                    AgentRole.LEADER.title() + " round", leaderEntry.summary());
 
             AgentOrchestrator.Outcome outcome = AgentOrchestrator.decide(rounds, leaderOut);
             String synthesis = outcome.leaderSynthesis().isBlank()
@@ -2120,9 +2145,42 @@ final class ReconController implements HttpHandler {
                     : outcome.leaderSynthesis();
             api.logging().logToOutput("[Recon Hound] Agent team run complete: " + outcome.decision()
                     + ", " + outcome.escalations().size() + " escalation(s).");
+            AiFeed.Outcome decisionOutcome = switch (outcome.decision()) {
+                case PROCEED -> AiFeed.Outcome.OK;
+                case ESCALATE, HOLD -> AiFeed.Outcome.HELD;
+            };
+            emitAiFeed(AiFeed.Kind.GATE_DECISION, leader.provider(), leader.resolvedModel(), decisionOutcome,
+                    0, 0, "Leader decision: " + outcome.decision(), firstLine(synthesis));
+            for (String esc : outcome.escalations()) {
+                emitAiFeed(AiFeed.Kind.ESCALATION, null, null, AiFeed.Outcome.HELD, 0, 0,
+                        "Human approval required", esc);
+            }
             done.accept(new AgentActivity.RunSummary(outcome.decision().name(), synthesis,
                     outcome.escalations(), AgentActivity.formatUsage(entries)));
             publishStatus();
+        });
+    }
+
+    /** Registers the UI's AI-feed listener; events (and it) are always delivered on the EDT. */
+    void setAiFeedListener(java.util.function.Consumer<AiFeed.Event> listener) { this.aiFeedListener = listener; }
+
+    /** Snapshot of the whole AI feed (oldest-first). Call on the EDT — the store is EDT-confined. */
+    List<AiFeed.Event> aiFeedSnapshot() { return aiFeed.snapshot(); }
+
+    /** Clears the AI feed. Call on the EDT. */
+    void clearAiFeed() { aiFeed.clear(); }
+
+    /**
+     * Records an AI-activity event into the in-memory feed and notifies the UI. Both the store write
+     * and the listener call happen on the EDT, so the store stays single-thread-confined even though
+     * callers run on {@link #llmWorker} / {@link #activeWorker} background threads.
+     */
+    private void emitAiFeed(AiFeed.Kind kind, LlmProvider provider, String model, AiFeed.Outcome outcome,
+                            long estIn, long estOut, String title, String detail) {
+        SwingUtilities.invokeLater(() -> {
+            AiFeed.Event e = aiFeed.record(kind, provider, model, outcome, estIn, estOut, title, detail);
+            java.util.function.Consumer<AiFeed.Event> l = aiFeedListener;
+            if (l != null) l.accept(e);
         });
     }
 
@@ -2192,15 +2250,23 @@ final class ReconController implements HttpHandler {
 
             List<LlmClient.TriageBatchResult> results = Collections.synchronizedList(new ArrayList<>());
             CountDownLatch latch = new CountDownLatch(credentials.size());
+            int batchSize = batch.size();
             for (LlmClient.LlmCredential credential : credentials) {
                 llmWorker.submit(() -> {
+                    LlmClient.TriageBatchResult r;
                     try {
-                        results.add(llmClient.triage(credential, batchPrompt));
+                        r = llmClient.triage(credential, batchPrompt);
                     } catch (Exception e) {
-                        results.add(new LlmClient.TriageBatchResult(List.of(), "[error] " + e.getMessage()));
-                    } finally {
-                        latch.countDown();
+                        r = new LlmClient.TriageBatchResult(List.of(), "[error] " + e.getMessage());
                     }
+                    results.add(r);
+                    boolean ok = !r.verdicts().isEmpty();
+                    emitAiFeed(AiFeed.Kind.TRIAGE, credential.provider(), credential.model(),
+                            ok ? AiFeed.Outcome.OK : AiFeed.Outcome.ERROR,
+                            AgentActivity.estimateTokens(batchPrompt), 0,
+                            "Triage: " + batchSize + " finding(s)",
+                            ok ? r.verdicts().size() + " verdict(s)" : firstLine(r.error()));
+                    latch.countDown();
                 });
             }
             try {

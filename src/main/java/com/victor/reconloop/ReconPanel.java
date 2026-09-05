@@ -35,6 +35,10 @@ final class ReconPanel extends JPanel {
     private JTextArea agentEscalations;
     private JLabel agentUsage;
 
+    // Global AI feed tab
+    private ReconModel.AiFeedTableModel aiFeedModel;
+    private JLabel aiFeedUsage;
+
     ReconPanel(MontoyaApi api, ReconController controller,
                ReconModel.FindingTableModel findingModel,
                ReconModel.DiscoveryTableModel discoveryModel,
@@ -239,8 +243,15 @@ final class ReconPanel extends JPanel {
         tabs.addTab("AI analysis", aiTab);
         agentTeamTab = buildAgentTeamPanel();
         tabs.addTab("Agent team", agentTeamTab);
+        tabs.addTab("AI feed", buildAiFeedPanel(controller));
         tabs.addTab("Nuclei templates (AI)", buildNucleiPanel(controller));
         add(tabs, BorderLayout.CENTER);
+
+        // Every LLM touchpoint streams into the AI feed; the controller delivers events on the EDT.
+        controller.setAiFeedListener(event -> {
+            aiFeedModel.add(event);
+            aiFeedUsage.setText(AiFeed.summarize(controller.aiFeedSnapshot()));
+        });
 
         autoLoop.addActionListener(e -> controller.setCrawlEnabled(autoLoop.isSelected()));
         addScope.addActionListener(e -> controller.setAddToScope(addScope.isSelected()));
@@ -564,6 +575,64 @@ final class ReconPanel extends JPanel {
 
         panel.add(top, BorderLayout.NORTH);
         panel.add(split, BorderLayout.CENTER);
+        return panel;
+    }
+
+    /**
+     * The "AI feed" tab: one live stream of every LLM touchpoint in the extension — false-positive
+     * triage, JavaScript review, exploit chaining, Nuclei-template authoring, agent-team rounds, and
+     * the human-approval gate decisions that govern them — newest first, with Kind/Provider filters
+     * and a session usage meter. In-memory only: nothing here is written to disk or the proxy history.
+     */
+    private JComponent buildAiFeedPanel(ReconController controller) {
+        JPanel panel = new JPanel(new BorderLayout(6, 6));
+
+        aiFeedModel = new ReconModel.AiFeedTableModel();
+        JTable table = new JTable(aiFeedModel);
+        table.setAutoCreateRowSorter(false); // model already prepends newest-first
+        javax.swing.table.TableRowSorter<ReconModel.AiFeedTableModel> sorter =
+                new javax.swing.table.TableRowSorter<>(aiFeedModel);
+        sorter.setSortable(0, false); // keep the model's newest-first order; the combos only filter
+        table.setRowSorter(sorter);
+
+        JComboBox<String> kindFilter = new JComboBox<>();
+        kindFilter.addItem("All kinds");
+        for (AiFeed.Kind k : AiFeed.Kind.values()) kindFilter.addItem(k.label());
+        JComboBox<String> providerFilter = new JComboBox<>();
+        providerFilter.addItem("All providers");
+        for (LlmProvider p : LlmProvider.values()) providerFilter.addItem(p.label());
+
+        Runnable applyFilter = () -> {
+            String kind = (String) kindFilter.getSelectedItem();
+            String provider = (String) providerFilter.getSelectedItem();
+            List<javax.swing.RowFilter<Object, Object>> filters = new ArrayList<>();
+            if (kind != null && !kind.startsWith("All"))
+                filters.add(javax.swing.RowFilter.regexFilter("^" + java.util.regex.Pattern.quote(kind) + "$", 1));
+            if (provider != null && !provider.startsWith("All"))
+                filters.add(javax.swing.RowFilter.regexFilter("^" + java.util.regex.Pattern.quote(provider) + "$", 2));
+            sorter.setRowFilter(filters.isEmpty() ? null : javax.swing.RowFilter.andFilter(filters));
+        };
+        kindFilter.addActionListener(e -> applyFilter.run());
+        providerFilter.addActionListener(e -> applyFilter.run());
+
+        JButton clear = new JButton("Clear feed");
+        clear.addActionListener(e -> {
+            controller.clearAiFeed();
+            aiFeedModel.clear();
+            aiFeedUsage.setText(AiFeed.summarize(controller.aiFeedSnapshot()));
+        });
+
+        JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
+        toolbar.add(new JLabel("Filter:"));
+        toolbar.add(kindFilter);
+        toolbar.add(providerFilter);
+        toolbar.add(clear);
+
+        aiFeedUsage = new JLabel("No AI activity yet.");
+
+        panel.add(toolbar, BorderLayout.NORTH);
+        panel.add(new JScrollPane(table), BorderLayout.CENTER);
+        panel.add(aiFeedUsage, BorderLayout.SOUTH);
         return panel;
     }
 
