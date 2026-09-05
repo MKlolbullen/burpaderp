@@ -2,7 +2,7 @@
 
 <img src="docs/img/hero.svg" alt="Recon Hound" width="880">
 
-### The recon-to-exploit toolkit for Burp Suite — passive intel, active testing, a multi-provider AI agent team, and Nuclei, all filing **native Burp issues**.
+### The recon-to-exploit toolkit for Burp Suite — passive intel, active testing, and a multi-provider AI agent team you can watch work, all filing **native Burp issues**.
 
 [![CI](https://github.com/MKlolbullen/burpaderp/actions/workflows/ci.yml/badge.svg)](https://github.com/MKlolbullen/burpaderp/actions/workflows/ci.yml)
 [![Release](https://github.com/MKlolbullen/burpaderp/actions/workflows/release.yml/badge.svg)](https://github.com/MKlolbullen/burpaderp/actions/workflows/release.yml)
@@ -10,7 +10,7 @@
 ![Java](https://img.shields.io/badge/Java-21-c2410c)
 ![API](https://img.shields.io/badge/Burp-Montoya-db2777)
 
-[**Install**](#install) · [**Capabilities**](#capability-map) · [**AI agent team**](#multi-agent-ai-team) · [**Control plane**](docs/RUN_GOVERNANCE.md) · [**CLI / CI mode**](#ci-native-scanning-no-burp-required) · [**How it works**](#what-it-does)
+[**Install**](#install) · [**Capabilities**](#capability-map) · [**AI agent team**](#multi-agent-ai-team) · [**AI feed**](#ai-feed--watch-the-models-work) · [**Control plane**](docs/RUN_GOVERNANCE.md) · [**CLI / CI mode**](#ci-native-scanning-no-burp-required) · [**How it works**](#what-it-does)
 
 </div>
 
@@ -20,7 +20,8 @@
 
 Recon Hound spans the full engagement — from mapping attack surface, through detecting weaknesses, to
 confirming and chaining them into impact — and everything it finds is filed as a **native Burp audit
-issue** (Dashboard / Target), not just a plugin tab.
+issue** (Dashboard / Target), not just a plugin tab. Every LLM call it makes is visible in one place,
+and nothing that touches the target happens without a human first.
 
 ![Capability map](docs/img/capabilities.svg)
 
@@ -31,6 +32,7 @@ issue** (Dashboard / Target), not just a plugin tab.
 | 💥 **Exploit** | Collaborator-backed **SSRF/SSTI/blind-XSS/CMDi**, native **SQLi** (error/boolean/time-based) + optional **sqlmap** hand-off, active **CORS** origin-bypass confirmation, **rate-limit** & **file-upload** probes, access-control/**IDOR**, **JWT** `alg:none` + weak-secret **forgery**, **GraphQL fuzzing**, **subdomain takeover**, open-redirect/CRLF, opt-in **encoded corpus fuzzing** |
 | 🤖 **Agents** | A configurable multi-provider **AI agent team** over the finding inventory — recon → PoC drafter → adversarial verifier → leader — behind a **fail-closed human-approval gate**: it reasons, it never touches the target on its own |
 | 🧠 **AI** | Five providers run together — **LLM JS bug-hunt** (PoC), cross-finding **exploit-chaining**, cross-provider **false-positive triage** (majority vote), **Nuclei** AI templates + **ProjectDiscovery cloud** scans |
+| 👁️ **Observe** | A single **AI feed** streams every LLM touchpoint — triage, JS review, chaining, Nuclei authoring, agent rounds, and every gate decision — newest-first, with an estimated-usage meter, in-memory and never persisted |
 | 📤 **Operate** | Native Burp issues + a passive **ScanCheck**, **SARIF + Markdown** export, per-project **persistence**, a typed Go **`reconctl` sidecar import**, and a **headless CI scanner** (`java -jar`) |
 
 ## Install
@@ -198,11 +200,25 @@ Enable it only against targets you are authorised to test.
 Results appear in the **Active tests** tab and, when reproduced or stronger, as Burp audit issues.
 Out-of-band findings arrive asynchronously as the Collaborator poller correlates interactions.
 
+## The AI layer
+
+Five LLM providers are supported and **run together** when more than one is enabled: **Anthropic
+(Claude)**, **OpenAI**, **xAI (Grok)**, **Google Gemini**, and **Venice.ai**, each called over raw
+HTTPS (no vendor SDK is bundled). Two principles hold across everything below:
+
+- **Keys never persist and never enter Burp.** API keys come from an in-memory UI field or the
+  provider's environment variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`,
+  `GEMINI_API_KEY`, `VENICE_API_KEY`). They are never written to the Burp project, and every LLM
+  request goes **direct** (not through Burp), so keys never enter the proxy history or trip Recon
+  Hound's own secret scanner.
+- **Nothing auto-fires.** Every AI action is on-demand, and nothing that puts packets on the target's
+  wire happens without an explicit human decision.
+
 ### Multi-agent AI team
 
-Recon Hound can run several LLM providers together as a small "cyber team" over the finding
-inventory. Enable one or more providers in the **AI analysis** tab, then click **Run agent team
-(findings)**. Each provider takes a role:
+Recon Hound can run several providers together as a small "cyber team" over the finding inventory.
+Enable one or more providers in the **AI analysis** tab, then click **Run agent team (findings)** —
+the run streams live into the dedicated **Agent team** tab. Each provider takes a role:
 
 | Role | Default provider | What it does |
 | --- | --- | --- |
@@ -216,26 +232,42 @@ inventory. Enable one or more providers in the **AI analysis** tab, then click *
   otherwise the highest reasoning-effort/budget). The leader makes the final call.
 - **Fail-closed human-approval gate** (`ActionGate`). The team *reasons* — it never touches the
   target on its own. Reading and drafting a PoC on paper proceed automatically; anything that would
-  put packets on the wire, recreate or execute a vulnerability, or change target state is filed as a
-  **human-approval escalation** in the Active tab. Unrecognised actions fail closed to "needs a human".
+  put packets on the wire, recreate or execute a vulnerability, or change target state becomes a
+  **human-approval escalation**. Unrecognised actions fail closed to "needs a human".
+- **The Agent team tab** shows the run as it happens: a per-round table (recon → drafter → verifier →
+  leader, each with provider, model, status, and estimated tokens), the leader's decision and
+  synthesis, the **human-approval queue** of proposed steps the team may *not* run itself, and an
+  estimated-usage meter.
 - **Reasoning effort.** A provider-neutral `low → max` scale maps onto each vendor's own reasoning
   knob (Anthropic effort levels, OpenAI/xAI `reasoning_effort`, Gemini thinking budget).
 - **No target traffic.** The run makes LLM calls only; the leader's synthesis and every escalation
-  come back to the Active tab for you to act on.
+  come back to the tab for you to act on.
+
+### AI feed — watch the models work
+
+A single **AI feed** tab is the one place that shows *everything the AI is doing*, as a newest-first
+stream. Every LLM touchpoint records an event: false-positive **triage** (per provider), **JS review**
+(per file), cross-finding **chain analysis**, **Nuclei-template** authoring, each **agent round**, and
+— made first-class — the leader's **gate decision** and every **human-approval escalation** it raises.
+
+- Each event carries its kind, provider, model, outcome (`ok` / `error` / `held for human`), estimated
+  input/output tokens, and a one-line detail. Filter the stream by **kind** or **provider**.
+- A session **usage meter** rolls up event counts and estimated tokens by kind and by provider —
+  explicitly an estimate from text length, not billed cost.
+- The feed is **in-memory only and never persisted**: prompts and responses can carry target data,
+  payloads, and secrets, so it follows the same stance as the keys — nothing touches disk or the proxy
+  history. It is a capped, session-lived ring, cleared on demand or on restart.
+
+This gives an engagement a defensible audit trail — the AI proposed *X*, the gate *held* it — without
+scattering that record across half a dozen tabs.
 
 ### AI analysis (optional, manual)
 
 ![AI analysis — manual, multi-provider](docs/img/ai-analysis.svg)
 
 The **AI analysis** tab sends content you choose (recovered JavaScript, source maps, responses, or a
-finding) to an LLM for review. Five providers are supported and **run together** when more than one
-is enabled: **Anthropic (Claude)**, **OpenAI**, **xAI (Grok)**, **Google Gemini**, and **Venice.ai**,
-each called over raw HTTPS (no vendor SDK is bundled).
+finding) to the enabled providers for review.
 
-- **API keys** come from an in-memory UI field or the provider's environment variable
-  (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `GEMINI_API_KEY`, `VENICE_API_KEY`). They are
-  **never persisted** to the Burp project, and requests go **direct** (not through Burp), so keys
-  never enter the proxy history or trip Recon Hound's own secret scanner.
 - **On-demand, nothing auto-fires.** Nothing is sent until you click a button.
 - **Automated JS bug-hunt → native issues.** **Analyze in-scope JS** collects in-scope JavaScript
   (deduplicated, skipping files already reviewed) up to a per-run *file budget*, asks the LLM for
@@ -258,6 +290,8 @@ each called over raw HTTPS (no vendor SDK is bundled).
   **Recon Hound: AI analysis** submenu — *explain & attack surface*, *find vulnerabilities*, and
   *suggest exploitation & chaining* — plus selection-only variants when text is highlighted.
 
+Whatever you run here also shows up in the [AI feed](#ai-feed--watch-the-models-work).
+
 > ⚠️ **Privacy:** this sends target-derived data to third-party LLMs. Some bug-bounty programs
 > prohibit sharing target data with third parties — only use it on data you are authorised to share.
 
@@ -267,8 +301,9 @@ each called over raw HTTPS (no vendor SDK is bundled).
 
 Findings surface in several places:
 
-- the Recon Hound **suite tab** tables (Findings, Discovered resources, Insertion points, XSS
-  reflections, Active tests, Hosts / IPs);
+- the Recon Hound **suite tab** tables — **Findings**, **Discovered resources**, **Insertion points**,
+  **XSS reflections**, **Active tests**, **Hosts / IPs**, **XSS vector library**, plus the AI views
+  (**AI analysis**, **Agent team**, **AI feed**, **Nuclei templates (AI)**);
 - Burp's **Dashboard / Target issue list** as native audit issues — **every** finding is filed here
   through a single deduplicated reporter, so results are in Burp's own reports and never live only in
   the plugin tabs. This covers secrets, disclosure signals, reflected-parameter/XSS candidates,
@@ -281,12 +316,13 @@ Findings surface in several places:
 - Burp's **native scan pipeline** — Recon Hound registers a **passive scan check**, so its detectors
   also run when Burp audits traffic; the crawl and scan-check paths share one deduplicated reporter, so
   a finding is never filed twice;
-- the extension **output/error log**.
+- the **AI feed** for the model side of the engagement, and the extension **output/error log**.
 
 The **Findings** tab can **export** to **SARIF 2.1.0** (code-scanning / CI ingestion) or **Markdown**
 (a bug-bounty-ready writeup grouped by severity). Plugin state — the issue-dedupe keys, the host/IP
 asset inventory, and the Findings/Hosts rows — is **persisted to the Burp project**
-(`api.persistence()`), so reopening the project restores results and avoids re-filing.
+(`api.persistence()`), so reopening the project restores results and avoids re-filing. (The AI feed is
+deliberately *not* persisted — see above.)
 
 ## CI-native scanning (no Burp required)
 
@@ -324,7 +360,7 @@ Passive analysis observes only what the target already returned. Active behaviou
 - Burp-scope bounded, same-origin by default, and request/redirect capped;
 - gated by the per-run request policy and budget;
 - and, for the AI agent team, held behind a **fail-closed human-approval gate** — the team reasons
-  but never touches the target on its own.
+  but never touches the target on its own, and every gate decision is recorded in the AI feed.
 
 Payload execution and XSS-vector firing are deliberately separate from discovery. The bundled corpora
 contain time-based, OOB, and potentially destructive strings and are only fired by the explicit
@@ -396,11 +432,13 @@ src/main/java/com/victor/reconloop/
 ├── CorpusFuzzEngine.java · PayloadEncoder.java · PayloadLibrary.java
 ├── CertificateTransparencyClient.java · ParameterDiscoveryEngine.java · SqlmapClient.java
 │
-│   # AI + multi-agent
+│   # AI + multi-agent + observability
 ├── LlmProvider.java               # Anthropic / OpenAI / xAI / Gemini / Venice
 ├── LlmClient.java                 # on-demand LLM analysis over raw HTTPS
 ├── ReasoningEffort.java           # provider-neutral low→max effort mapping
 ├── AgentRole.java · AgentTeam.java · AgentOrchestrator.java · ActionGate.java
+├── AgentActivity.java             # curated per-run agent-team activity model
+├── AiFeed.java                    # global, capped, in-memory LLM activity feed
 ├── PdcpClient.java                # ProjectDiscovery cloud Nuclei
 │
 │   # run governance + reporting

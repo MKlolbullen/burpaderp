@@ -173,4 +173,46 @@ final class ReconModel {
         void add(AgentActivityRow row) { rows.add(row); int i = rows.size() - 1; fireTableRowsInserted(i, i); }
         void clear() { int n = rows.size(); rows.clear(); if (n > 0) fireTableDataChanged(); }
     }
+
+    /**
+     * The global AI feed: every LLM touchpoint in the extension as one stream, newest first. Holds
+     * {@link AiFeed.Event} directly (no parallel row record) and renders columns on demand; a
+     * {@link javax.swing.table.TableRowSorter} on top can filter by the Kind/Provider columns.
+     */
+    static final class AiFeedTableModel extends AbstractTableModel {
+        private final String[] columns = {"Time", "Kind", "Provider", "Model", "Outcome", "~In tok", "~Out tok", "Detail"};
+        private final List<AiFeed.Event> rows = new ArrayList<>();
+        /** Mirror the feed store's cap so the table and the usage meter (fed from the capped snapshot)
+         *  never diverge: rows are newest-first, so the oldest — the one the store evicted — is the last. */
+        private static final int CAP = AiFeed.Store.DEFAULT_CAP;
+        private static final java.time.format.DateTimeFormatter TIME =
+                java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss").withZone(java.time.ZoneId.systemDefault());
+
+        @Override public int getRowCount() { return rows.size(); }
+        @Override public int getColumnCount() { return columns.length; }
+        @Override public String getColumnName(int column) { return columns[column]; }
+        @Override public Object getValueAt(int row, int col) {
+            AiFeed.Event e = rows.get(row);
+            return switch (col) {
+                case 0 -> TIME.format(java.time.Instant.ofEpochMilli(e.epochMillis()));
+                case 1 -> e.kind().label();
+                case 2 -> e.provider() == null ? "—" : e.provider().label();
+                case 3 -> e.model() == null ? "" : e.model();
+                case 4 -> e.outcome().label();
+                case 5 -> e.estInputTokens();
+                case 6 -> e.estOutputTokens();
+                default -> e.detail().isBlank() ? e.title() : e.title() + " — " + e.detail();
+            };
+        }
+        void add(AiFeed.Event event) {
+            rows.add(0, event);
+            fireTableRowsInserted(0, 0);
+            if (rows.size() > CAP) {
+                int last = rows.size() - 1;
+                rows.remove(last);
+                fireTableRowsDeleted(last, last);
+            }
+        }
+        void clear() { int n = rows.size(); rows.clear(); if (n > 0) fireTableDataChanged(); }
+    }
 }
