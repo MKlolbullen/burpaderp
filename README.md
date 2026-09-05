@@ -28,7 +28,7 @@ and nothing that touches the target happens without a human first.
 |  | |
 | --- | --- |
 | 🔎 **Discover** | Crawl + redirect chains, **webpack-chunk reconstruction**, source-map mining, OpenAPI/GraphQL ingest, crt.sh subdomains, Arjun param discovery, host/IP inventory |
-| 🩻 **Detect** | Secrets (RegexHound + `gf`), **SCA** for vulnerable JS libs, reflected-XSS surface, **DOM-XSS** source→sink, CORS/CSP/JWT hygiene, **session-cookie & CSRF** hygiene, **excessive data exposure / mass assignment**, **OAuth/OIDC** & **SAML** flaws, debug-endpoint & **BFLA** candidates, disclosure signals, exposed source maps |
+| 🩻 **Detect** | Secrets (RegexHound + `gf`), **SCA** for vulnerable JS libs, reflected-XSS surface, **DOM-XSS** source→sink, CORS/CSP/JWT hygiene, **clickjacking & security-header** checks, **session-cookie & CSRF** hygiene, **excessive data exposure / mass assignment**, **OAuth/OIDC** & **SAML** flaws, debug-endpoint & **BFLA** candidates, disclosure signals, exposed source maps |
 | 💥 **Exploit** | Collaborator-backed **SSRF/SSTI/blind-XSS/CMDi**, native **SQLi** (error/boolean/time-based) + optional **sqlmap** hand-off, error-based **NoSQL injection**, canary-confirmed **path traversal / LFI**, in-band & OOB **XXE**, active **CORS** origin-bypass confirmation, **rate-limit** & **file-upload** probes, access-control/**IDOR**, **JWT** `alg:none` + weak-secret **forgery**, **GraphQL fuzzing**, **subdomain takeover**, open-redirect/CRLF, opt-in **encoded corpus fuzzing** |
 | 🤖 **Agents** | A configurable multi-provider **AI agent team** over the finding inventory — recon → PoC drafter → adversarial verifier → leader — behind a **fail-closed human-approval gate**: it reasons, it never touches the target on its own |
 | 🧠 **AI** | Five providers run together — **LLM JS bug-hunt** (PoC), cross-finding **exploit-chaining**, cross-provider **false-positive triage** (majority vote), **Nuclei** AI templates + **ProjectDiscovery cloud** scans |
@@ -120,7 +120,10 @@ already returned, never injecting anything:
 
 - **Web hygiene** (`WebHygieneEngine`) — flags **CORS** misconfiguration (Origin reflection or
   `null` origin, especially with `Allow-Credentials: true`), weak **CSP** directives
-  (`unsafe-inline`/`unsafe-eval`, source wildcards, missing `object-src`/`base-uri`), **JWT** defects
+  (`unsafe-inline`/`unsafe-eval`, source wildcards, missing `object-src`/`base-uri`),
+  **clickjacking / security-header** gaps (an HTML page with neither `X-Frame-Options` nor a CSP
+  `frame-ancestors` directive, plus missing `Strict-Transport-Security` on HTTPS,
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy`, and `Permissions-Policy`), **JWT** defects
   (`alg:none`, brute-forceable HMAC, `kid` injection surface), **session-cookie** attribute hygiene
   (missing `HttpOnly`/`Secure`/`SameSite` on session-like cookies), and a **CSRF-protection**
   heuristic (state-changing requests carrying a session cookie with no anti-CSRF token/header).

@@ -257,4 +257,67 @@ public class WebHygieneEngineTest {
         assertNull(WebHygieneEngine.crackHmac("x", "", "hs256"));
         assertNull(WebHygieneEngine.crackHmac("x", null, "hs256"));
     }
+
+    // ---- analyzeSecurityHeaders ----
+
+    private static List<WebHygieneEngine.Note> securityHeaders(boolean html, boolean https, String xfo,
+            String csp, String hsts, String xcto, String referrer, String permissions) {
+        List<WebHygieneEngine.Note> notes = new ArrayList<>();
+        WebHygieneEngine.analyzeSecurityHeaders(html, https, xfo, csp, hsts, xcto, referrer, permissions, notes);
+        return notes;
+    }
+
+    @Test
+    public void htmlWithoutFramingProtectionIsFlaggedForClickjacking() {
+        assertTrue(hasNote(securityHeaders(true, false, null, null, null, null, null, null), "clickjacking"));
+    }
+
+    @Test
+    public void xFrameOptionsSuppressesClickjacking() {
+        assertFalse(hasNote(
+                securityHeaders(true, false, "DENY", null, null, "nosniff", "no-referrer", "geolocation=()"),
+                "clickjacking"));
+    }
+
+    @Test
+    public void cspFrameAncestorsSuppressesClickjacking() {
+        assertFalse(hasNote(
+                securityHeaders(true, false, null, "frame-ancestors 'none'", null, "nosniff", "no-referrer", "geolocation=()"),
+                "clickjacking"));
+    }
+
+    @Test
+    public void nonHtmlResponseIsNotCheckedForPageHeaders() {
+        List<WebHygieneEngine.Note> notes = securityHeaders(false, false, null, null, null, null, null, null);
+        assertFalse(hasNote(notes, "clickjacking"));
+        assertFalse(hasNote(notes, "nosniff"));
+        assertFalse(hasNote(notes, "referrer-policy"));
+        assertFalse(hasNote(notes, "permissions-policy"));
+    }
+
+    @Test
+    public void missingHstsIsFlaggedOnHttpsOnly() {
+        assertTrue(hasNote(securityHeaders(false, true, null, null, null, null, null, null),
+                "strict-transport-security"));
+        assertFalse(hasNote(securityHeaders(false, false, null, null, null, null, null, null),
+                "strict-transport-security"));
+        assertFalse(hasNote(securityHeaders(false, true, null, null, "max-age=31536000", null, null, null),
+                "strict-transport-security"));
+    }
+
+    @Test
+    public void missingNosniffAndPolicyHeadersAreNoted() {
+        List<WebHygieneEngine.Note> notes = securityHeaders(true, false, "DENY", null, null, null, null, null);
+        assertTrue(hasNote(notes, "nosniff"));
+        assertTrue(hasNote(notes, "referrer-policy"));
+        assertTrue(hasNote(notes, "permissions-policy"));
+    }
+
+    @Test
+    public void fullyHardenedHtmlHttpsResponseProducesNoSecurityHeaderNotes() {
+        List<WebHygieneEngine.Note> notes = securityHeaders(true, true, "DENY",
+                "frame-ancestors 'none'", "max-age=63072000; includeSubDomains", "nosniff",
+                "strict-origin-when-cross-origin", "geolocation=(), camera=()");
+        assertTrue(notes.isEmpty());
+    }
 }
