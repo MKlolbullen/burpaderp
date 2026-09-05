@@ -157,11 +157,13 @@ Enable it only against targets you are authorised to test.
 
 Every parameter-level probe below injects through a shared **insertion-point model** (`InsertionPoint`)
 rather than query/body parameters alone — so SQLi, NoSQLi, SSTI, path traversal, reflected/blind XSS,
-command injection, open-redirect and CRLF are all exercised against a curated allow-list of **fuzzable
-request headers** too (`X-Forwarded-For`/`-Host`, `Referer`, `User-Agent`, client-IP and URL-override
-headers, …). Cookies and transport/auth headers (`Host`, `Authorization`, …) are never mutated, so a
-probe can't malform the request or drop the session. (Path segments and JSON body values are the next
-extension of the same model.)
+command injection, open-redirect and CRLF are all exercised against every non-cookie parameter (URL,
+body, JSON, XML, multipart) **and** a curated allow-list of **fuzzable request headers**
+(`X-Forwarded-For`/`-Host`, `Referer`, `User-Agent`, client-IP and URL/method-override headers, …) —
+the headers are probed **whether or not the captured request already carried them**, since the classic
+bug is an endpoint that trusts an absent header once it is supplied. Cookies and transport/auth headers
+(`Host`, `Authorization`, …) are never mutated, so a probe can't malform the request or drop the
+session. (Path segments and JSON body values are the next extension of the same model.)
 
 - **crt.sh subdomain enumeration** — passive OSINT against the certificate-transparency log
   (`crt.sh`, never the target). Discovered hosts feed the normal discovery/scope pipeline.
