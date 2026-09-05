@@ -157,11 +157,21 @@ Enable it only against targets you are authorised to test.
 
 Every parameter-level probe below injects through a shared **insertion-point model** (`InsertionPoint`)
 rather than query/body parameters alone — so SQLi, NoSQLi, SSTI, path traversal, reflected/blind XSS,
-command injection, open-redirect and CRLF are all exercised against a curated allow-list of **fuzzable
-request headers** too (`X-Forwarded-For`/`-Host`, `Referer`, `User-Agent`, client-IP and URL-override
-headers, …). Cookies and transport/auth headers (`Host`, `Authorization`, …) are never mutated, so a
-probe can't malform the request or drop the session. (Path segments and JSON body values are the next
-extension of the same model.)
+command injection, open-redirect and CRLF are all exercised across the **whole request surface**:
+
+- every non-cookie **parameter** (URL, body, JSON, XML, multipart);
+- **JSON body values** — the body is parsed and each primitive leaf (by RFC-6901 pointer, e.g.
+  `/user/role`) becomes an injection point; the payload is set into the parsed tree and the body is
+  re-serialised, so nested API fields are reachable, not just top-level form params;
+- **URL path segments** — each segment (e.g. the `123` in `/api/users/123`) is a point; payloads are
+  percent-encoded so they can't malform the request line;
+- a curated allow-list of **fuzzable request headers** (`X-Forwarded-For`/`-Host`, `Referer`,
+  `User-Agent`, client-IP and URL/method-override headers, …), probed **whether or not the captured
+  request already carried them**, since the classic bug is an endpoint that trusts an absent header
+  once it is supplied.
+
+Cookies and transport/auth headers (`Host`, `Authorization`, …) are never mutated, so a probe can't
+malform the request or drop the session.
 
 - **crt.sh subdomain enumeration** — passive OSINT against the certificate-transparency log
   (`crt.sh`, never the target). Discovered hosts feed the normal discovery/scope pipeline.

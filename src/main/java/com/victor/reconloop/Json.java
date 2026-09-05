@@ -58,6 +58,166 @@ final class Json {
         return s.strip();
     }
 
+    // ---- serialization + RFC-6901 pointer access (for JSON-body insertion points) ----
+
+    /** Serialises a parsed tree ({@link Map}/{@link List}/String/Number/Boolean/null) back to JSON. */
+    static String write(Object value) {
+        StringBuilder sb = new StringBuilder();
+        writeValue(sb, value);
+        return sb.toString();
+    }
+
+    private static void writeValue(StringBuilder sb, Object v) {
+        if (v == null) { sb.append("null"); return; }
+        if (v instanceof String s) { writeString(sb, s); return; }
+        if (v instanceof Boolean b) { sb.append(b.booleanValue() ? "true" : "false"); return; }
+        if (v instanceof Number n) { writeNumber(sb, n); return; }
+        if (v instanceof Map<?, ?> m) {
+            sb.append('{');
+            boolean first = true;
+            for (Map.Entry<?, ?> e : m.entrySet()) {
+                if (!first) sb.append(',');
+                first = false;
+                writeString(sb, String.valueOf(e.getKey()));
+                sb.append(':');
+                writeValue(sb, e.getValue());
+            }
+            sb.append('}');
+            return;
+        }
+        if (v instanceof List<?> a) {
+            sb.append('[');
+            boolean first = true;
+            for (Object e : a) {
+                if (!first) sb.append(',');
+                first = false;
+                writeValue(sb, e);
+            }
+            sb.append(']');
+            return;
+        }
+        writeString(sb, String.valueOf(v)); // fallback: treat anything else as a string
+    }
+
+    private static void writeNumber(StringBuilder sb, Number n) {
+        if (n instanceof Double d) {
+            if (d.isNaN() || d.isInfinite()) { sb.append("null"); return; }
+            if (d == Math.rint(d) && Math.abs(d) < 1e15) { sb.append(Long.toString(d.longValue())); return; }
+        }
+        sb.append(n.toString());
+    }
+
+    private static void writeString(StringBuilder sb, String s) {
+        sb.append('"');
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"' -> sb.append("\\\"");
+                case '\\' -> sb.append("\\\\");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                case '\b' -> sb.append("\\b");
+                case '\f' -> sb.append("\\f");
+                default -> {
+                    if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
+                    else sb.append(c);
+                }
+            }
+        }
+        sb.append('"');
+    }
+
+    /** RFC-6901 JSON Pointers to every primitive (string/number/boolean) leaf in {@code tree}. */
+    static List<String> leafPointers(Object tree) {
+        List<String> out = new ArrayList<>();
+        collectPointers(tree, new StringBuilder(), out);
+        return out;
+    }
+
+    private static void collectPointers(Object node, StringBuilder path, List<String> out) {
+        if (node instanceof Map<?, ?> m) {
+            for (Map.Entry<?, ?> e : m.entrySet()) {
+                int len = path.length();
+                path.append('/').append(escapeToken(String.valueOf(e.getKey())));
+                collectPointers(e.getValue(), path, out);
+                path.setLength(len);
+            }
+        } else if (node instanceof List<?> a) {
+            for (int i = 0; i < a.size(); i++) {
+                int len = path.length();
+                path.append('/').append(i);
+                collectPointers(a.get(i), path, out);
+                path.setLength(len);
+            }
+        } else if (node instanceof String || node instanceof Number || node instanceof Boolean) {
+            out.add(path.toString()); // a primitive leaf; null/container nodes are not injectable points
+        }
+    }
+
+    /** Resolves {@code pointer} against {@code tree}, or {@code null} if any step is missing. */
+    static Object getByPointer(Object tree, String pointer) {
+        Object node = tree;
+        for (String token : splitPointer(pointer)) {
+            node = step(node, token);
+            if (node == null) return null;
+        }
+        return node;
+    }
+
+    /** Sets the leaf {@code pointer} refers to, in place. Returns false if the path can't be resolved. */
+    @SuppressWarnings("unchecked")
+    static boolean setByPointer(Object tree, String pointer, Object value) {
+        List<String> tokens = splitPointer(pointer);
+        if (tokens.isEmpty()) return false;
+        Object node = tree;
+        for (int i = 0; i < tokens.size() - 1; i++) {
+            node = step(node, tokens.get(i));
+            if (node == null) return false;
+        }
+        String last = tokens.get(tokens.size() - 1);
+        if (node instanceof Map<?, ?> m) {
+            String key = unescapeToken(last);
+            if (m.containsKey(key)) { ((Map<String, Object>) m).put(key, value); return true; } // replace only
+            return false;
+        }
+        if (node instanceof List<?> a) {
+            int idx = parseIndex(last);
+            if (idx >= 0 && idx < a.size()) { ((List<Object>) a).set(idx, value); return true; }
+        }
+        return false;
+    }
+
+    private static Object step(Object node, String token) {
+        if (node instanceof Map<?, ?> m) return m.get(unescapeToken(token));
+        if (node instanceof List<?> a) {
+            int idx = parseIndex(token);
+            return (idx >= 0 && idx < a.size()) ? a.get(idx) : null;
+        }
+        return null;
+    }
+
+    private static List<String> splitPointer(String pointer) {
+        List<String> tokens = new ArrayList<>();
+        if (pointer == null || pointer.isEmpty()) return tokens;
+        for (String part : pointer.substring(1).split("/", -1)) tokens.add(part);
+        return tokens;
+    }
+
+    private static int parseIndex(String token) {
+        if (token == null || token.isEmpty()) return -1;
+        for (int i = 0; i < token.length(); i++) if (!Character.isDigit(token.charAt(i))) return -1;
+        try { return Integer.parseInt(token); } catch (NumberFormatException e) { return -1; }
+    }
+
+    private static String escapeToken(String token) {
+        return token.replace("~", "~0").replace("/", "~1");
+    }
+
+    private static String unescapeToken(String token) {
+        return token.replace("~1", "/").replace("~0", "~");
+    }
+
     private Object value() {
         char c = peek();
         return switch (c) {

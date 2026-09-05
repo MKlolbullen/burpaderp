@@ -101,4 +101,71 @@ public class JsonTest {
     public void strictParseRejectsTrailingContent() {
         Json.parseStrict("{\"a\":1} trailing");
     }
+
+    // ---- write ----
+
+    @Test
+    public void writeRoundTripsNestedStructures() {
+        String src = "{\"user\":{\"name\":\"amy\",\"roles\":[\"a\",\"b\"]},\"n\":3,\"ok\":true,\"x\":null}";
+        Object tree = Json.parse(src);
+        String out = Json.write(tree);
+        // Re-parsing the serialised form must yield an equal structure.
+        assertEquals(tree, Json.parse(out));
+        assertTrue(out.contains("\"name\":\"amy\""));
+    }
+
+    @Test
+    public void writeRendersIntegralDoublesWithoutADecimalPoint() {
+        assertEquals("{\"n\":3}", Json.write(Json.parse("{\"n\":3}")));
+        assertEquals("{\"n\":3.5}", Json.write(Json.parse("{\"n\":3.5}")));
+    }
+
+    @Test
+    public void writeEscapesControlAndQuoteCharacters() {
+        String out = Json.write(java.util.Map.of("k", "a\"b\nc"));
+        assertTrue(out.contains("\\\""));
+        assertTrue(out.contains("\\n"));
+    }
+
+    // ---- leafPointers / get / set ----
+
+    @Test
+    public void leafPointersEnumeratesEveryPrimitiveLeaf() {
+        Object tree = Json.parse("{\"a\":\"x\",\"b\":{\"c\":1},\"d\":[\"e\",true],\"n\":null}");
+        java.util.List<String> pointers = Json.leafPointers(tree);
+        assertTrue(pointers.contains("/a"));
+        assertTrue(pointers.contains("/b/c"));
+        assertTrue(pointers.contains("/d/0"));
+        assertTrue(pointers.contains("/d/1"));
+        assertFalse(pointers.contains("/n"));      // null leaves are not injectable points
+        assertFalse(pointers.contains("/b"));      // containers are not leaves
+    }
+
+    @Test
+    public void setByPointerReplacesObjectAndArrayLeavesInPlace() {
+        Object tree = Json.parse("{\"user\":{\"role\":\"guest\"},\"tags\":[\"x\",\"y\"]}");
+        assertTrue(Json.setByPointer(tree, "/user/role", "admin"));
+        assertTrue(Json.setByPointer(tree, "/tags/1", "z"));
+        assertEquals("admin", Json.getByPointer(tree, "/user/role"));
+        assertEquals("z", Json.getByPointer(tree, "/tags/1"));
+        assertEquals("{\"user\":{\"role\":\"admin\"},\"tags\":[\"x\",\"z\"]}", Json.write(tree));
+    }
+
+    @Test
+    public void setByPointerFailsOnMissingPathAndOutOfRangeIndex() {
+        Object tree = Json.parse("{\"a\":[\"x\"]}");
+        assertFalse(Json.setByPointer(tree, "/a/5", "z"));
+        assertFalse(Json.setByPointer(tree, "/missing/leaf", "z"));
+        assertFalse(Json.setByPointer(tree, "", "z"));
+    }
+
+    @Test
+    public void pointerTokensWithSlashOrTildeAreEscaped() {
+        Object tree = Json.parse("{\"a/b\":\"x\"}");
+        java.util.List<String> pointers = Json.leafPointers(tree);
+        assertEquals(java.util.List.of("/a~1b"), pointers);
+        assertEquals("x", Json.getByPointer(tree, "/a~1b"));
+        assertTrue(Json.setByPointer(tree, "/a~1b", "y"));
+        assertEquals("y", Json.getByPointer(tree, "/a~1b"));
+    }
 }
