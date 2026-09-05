@@ -39,14 +39,19 @@ final class NucleiTemplateBuilder {
      * @param url            the finding URL (the request that was probed)
      * @param injectionPoint the insertion-point label (a bare parameter name here; {@code header:}/
      *                       {@code path[}/{@code json:} labels are not query params and return empty)
+     * @param evidence       the finding's evidence text, used to gate classes with several confirmation
+     *                       vectors (SQLi, SSTI) so a template is only emitted when the fixed payload
+     *                       and matcher actually reproduce the vector that confirmed <em>this</em> finding
      */
-    static Optional<PocSpec> fromActiveFinding(String testClass, String severity, String url, String injectionPoint) {
+    static Optional<PocSpec> fromActiveFinding(String testClass, String severity, String url,
+                                               String injectionPoint, String evidence) {
         if (testClass == null || url == null || injectionPoint == null) return Optional.empty();
         // Only bare query/body parameter names are handled in this slice.
         if (injectionPoint.startsWith("header:") || injectionPoint.startsWith("path[")
                 || injectionPoint.startsWith("json:") || injectionPoint.isBlank()) {
             return Optional.empty();
         }
+        String ev = evidence == null ? "" : evidence;
 
         String payload;
         MatcherKind kind;
@@ -54,6 +59,9 @@ final class NucleiTemplateBuilder {
         String matcher;
         switch (testClass) {
             case "SQLi" -> {
+                // Only error-based SQLi is reproduced by an error-signature body matcher; a
+                // boolean- or time-based confirmation is not, so don't emit a template that would fail.
+                if (!ev.toLowerCase(Locale.ROOT).contains("error signature")) return Optional.empty();
                 payload = "'"; kind = MatcherKind.REGEX; part = "body";
                 matcher = "(?i)sql syntax|mysql_fetch|ORA-[0-9]{4,5}|PostgreSQL.*ERROR|SQLite/JDBCDriver|"
                         + "Unclosed quotation mark|quoted string not properly terminated";
@@ -63,6 +71,9 @@ final class NucleiTemplateBuilder {
                 matcher = "(?i)MongoError|MongoServerError|BSON|E11000 duplicate key|Cast to ObjectId failed|\\$where";
             }
             case "SSTI" -> {
+                // The {{7*777}} payload only reproduces the brace family; a ${...}/#{...}/<%=%> engine
+                // (named in the evidence) would not evaluate it, so gate on the confirmed family.
+                if (!ev.contains("{{")) return Optional.empty();
                 payload = "rhs{{7*777}}she"; kind = MatcherKind.WORD; part = "body";
                 matcher = "rhs5439she"; // the distinctive product marker ActiveTestEngine confirms on
             }

@@ -2652,7 +2652,7 @@ final class ReconController implements HttpHandler {
                     + "Parameter: <code>" + escape(finding.parameter()) + "</code><br>"
                     + "Evidence: " + escape(finding.evidence());
             java.util.Optional<NucleiTemplateBuilder.PocSpec> poc = NucleiTemplateBuilder.fromActiveFinding(
-                    finding.testClass(), finding.severity(), finding.url(), finding.parameter());
+                    finding.testClass(), finding.severity(), finding.url(), finding.parameter(), finding.evidence());
             if (poc.isPresent()) {
                 detail += "<br><br><b>Runnable Nuclei PoC</b> (re-proves this finding — run against an "
                         + "authorised target):<br><pre>" + escape(NucleiTemplateBuilder.build(poc.get())) + "</pre>";
