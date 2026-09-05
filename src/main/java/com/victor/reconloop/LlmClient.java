@@ -195,6 +195,32 @@ final class LlmClient {
     private static final int MAX_OUTPUT_TOKENS = 4096;
     private static final int MAX_INPUT_CHARS = 200_000;
 
+    /**
+     * Caps the model input at {@code maxChars} without silently cutting mid-line. When the input is
+     * over budget it truncates at the last line boundary within budget — so a finding/record in the
+     * inventory is never sliced in half — and appends a visible notice recording how much was dropped.
+     * This turns the old silent {@code substring(0, MAX_INPUT_CHARS)} cut (which could pass a
+     * half-a-finding, no-signal payload to the model and let a truncated inventory read as complete)
+     * into an explicit, auditable truncation. Pure and directly unit-testable.
+     */
+    static String budgetInput(String input, int maxChars) {
+        if (input == null) return "";
+        if (input.length() <= maxChars) return input;
+        // Reserve room for the notice so the returned string still fits within maxChars.
+        int reserve = 200;
+        int limit = Math.max(0, maxChars - reserve);
+        int nl = input.lastIndexOf('\n', limit);
+        // Prefer a line boundary when one sits reasonably close to the limit; cut just past the
+        // newline so whole lines (and their terminator) are kept, never half a record. Fall back to a
+        // hard cut at the limit for a single enormous line with no newline to break on.
+        int cut = nl > limit / 2 ? nl + 1 : limit;
+        String kept = input.substring(0, cut);
+        int omittedChars = input.length() - kept.length();
+        long droppedLines = input.substring(cut).chars().filter(c -> c == '\n').count();
+        return kept + "\n\n[... truncated to fit the model input budget: " + omittedChars + " of "
+                + input.length() + " characters (" + droppedLines + " line(s)) omitted ...]";
+    }
+
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(20))
             .proxy(ProxySelector.getDefault())
@@ -206,8 +232,7 @@ final class LlmClient {
             return "[error] No API key. Set it in the field or export $" + provider.envVar() + ".";
         }
         String usedModel = model == null || model.isBlank() ? provider.defaultModel() : model.trim();
-        String input = prompt == null ? "" : prompt;
-        if (input.length() > MAX_INPUT_CHARS) input = input.substring(0, MAX_INPUT_CHARS);
+        String input = budgetInput(prompt == null ? "" : prompt, MAX_INPUT_CHARS);
 
         try {
             HttpRequest.Builder builder = HttpRequest.newBuilder()

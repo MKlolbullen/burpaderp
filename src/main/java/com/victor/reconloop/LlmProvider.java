@@ -70,8 +70,20 @@ enum LlmProvider {
         String usr = jsonEscape(prompt == null ? "" : prompt);
         String mdl = jsonEscape(model);
         return switch (this) {
-            case ANTHROPIC -> "{\"model\":\"" + mdl + "\",\"max_tokens\":" + maxTokens
-                    + ",\"system\":\"" + sys + "\",\"messages\":[{\"role\":\"user\",\"content\":\"" + usr + "\"}]}";
+            case ANTHROPIC -> {
+                // Emit the system prompt as a cached content block so a repeated stable prefix (large
+                // static system prompt, or an inventory hoisted into `system`) is billed once and read
+                // from cache on subsequent calls. Prompt caching is GA — no beta header — and if the
+                // prefix is below the model's minimum cacheable size the field is simply ignored, so
+                // this is safe for short prompts. An empty system stays a plain "" to avoid an empty
+                // cached block.
+                String systemJson = (system == null || system.isBlank())
+                        ? "\"\""
+                        : "[{\"type\":\"text\",\"text\":\"" + sys + "\",\"cache_control\":{\"type\":\"ephemeral\"}}]";
+                yield "{\"model\":\"" + mdl + "\",\"max_tokens\":" + maxTokens
+                        + ",\"system\":" + systemJson
+                        + ",\"messages\":[{\"role\":\"user\",\"content\":\"" + usr + "\"}]}";
+            }
             case OPENAI, XAI, VENICE -> "{\"model\":\"" + mdl + "\",\"max_tokens\":" + maxTokens
                     + ",\"messages\":[{\"role\":\"system\",\"content\":\"" + sys + "\"},"
                     + "{\"role\":\"user\",\"content\":\"" + usr + "\"}]}";
