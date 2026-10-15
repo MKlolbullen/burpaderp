@@ -76,8 +76,18 @@ final class CorpusFuzzEngine {
      */
     List<ActiveTestEngine.ActiveFinding> fuzz(HttpRequest base, HttpParameter parameter,
                                                Set<PayloadEncoder.Encoding> encodings, int maxPerCategory) {
+        return fuzz(base, parameter, encodings, maxPerCategory, false);
+    }
+
+    /**
+     * {@code allowMutating} must be true before non-safe HTTP methods are replayed with corpus payloads.
+     */
+    List<ActiveTestEngine.ActiveFinding> fuzz(HttpRequest base, HttpParameter parameter,
+                                               Set<PayloadEncoder.Encoding> encodings, int maxPerCategory,
+                                               boolean allowMutating) {
         List<ActiveTestEngine.ActiveFinding> out = new ArrayList<>();
         if (base == null || parameter == null || encodings == null || encodings.isEmpty() || maxPerCategory <= 0) return out;
+        if (!allowMutating && !ActiveTestEngine.isSafeMethod(base)) return out;
 
         for (String category : relevantCategories(parameter.name(), parameter.value(), rceParamHints, library.categories())) {
             RequestBudget budget = new RequestBudget(maxPerCategory);
@@ -103,8 +113,8 @@ final class CorpusFuzzEngine {
                         // A meaningful timing comparison needs both requests. Do not spend the final
                         // token on a baseline that can never be paired with its mutation.
                         if (budget.remaining() < 2) break;
-                        long baselineMillis = timeRequest(base, parameter, parameter.value(), budget);
-                        long payloadMillis = timeRequest(base, parameter, encoded, budget);
+                        long baselineMillis = timeRequest(base, parameter, parameter.value(), budget, allowMutating);
+                        long payloadMillis = timeRequest(base, parameter, encoded, budget, allowMutating);
                         if (baselineMillis >= 0 && payloadMillis >= 0
                                 && ActiveTestEngine.looksTimeBased(baselineMillis, payloadMillis, TIME_BASED_DELAY_SECONDS)) {
                             out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-" + category, parameter.name(),
@@ -114,7 +124,7 @@ final class CorpusFuzzEngine {
                         continue;
                     }
 
-                    HttpResponse response = sendMutated(base, parameter, encoded, budget);
+                    HttpResponse response = sendMutated(base, parameter, encoded, budget, allowMutating);
                     if (response == null) continue;
                     String body = response.bodyToString();
 
@@ -141,8 +151,10 @@ final class CorpusFuzzEngine {
         return out;
     }
 
-    private HttpResponse sendMutated(HttpRequest base, HttpParameter parameter, String value, RequestBudget budget) {
+    private HttpResponse sendMutated(HttpRequest base, HttpParameter parameter, String value,
+                                     RequestBudget budget, boolean allowMutating) {
         try {
+            if (!allowMutating && !ActiveTestEngine.isSafeMethod(base)) return null;
             if (!api.scope().isInScope(base.url())) return null;
             if (!budget.tryAcquire()) return null;
             HttpParameter mutated = HttpParameter.parameter(parameter.name(), value, parameter.type());
@@ -155,11 +167,12 @@ final class CorpusFuzzEngine {
         }
     }
 
-    private long timeRequest(HttpRequest base, HttpParameter parameter, String value, RequestBudget budget) {
+    private long timeRequest(HttpRequest base, HttpParameter parameter, String value,
+                             RequestBudget budget, boolean allowMutating) {
         if (budget.exhausted()) return -1;
         long start = System.currentTimeMillis();
         int before = budget.used();
-        sendMutated(base, parameter, value, budget);
+        sendMutated(base, parameter, value, budget, allowMutating);
         if (budget.used() == before) return -1;
         return System.currentTimeMillis() - start;
     }
