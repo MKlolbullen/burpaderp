@@ -72,3 +72,59 @@ func TestExtendedCatalogDoesNotTreatWorkflowUtilitiesAsTools(t *testing.T) {
 		}
 	}
 }
+
+func TestXSStrikeStaysBehindParameterizedURL(t *testing.T) {
+	spec, err := DefaultToolRegistry().MustGet("xsstrike")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !spec.Accepts(KindParameterizedURL) || spec.Accepts(KindURL) {
+		t.Fatal("xsstrike must require an explicit parameterized_url injection point like dalfox")
+	}
+	if spec.Risk != RiskActiveFuzz {
+		t.Fatal("xsstrike must remain behind the active-fuzz policy gate")
+	}
+}
+
+func TestSecretScannersProduceFindings(t *testing.T) {
+	r := DefaultToolRegistry()
+	for _, name := range []string{"gitleaks", "trufflehog", "postleaks", "scan4secrets"} {
+		spec, err := r.MustGet(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !spec.ProducesKind(KindFinding) {
+			t.Fatalf("%s must produce findings", name)
+		}
+	}
+}
+
+func TestActiveWebAndSecretToolsRequireOptIn(t *testing.T) {
+	registry := DefaultToolRegistry()
+	policy := DefaultRunPolicy()
+	for _, name := range []string{"xsstrike", "xsrfprobe", "ssrfire", "scan4secrets"} {
+		spec, err := registry.MustGet(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := policy.Check(spec); err == nil {
+			t.Fatalf("default policy should require explicit opt-in for %s", name)
+		}
+	}
+	// Passive secret discovery (postleaks keyword search, gitleaks/trufflehog
+	// source scans) is not gated behind the active-fuzz switch.
+	for _, name := range []string{"postleaks", "gitleaks", "trufflehog"} {
+		spec, _ := registry.MustGet(name)
+		if err := policy.Check(spec); err != nil {
+			t.Fatalf("passive secret scanner %s should run under the default policy: %v", name, err)
+		}
+	}
+}
+
+func TestUnpinnedWebToolOutputFailsClosed(t *testing.T) {
+	for _, name := range []string{"xsstrike", "xsrfprobe", "ssrfire", "scan4secrets", "postleaks"} {
+		if _, err := ParseToolOutputLine(name, `{"anything":"value"}`); err == nil {
+			t.Fatalf("%s output must fail closed until a machine-stable adapter is pinned", name)
+		}
+	}
+}
