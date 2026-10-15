@@ -69,12 +69,26 @@ func ParseToolOutputLine(toolName, line string) ([]Record, error) {
 		return parseGF(line)
 	case "nuclei":
 		return parseNuclei(line)
+	case "trufflehog":
+		return parseTrufflehog(line)
 	case "masscan":
 		return nil, errors.New("masscan uses a document/array output format; use a dedicated masscan document adapter rather than treating stdout as JSONL")
 	case "arjun":
 		return nil, errors.New("Arjun JSON is a document keyed by target URL; use ParseArjunDocument")
+	case "gitleaks":
+		return nil, errors.New("gitleaks emits a single JSON array report (not JSONL); use ParseGitleaksReport")
 	case "dalfox", "corsy", "crlfuzz":
 		return nil, fmt.Errorf("%s output adapter is not declared machine-stable yet; quarantine raw output instead of guessing", tool)
+	case "xsstrike":
+		return nil, errors.New("xsstrike output adapter is not declared machine-stable: XSStrike only prints human-readable results, so quarantine raw output instead of guessing")
+	case "xsrfprobe":
+		return nil, errors.New("xsrfprobe output adapter is not declared machine-stable: XSRFProbe writes a report directory tree rather than JSONL stdout")
+	case "ssrfire":
+		return nil, errors.New("ssrfire output adapter is not declared machine-stable: SSRFire writes result files under output/<domain>/ rather than JSONL stdout")
+	case "scan4secrets":
+		return nil, errors.New("scan4secrets writes JSON/JSONL reports to an output file; wire the report-file reader before treating stdout as JSONL")
+	case "postleaks":
+		return nil, errors.New("postleaks writes JSON results to an output folder; feed that folder to gitleaks/trufflehog rather than parsing stdout")
 	default:
 		return nil, fmt.Errorf("no output adapter for tool %q", toolName)
 	}

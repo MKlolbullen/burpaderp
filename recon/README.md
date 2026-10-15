@@ -60,8 +60,54 @@ This complements the existing Java `CorpusFuzzEngine`; it does not remove its ha
 - `gf` parameterized URLs -> one `parameterized_url` per query parameter
 - Arjun JSON document -> `parameterized_url[]`
 - Nuclei JSONL -> bounded `finding`
+- `trufflehog` `--json` JSONL -> bounded `finding` (verified secrets escalate to `high`)
+- `gitleaks` JSON report (array document) -> bounded `finding[]` via `ParseGitleaksReport`
 
-`masscan` is intentionally not guessed as line-oriented JSON. Dalfox/Corsy/CRLFuzz output is also quarantined until a machine-stable adapter is declared. **Unsupported output fails closed.**
+`masscan` is intentionally not guessed as line-oriented JSON. Dalfox/Corsy/CRLFuzz output is also quarantined until a machine-stable adapter is declared, as is the human-readable or file-only output of XSStrike, XSRFProbe, SSRFire, scan4secrets and postleaks (see below). **Unsupported output fails closed.**
+
+## Web vulnerability + secret-exposure tools
+
+The catalog models several additional weakness-finding tools so a multi-tool run
+can cover XSS, CSRF, SSRF and secret exposure in the same typed stream — without
+piping raw strings between processes.
+
+| Tool | Consumes | Produces | Risk | Output status |
+| --- | --- | --- | --- | --- |
+| `xsstrike` | `parameterized_url` | `finding` | `active_fuzz` | fail-closed (human stdout only) |
+| `xsrfprobe` | `http_target`/`url` | `finding` | `active_fuzz` | fail-closed (writes a report tree) |
+| `ssrfire` | `domain` | `finding` | `active_fuzz` | fail-closed (needs an OAST server; writes `output/<domain>/`) |
+| `scan4secrets` | `http_target`/`url` | `finding` | `active_fuzz` | fail-closed (JSON/JSONL written to a report file) |
+| `postleaks` | `domain` | `finding` | `passive_osint` | fail-closed (JSON written to an output folder) |
+| `gitleaks` | source (not modeled) | `finding` | `passive_osint` | **adapter implemented** (`ParseGitleaksReport`) |
+| `trufflehog` | source (not modeled) | `finding` | `passive_osint` | **adapter implemented** (`--json` JSONL) |
+
+Like `dalfox`, the XSS specialist `xsstrike` only accepts an explicit
+`parameterized_url` injection point, never a bare `url`, and the three active web
+scanners stay behind the `--allow-active` policy gate. Registering a tool with a
+fail-closed adapter is deliberate: it pins the typed contract (what may cross the
+boundary) now, while the version-specific output parser is added later. No
+executable `CommandProfile` is declared for these tools, so `reconctl run` will
+not launch them until a pinned invocation + adapter pair exists; their contracts
+are still enforced by `reconctl plan`/`edge` and by the `adapt` boundary.
+
+### postleaks -> gitleaks / trufflehog
+
+`postleaks` searches Postman's public library for a keyword/domain and writes the
+matching request bodies to an output folder. That folder is exactly the kind of
+filesystem source `gitleaks` and `trufflehog` are built to scan, so the intended
+flow is:
+
+```text
+postleaks -k example.com --output pml/   # dump candidate Postman requests
+gitleaks   dir pml/ --report-format json   -> ParseGitleaksReport -> finding[]
+trufflehog filesystem pml/ --json          -> trufflehog adapter  -> finding[]
+```
+
+Because the *source* consumed by these secret scanners (a git repo, a filesystem
+tree, a Postman export) is not yet a pipeline `Kind`, execution is not wired, but
+their report output already normalizes into the same bounded `finding` records
+every other stage emits — so a Java/Montoya bridge or `reconctl adapt` can import
+them directly.
 
 ## `reconctl`
 

@@ -78,12 +78,25 @@ func DefaultToolRegistry() ToolRegistry {
 		{Name: "paramspider", Binary: "paramspider", Consumes: []Kind{KindDomain, KindHostname, KindURL}, Produces: []Kind{KindParameterizedURL}, Risk: RiskPassiveOSINT, Description: "parameterized URL collection; adapter intentionally fail-closed until output handling is pinned"},
 
 		{Name: "dalfox", Binary: "dalfox", Consumes: []Kind{KindParameterizedURL}, Produces: []Kind{KindFinding}, Risk: RiskActiveFuzz, Description: "XSS parameter analysis and verification"},
+		{Name: "xsstrike", Binary: "xsstrike", Consumes: []Kind{KindParameterizedURL}, Produces: []Kind{KindFinding}, Risk: RiskActiveFuzz, Description: "context-aware reflected/DOM XSS detection; adapter intentionally fail-closed because XSStrike only emits human-readable stdout"},
 		{Name: "nuclei", Binary: "nuclei", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindFinding}, Risk: RiskActiveFuzz, Description: "template-driven vulnerability scanning"},
 		{Name: "corsy", Binary: "corsy", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindFinding}, Risk: RiskHTTPProbe, Description: "CORS checks"},
 		{Name: "crlfuzz", Binary: "crlfuzz", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindFinding}, Risk: RiskActiveFuzz, Description: "CRLF/header injection checks"},
+		{Name: "xsrfprobe", Binary: "xsrfprobe", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindFinding}, Risk: RiskActiveFuzz, Description: "CSRF audit toolkit; adapter intentionally fail-closed because XSRFProbe writes a report tree rather than JSONL stdout"},
+		{Name: "ssrfire", Binary: "ssrfire.sh", Consumes: []Kind{KindDomain}, Produces: []Kind{KindFinding}, Risk: RiskActiveFuzz, Description: "automated SSRF/open-redirect/XSS discovery; needs an OAST callback server and writes output files, so no pinned stdin/stdout profile is modeled"},
 		{Name: "sqlmap", Binary: "sqlmap", Consumes: []Kind{KindParameterizedURL}, Produces: []Kind{KindFinding}, Risk: RiskActiveFuzz, Description: "SQL injection verification; execution and parsing require an explicit guarded profile"},
 		{Name: "wpscan", Binary: "wpscan", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindFinding}, Risk: RiskActiveFuzz, Description: "WordPress security scanner; adapter intentionally fail-closed until JSON output is pinned"},
-		{Name: "trufflehog", Binary: "trufflehog", Consumes: []Kind{KindURL}, Produces: []Kind{KindFinding}, Risk: RiskPassiveOSINT, Description: "secret discovery over explicitly configured sources; repository/source contracts are not yet modeled"},
+
+		// Secret / exposure discovery. gitleaks and trufflehog have machine-stable
+		// report formats, so their output adapters are real (ParseGitleaksReport and
+		// the trufflehog JSONL case); their *source* contracts (git/filesystem) are
+		// not modeled as pipeline Kinds yet, so no executable profile is declared.
+		// scan4secrets (DAST) and postleaks are registered with typed contracts but
+		// stay fail-closed until their report-file/output-folder bridges are pinned.
+		{Name: "scan4secrets", Binary: "scan4secrets", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindFinding}, Risk: RiskActiveFuzz, Description: "live DAST secret/misconfiguration scanner; JSON/JSONL reports are written to an output file, so the stdout adapter is fail-closed until the report-file bridge is pinned"},
+		{Name: "postleaks", Binary: "postleaks", Consumes: []Kind{KindDomain}, Produces: []Kind{KindFinding}, Risk: RiskPassiveOSINT, Description: "Postman public-library secret search by keyword/domain; JSON results are written to an output folder meant to be re-scanned by gitleaks/trufflehog, so the stdout adapter is fail-closed"},
+		{Name: "gitleaks", Binary: "gitleaks", Consumes: []Kind{KindURL}, Produces: []Kind{KindFinding}, Risk: RiskPassiveOSINT, Description: "secret discovery over git/filesystem sources; source contracts are not yet modeled, but the JSON report adapter (ParseGitleaksReport) normalizes findings"},
+		{Name: "trufflehog", Binary: "trufflehog", Consumes: []Kind{KindURL}, Produces: []Kind{KindFinding}, Risk: RiskPassiveOSINT, Description: "secret discovery over git/filesystem/other sources; source contracts are not yet modeled, but the --json JSONL output adapter normalizes findings"},
 	}
 
 	m := make(map[string]ToolSpec, len(specs))
