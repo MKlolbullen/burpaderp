@@ -17,11 +17,13 @@ import java.util.regex.Pattern;
  * server-side template injection via arithmetic evaluation, reflected-XSS confirmation via a
  * metacharacter canary, and lightweight WAF fingerprinting.
  *
- * <p>Every target-directed request is scope-checked and acquires a hard request-budget token
- * immediately before the network send. Payload firing only happens when the user has explicitly
- * enabled active tests. Detection cores ({@link #detectSstiEval}, {@link #survivingXssChars},
- * {@link #fingerprintWaf}, {@link #encodeCorrelation}) are pure and unit-tested; the Montoya-facing
- * orchestration is deliberately thin.
+ * <p>Every target-directed request is scope-checked, method-checked, and acquires a hard
+ * request-budget token immediately before the network send. By default only GET, HEAD, and OPTIONS
+ * are replayed; POST/PUT/PATCH/DELETE require an explicit mutating-probe opt-in. Payload firing
+ * only happens when the user has explicitly enabled active tests. Detection cores
+ * ({@link #detectSstiEval}, {@link #survivingXssChars}, {@link #fingerprintWaf},
+ * {@link #encodeCorrelation}) are pure and unit-tested; the Montoya-facing orchestration is
+ * deliberately thin.
  */
 final class ActiveTestEngine {
 
@@ -97,10 +99,12 @@ final class ActiveTestEngine {
             "too many requests", "too many attempts", "rate limit", "rate-limit", "try again later",
             "temporarily locked", "temporarily blocked", "account locked", "please wait", "slow down");
     private static final int RATE_LIMIT_BURST_SIZE = 6;
+    static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "OPTIONS");
 
     private final MontoyaApi api;
     private final long throttleMillis;
     private final ThreadLocal<RequestBudget> requestBudget = new ThreadLocal<>();
+    private final ThreadLocal<Boolean> allowMutatingRequests = new ThreadLocal<>();
     private volatile CollaboratorClient collaborator;
 
     ActiveTestEngine(MontoyaApi api, long throttleMillis) {
@@ -110,12 +114,22 @@ final class ActiveTestEngine {
 
     void setCollaborator(CollaboratorClient collaborator) { this.collaborator = collaborator; }
 
-    /** Runs the enabled active probes against every non-cookie parameter of {@code base}. */
+    /** Runs safe-method probes against every non-cookie parameter of {@code base}. */
     List<ActiveFinding> test(HttpRequest base, int maxRequests) {
+        return test(base, maxRequests, false);
+    }
+
+    /**
+     * Runs the enabled active probes against every non-cookie parameter of {@code base}.
+     * {@code allowMutating} must be true before non-safe HTTP methods are replayed.
+     */
+    List<ActiveFinding> test(HttpRequest base, int maxRequests, boolean allowMutating) {
         if (base == null || maxRequests <= 0) return List.of();
+        if (!allowMutating && !isSafeMethod(base)) return List.of();
         List<ActiveFinding> findings = new ArrayList<>();
         RequestBudget budget = new RequestBudget(maxRequests);
         requestBudget.set(budget);
+        allowMutatingRequests.set(allowMutating);
         try {
             List<HttpParameter> parameters;
             try {
@@ -150,6 +164,7 @@ final class ActiveTestEngine {
             return findings;
         } finally {
             requestBudget.remove();
+            allowMutatingRequests.remove();
         }
     }
 
@@ -448,10 +463,13 @@ final class ActiveTestEngine {
         }
     }
 
-    /** Lowest target-directed send gate: scope first, then one atomic budget acquisition. */
+    /**
+     * Lowest target-directed send gate: method policy, then scope, then one atomic budget acquisition.
+     */
     private HttpRequestResponse sendRequest(HttpRequest request) {
         if (request == null) return null;
         try {
+            if (!methodAllowed(request)) return null;
             if (!api.scope().isInScope(request.url())) return null;
             RequestBudget budget = requestBudget.get();
             if (budget == null || !budget.tryAcquire()) return null;
@@ -472,6 +490,19 @@ final class ActiveTestEngine {
     private int budgetUsed() {
         RequestBudget budget = requestBudget.get();
         return budget == null ? 0 : budget.used();
+    }
+
+    private boolean methodAllowed(HttpRequest request) {
+        return Boolean.TRUE.equals(allowMutatingRequests.get()) || isSafeMethod(request);
+    }
+
+    static boolean isSafeMethod(HttpRequest request) {
+        return request != null && isSafeMethod(request.method());
+    }
+
+    static boolean isSafeMethod(String method) {
+        if (method == null || method.isBlank()) return false;
+        return SAFE_METHODS.contains(method.toUpperCase(Locale.ROOT));
     }
 
     private void throttle() {

@@ -122,6 +122,7 @@ final class ReconController implements HttpHandler {
     private final AtomicBoolean followRedirects = new AtomicBoolean(true);
     private final AtomicBoolean detectReflections = new AtomicBoolean(true);
     private final AtomicBoolean activeTestsEnabled = new AtomicBoolean(false);
+    private final AtomicBoolean mutatingActiveRequests = new AtomicBoolean(false);
     private final AtomicInteger maxRequests = new AtomicInteger(500);
     private final AtomicInteger maxRedirects = new AtomicInteger(8);
     private final AtomicInteger activeThrottleMillis = new AtomicInteger(150);
@@ -206,6 +207,7 @@ final class ReconController implements HttpHandler {
     void setFollowRedirects(boolean value) { followRedirects.set(value); }
     void setDetectReflections(boolean value) { detectReflections.set(value); }
     void setActiveTestsEnabled(boolean value) { activeTestsEnabled.set(value); }
+    void setMutatingActiveRequests(boolean value) { mutatingActiveRequests.set(value); }
     void setMaxRequests(int value) { maxRequests.set(Math.max(1, value)); }
     void setMaxRedirects(int value) { maxRedirects.set(Math.max(0, value)); }
     void setActiveRequestBudget(int value) { activeRequestBudget.set(Math.max(1, value)); }
@@ -434,10 +436,13 @@ final class ReconController implements HttpHandler {
                     .collect(java.util.stream.Collectors.toMap(HttpRequest::url, r -> r, (a, b) -> a, LinkedHashMap::new))
                     .values().stream().toList();
 
-            api.logging().logToOutput("[Recon Hound] Active testing " + targets.size() + " in-scope parameterised request(s).");
+            boolean allowMutating = mutatingActiveRequests.get();
+            api.logging().logToOutput("[Recon Hound] Active testing " + targets.size()
+                    + " in-scope parameterised request(s)"
+                    + (allowMutating ? " including mutating methods." : " using safe methods only."));
             for (HttpRequest base : targets) {
                 if (!activeTestsEnabled.get()) break;
-                for (ActiveTestEngine.ActiveFinding finding : activeTestEngine.test(base, activeRequestBudget.get())) {
+                for (ActiveTestEngine.ActiveFinding finding : activeTestEngine.test(base, activeRequestBudget.get(), allowMutating)) {
                     reportActiveFinding(finding, base);
                 }
                 publishStatus();
@@ -467,8 +472,10 @@ final class ReconController implements HttpHandler {
                     .collect(java.util.stream.Collectors.toMap(HttpRequest::url, r -> r, (a, b) -> a, LinkedHashMap::new))
                     .values().stream().toList();
 
+            boolean allowMutating = mutatingActiveRequests.get();
             api.logging().logToOutput("[Recon Hound] Corpus-fuzzing " + targets.size() + " in-scope parameterised request(s) "
-                    + "(" + payloadLibrary.totalPayloads() + " corpus payloads available, encodings=" + encodings + ").");
+                    + "(" + payloadLibrary.totalPayloads() + " corpus payloads available, encodings=" + encodings + ")"
+                    + (allowMutating ? " including mutating methods." : " using safe methods only."));
             for (HttpRequest base : targets) {
                 if (!activeTestsEnabled.get()) break;
                 try {
@@ -477,7 +484,7 @@ final class ReconController implements HttpHandler {
                         if (parameter == null || parameter.name() == null || parameter.name().isBlank()) continue;
                         if ("COOKIE".equalsIgnoreCase(String.valueOf(parameter.type()))) continue;
                         for (ActiveTestEngine.ActiveFinding finding :
-                                corpusFuzzEngine.fuzz(base, parameter, encodings, maxPerCategory)) {
+                                corpusFuzzEngine.fuzz(base, parameter, encodings, maxPerCategory, allowMutating)) {
                             reportActiveFinding(finding, base);
                         }
                     }

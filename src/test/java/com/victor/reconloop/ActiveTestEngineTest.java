@@ -234,6 +234,22 @@ public class ActiveTestEngineTest {
         assertFalse(ActiveTestEngine.looksTimeBased(4800, 4900, 5));
     }
 
+    // ---- isSafeMethod ----
+
+    @Test
+    public void safeMethodPolicyAllowsOnlyReadOnlyHttpMethodsByDefault() {
+        assertTrue(ActiveTestEngine.isSafeMethod("GET"));
+        assertTrue(ActiveTestEngine.isSafeMethod("head"));
+        assertTrue(ActiveTestEngine.isSafeMethod("OPTIONS"));
+
+        assertFalse(ActiveTestEngine.isSafeMethod("POST"));
+        assertFalse(ActiveTestEngine.isSafeMethod("PUT"));
+        assertFalse(ActiveTestEngine.isSafeMethod("PATCH"));
+        assertFalse(ActiveTestEngine.isSafeMethod("DELETE"));
+        assertFalse(ActiveTestEngine.isSafeMethod((String) null));
+        assertFalse(ActiveTestEngine.isSafeMethod(""));
+    }
+
     // ---- craftCorsProbeOrigins ----
 
     @Test

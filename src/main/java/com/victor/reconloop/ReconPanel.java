@@ -83,6 +83,8 @@ final class ReconPanel extends JPanel {
 
         // ---- Active testing (opt-in) ----
         JCheckBox activeEnabled = new JCheckBox("Enable active tests (fires payloads — authorized targets only)", false);
+        JCheckBox mutatingActive = new JCheckBox("Allow mutating active replays (POST/PUT/PATCH/DELETE)", false);
+        mutatingActive.setToolTipText("Default active tests replay only GET/HEAD/OPTIONS. Enable only when state-changing requests are explicitly authorized.");
         JSpinner activeBudget = new JSpinner(new SpinnerNumberModel(60, 1, 5000, 10));
         JTextField ctDomain = new JTextField(18);
         JButton ctButton = new JButton("Enumerate (crt.sh)");
@@ -103,6 +105,7 @@ final class ReconPanel extends JPanel {
 
         JPanel activeRow1 = new JPanel(new FlowLayout(FlowLayout.LEFT));
         activeRow1.add(activeEnabled);
+        activeRow1.add(mutatingActive);
         activeRow1.add(new JLabel("Per-request budget:")); activeRow1.add(activeBudget);
         activeRow1.add(runActive);
         activePanel.add(activeRow1);
@@ -240,6 +243,7 @@ final class ReconPanel extends JPanel {
         redirects.addActionListener(e -> controller.setFollowRedirects(redirects.isSelected()));
         reflections.addActionListener(e -> controller.setDetectReflections(reflections.isSelected()));
         activeEnabled.addActionListener(e -> controller.setActiveTestsEnabled(activeEnabled.isSelected()));
+        mutatingActive.addActionListener(e -> controller.setMutatingActiveRequests(mutatingActive.isSelected()));
         activeBudget.addChangeListener(e -> controller.setActiveRequestBudget((Integer) activeBudget.getValue()));
         ctButton.addActionListener(e -> controller.enumerateSubdomains(ctDomain.getText()));
         paramButton.addActionListener(e -> controller.discoverParameters(paramUrl.getText()));
