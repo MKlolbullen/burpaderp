@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/img/hero.svg" alt="Recon Hound" width="880">
+<img src="docs/img/hero.jpeg" alt="Recon Hound" width="880">
 
 ### The recon-to-exploit toolkit for Burp Suite — passive intel, active testing, and a multi-provider AI agent team you can watch work, all filing **native Burp issues**.
 
