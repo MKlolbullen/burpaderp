@@ -272,6 +272,52 @@ final class ReconController implements HttpHandler {
         });
     }
 
+    /**
+     * Looks the domain up in public scan and passive-DNS datasets. Requests go only to those
+     * providers. Discovered names and addresses are recorded in the asset inventory and are not
+     * crawled.
+     */
+    void lookupPassiveOsint(String domain) {
+        activeWorker.submit(() -> {
+            String root = CertificateTransparencyClient.normalizeDomain(domain);
+            if (root == null) {
+                api.logging().logToError("Invalid domain for passive OSINT: " + domain);
+                return;
+            }
+            api.logging().logToOutput("[Recon Hound] Passive OSINT for " + root
+                    + " (Shodan, Censys, VirusTotal, FOFA; no traffic to the target).");
+            PassiveOsintClient client = new PassiveOsintClient();
+            int recorded = 0;
+            for (PassiveOsintClient.Provider provider : PassiveOsintClient.Provider.values()) {
+                String key = System.getenv(provider.envVar);
+                PassiveOsintClient.LookupResult result = client.lookup(provider, root, key);
+                if (provider == PassiveOsintClient.Provider.VIRUSTOTAL && key != null && !key.isBlank()) {
+                    result = mergeOsint(result, client.lookupVirusTotalResolutions(root, key));
+                }
+                for (String note : result.notes()) {
+                    api.logging().logToOutput("[Recon Hound] " + note);
+                }
+                for (PassiveOsintClient.Observation observation : result.observations()) {
+                    if ("host".equals(observation.kind())) recordAsset(observation.value(), observation.source());
+                    else recordIp(observation.value(), observation.source());
+                    recorded++;
+                }
+            }
+            api.logging().logToOutput("[Recon Hound] Passive OSINT recorded " + recorded
+                    + " host/IP observation(s) for " + root + ".");
+            publishStatus();
+        });
+    }
+
+    private static PassiveOsintClient.LookupResult mergeOsint(PassiveOsintClient.LookupResult first,
+                                                               PassiveOsintClient.LookupResult second) {
+        List<PassiveOsintClient.Observation> observations = new ArrayList<>(first.observations());
+        observations.addAll(second.observations());
+        List<String> notes = new ArrayList<>(first.notes());
+        notes.addAll(second.notes());
+        return new PassiveOsintClient.LookupResult(observations, notes);
+    }
+
     void discoverParameters(String url) {
         if (!activeTestsEnabled.get()) {
             api.logging().logToOutput("[Recon Hound] Parameter discovery sends active traffic; enable the opt-in checkbox first.");

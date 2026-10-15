@@ -93,6 +93,20 @@ final class ReconPanel extends JPanel {
         JLabel payloads = new JLabel("Payload categories: " + controller.payloadCategories());
         controls.add(payloads);
 
+        JTextField osintDomain = new JTextField(18);
+        JButton osintButton = new JButton("Look up hosts");
+        osintButton.setToolTipText("Queries Shodan, Censys, VirusTotal, and FOFA for this domain. "
+                + "No request is sent to the target. Keys: $SHODAN_API_KEY, $CENSYS_API_TOKEN, "
+                + "$VIRUSTOTAL_API_KEY, $FOFA_API_KEY. Keys are not stored.");
+        JPanel osintPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        osintPanel.setBorder(BorderFactory.createTitledBorder(
+                "Passive OSINT — public scan and DNS data only (no traffic to the target)"));
+        osintPanel.add(new JLabel("Domain:"));
+        osintPanel.add(osintDomain);
+        osintPanel.add(osintButton);
+        osintPanel.add(new JLabel("Shodan, Censys, VirusTotal, FOFA. Missing keys are skipped."));
+        controls.add(osintPanel);
+
         // ---- Active testing (opt-in) ----
         JCheckBox activeEnabled = new JCheckBox("Enable active tests (fires payloads — authorized targets only)", false);
         JSpinner activeBudget = new JSpinner(new SpinnerNumberModel(60, 1, 5000, 10));
@@ -262,6 +276,7 @@ final class ReconPanel extends JPanel {
         reflections.addActionListener(e -> controller.setDetectReflections(reflections.isSelected()));
         activeEnabled.addActionListener(e -> controller.setActiveTestsEnabled(activeEnabled.isSelected()));
         activeBudget.addChangeListener(e -> controller.setActiveRequestBudget((Integer) activeBudget.getValue()));
+        osintButton.addActionListener(e -> controller.lookupPassiveOsint(osintDomain.getText()));
         ctButton.addActionListener(e -> controller.enumerateSubdomains(ctDomain.getText()));
         paramButton.addActionListener(e -> controller.discoverParameters(paramUrl.getText()));
         graphqlButton.addActionListener(e -> controller.introspectGraphql(graphqlUrl.getText()));
