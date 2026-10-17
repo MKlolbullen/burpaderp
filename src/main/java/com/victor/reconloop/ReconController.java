@@ -126,6 +126,10 @@ final class ReconController implements HttpHandler {
     private final AtomicBoolean detectReflections = new AtomicBoolean(true);
     private final AtomicBoolean activeTestsEnabled = new AtomicBoolean(false);
     private final AtomicBoolean mutatingActiveRequests = new AtomicBoolean(false);
+    private final AtomicBoolean oastActiveRequests = new AtomicBoolean(false);
+    private final AtomicBoolean timeDelayActiveRequests = new AtomicBoolean(false);
+    private final AtomicBoolean uploadActiveRequests = new AtomicBoolean(false);
+    private final AtomicBoolean authLockoutActiveRequests = new AtomicBoolean(false);
     private final AtomicInteger maxRequests = new AtomicInteger(500);
     private final AtomicInteger maxRedirects = new AtomicInteger(8);
     private final AtomicInteger activeThrottleMillis = new AtomicInteger(150);
@@ -214,6 +218,10 @@ final class ReconController implements HttpHandler {
     void setDetectReflections(boolean value) { detectReflections.set(value); }
     void setActiveTestsEnabled(boolean value) { activeTestsEnabled.set(value); }
     void setMutatingActiveRequests(boolean value) { mutatingActiveRequests.set(value); }
+    void setOastActiveRequests(boolean value) { oastActiveRequests.set(value); }
+    void setTimeDelayActiveRequests(boolean value) { timeDelayActiveRequests.set(value); }
+    void setUploadActiveRequests(boolean value) { uploadActiveRequests.set(value); }
+    void setAuthLockoutActiveRequests(boolean value) { authLockoutActiveRequests.set(value); }
     void setMaxRequests(int value) { maxRequests.set(Math.max(1, value)); }
     void setMaxRedirects(int value) { maxRedirects.set(Math.max(0, value)); }
     void setActiveRequestBudget(int value) { activeRequestBudget.set(Math.max(1, value)); }
@@ -498,7 +506,7 @@ final class ReconController implements HttpHandler {
             api.logging().logToOutput("[Recon Hound] Active tests are disabled; enable the opt-in checkbox first.");
             return;
         }
-        ensureCollaborator();
+        if (oastActiveRequests.get()) ensureCollaborator();
         activeWorker.submit(() -> {
             List<HttpRequest> targets = api.siteMap().requestResponses().stream()
                     .map(HttpRequestResponse::request)
@@ -517,6 +525,10 @@ final class ReconController implements HttpHandler {
                     + run.requestLimits().global() + "/" + run.requestLimits().perHost() + "/"
                     + run.requestLimits().perEndpoint() + "/" + run.requestLimits().perProbe()
                     + (allowMutating ? " including non-safe methods." : " using safe methods only.")
+                    + " Risk grants=[OAST=" + oastActiveRequests.get()
+                    + ", time-delay=" + timeDelayActiveRequests.get()
+                    + ", upload=" + uploadActiveRequests.get()
+                    + ", auth/lockout=" + authLockoutActiveRequests.get() + "]"
                     + " Run=" + run.id());
             try {
                 for (HttpRequest base : targets) {
@@ -551,7 +563,7 @@ final class ReconController implements HttpHandler {
             api.logging().logToOutput("[Recon Hound] Active tests are disabled; enable the opt-in checkbox first.");
             return;
         }
-        ensureCollaborator();
+        if (oastActiveRequests.get()) ensureCollaborator();
         activeWorker.submit(() -> {
             List<HttpRequest> targets = api.siteMap().requestResponses().stream()
                     .map(HttpRequestResponse::request)
@@ -640,7 +652,8 @@ final class ReconController implements HttpHandler {
                 try {
                     HttpRequest originalRequest = target.request();
                     ActiveRequestGateway.Result validResult = gateway.send(run,
-                            RequestPolicy.PlannedRequest.safe(originalRequest.method(), originalRequest.url(), "jwt-baseline"),
+                            new RequestPolicy.PlannedRequest(originalRequest.method(), originalRequest.url(), "jwt-baseline",
+                                    Set.of(RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT)),
                             originalRequest);
                     if (validResult.error() != null) {
                         api.logging().logToError("JWT baseline request failed for " + originalRequest.url(), validResult.error());
@@ -659,7 +672,8 @@ final class ReconController implements HttpHandler {
                         HttpRequest forgedReq = httpRequestFromString(target.request(),
                                 target.request().toString().replace(target.token(), forgedToken));
                         ActiveRequestGateway.Result forgedResult = gateway.send(run,
-                                RequestPolicy.PlannedRequest.safe(forgedReq.method(), forgedReq.url(), "jwt-alg-none"), forgedReq);
+                                new RequestPolicy.PlannedRequest(forgedReq.method(), forgedReq.url(), "jwt-alg-none",
+                                        Set.of(RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT)), forgedReq);
                         if (forgedResult.error() != null) {
                             api.logging().logToError("JWT alg:none request failed for " + target.request().url(), forgedResult.error());
                             continue;
@@ -707,7 +721,8 @@ final class ReconController implements HttpHandler {
                             HttpRequest forgedReq = httpRequestFromString(target.request(),
                                     target.request().toString().replace(target.token(), forgedToken));
                             ActiveRequestGateway.Result forgedResult = gateway.send(run,
-                                    RequestPolicy.PlannedRequest.safe(forgedReq.method(), forgedReq.url(), "jwt-weak-secret"), forgedReq);
+                                    new RequestPolicy.PlannedRequest(forgedReq.method(), forgedReq.url(), "jwt-weak-secret",
+                                            Set.of(RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT)), forgedReq);
                             if (forgedResult.error() != null) {
                                 api.logging().logToError("JWT weak-secret request failed for " + target.request().url(), forgedResult.error());
                                 continue;
@@ -923,8 +938,9 @@ final class ReconController implements HttpHandler {
                 try {
                     HttpRequest replayRequest = engine.applyIdentity(original.request());
                     ActiveRequestGateway.Result replayResult = gateway.send(run,
-                            RequestPolicy.PlannedRequest.safe(replayRequest.method(), replayRequest.url(),
-                                    "access-control-replay"),
+                            new RequestPolicy.PlannedRequest(replayRequest.method(), replayRequest.url(),
+                                    "access-control-replay",
+                                    Set.of(RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT)),
                             replayRequest);
                     if (replayResult.error() != null) {
                         api.logging().logToError("Access-control replay failed for " + replayRequest.url(),
@@ -1234,9 +1250,19 @@ final class ReconController implements HttpHandler {
      * the operator enables the explicit non-safe-method checkbox.
      */
     private ActiveRequestGateway newTargetGateway(boolean allowMutating) {
-        Set<RequestPolicy.Permission> permissions = allowMutating
-                ? EnumSet.of(RequestPolicy.Permission.UNSAFE_HTTP_METHOD, RequestPolicy.Permission.STATE_CHANGING)
-                : Set.of();
+        EnumSet<RequestPolicy.Permission> permissions = EnumSet.noneOf(RequestPolicy.Permission.class);
+        if (allowMutating) {
+            permissions.add(RequestPolicy.Permission.UNSAFE_HTTP_METHOD);
+            permissions.add(RequestPolicy.Permission.STATE_CHANGING);
+        }
+        if (oastActiveRequests.get()) permissions.add(RequestPolicy.Permission.OAST);
+        if (timeDelayActiveRequests.get()) permissions.add(RequestPolicy.Permission.TIME_DELAY);
+        if (uploadActiveRequests.get()) permissions.add(RequestPolicy.Permission.UPLOAD);
+        if (authLockoutActiveRequests.get()) {
+            permissions.add(RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT);
+        }
+        // PERSISTENT_PAYLOAD deliberately has no UI grant: destructive/persistent corpus entries
+        // remain hard-disabled and are filtered before planning.
         return new ActiveRequestGateway(
                 new RequestPolicy(api.scope()::isInScope, permissions), api.http()::sendRequest);
     }
