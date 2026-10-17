@@ -112,6 +112,12 @@ final class ReconPanel extends JPanel {
         JCheckBox mutatingActive = new JCheckBox("Allow mutating active replays (POST/PUT/PATCH/DELETE)", false);
         mutatingActive.setToolTipText("Default active tests replay only GET/HEAD/OPTIONS. Enable only when state-changing requests are explicitly authorized.");
         JSpinner activeBudget = new JSpinner(new SpinnerNumberModel(60, 1, 5000, 10));
+        JSpinner activeHostBudget = new JSpinner(new SpinnerNumberModel(60, 1, 5000, 10));
+        JSpinner activeEndpointBudget = new JSpinner(new SpinnerNumberModel(20, 1, 5000, 5));
+        JSpinner activeProbeBudget = new JSpinner(new SpinnerNumberModel(20, 1, 5000, 5));
+        activeHostBudget.setToolTipText("Maximum target-directed requests to one host during a run.");
+        activeEndpointBudget.setToolTipText("Maximum requests to one HTTP method + path during a run; query mutations share the same endpoint quota.");
+        activeProbeBudget.setToolTipText("Maximum requests attributed to one probe ID during a run.");
         JTextField ctDomain = new JTextField(18);
         JButton ctButton = new JButton("Enumerate (crt.sh)");
         JTextField paramUrl = new JTextField(22);
@@ -132,9 +138,16 @@ final class ReconPanel extends JPanel {
         JPanel activeRow1 = new JPanel(new FlowLayout(FlowLayout.LEFT));
         activeRow1.add(activeEnabled);
         activeRow1.add(mutatingActive);
-        activeRow1.add(new JLabel("Run request budget:")); activeRow1.add(activeBudget);
+        activeRow1.add(new JLabel("Global run budget:")); activeRow1.add(activeBudget);
         activeRow1.add(runActive);
         activePanel.add(activeRow1);
+
+        JPanel quotaRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        quotaRow.add(new JLabel("Per-host:")); quotaRow.add(activeHostBudget);
+        quotaRow.add(new JLabel("Per-endpoint:")); quotaRow.add(activeEndpointBudget);
+        quotaRow.add(new JLabel("Per-probe:")); quotaRow.add(activeProbeBudget);
+        quotaRow.add(new JLabel("(effective values are capped by the global run budget)"));
+        activePanel.add(quotaRow);
 
         JPanel activeRow2 = new JPanel(new FlowLayout(FlowLayout.LEFT));
         activeRow2.add(new JLabel("crt.sh domain:")); activeRow2.add(ctDomain); activeRow2.add(ctButton);
@@ -280,6 +293,9 @@ final class ReconPanel extends JPanel {
         activeEnabled.addActionListener(e -> controller.setActiveTestsEnabled(activeEnabled.isSelected()));
         mutatingActive.addActionListener(e -> controller.setMutatingActiveRequests(mutatingActive.isSelected()));
         activeBudget.addChangeListener(e -> controller.setActiveRequestBudget((Integer) activeBudget.getValue()));
+        activeHostBudget.addChangeListener(e -> controller.setActivePerHostBudget((Integer) activeHostBudget.getValue()));
+        activeEndpointBudget.addChangeListener(e -> controller.setActivePerEndpointBudget((Integer) activeEndpointBudget.getValue()));
+        activeProbeBudget.addChangeListener(e -> controller.setActivePerProbeBudget((Integer) activeProbeBudget.getValue()));
         osintButton.addActionListener(e -> controller.lookupPassiveOsint(osintDomain.getText()));
         ctButton.addActionListener(e -> controller.enumerateSubdomains(ctDomain.getText()));
         paramButton.addActionListener(e -> controller.discoverParameters(paramUrl.getText()));
