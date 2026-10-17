@@ -41,8 +41,8 @@ public class AccessControlEngineTest {
 
     @Test
     public void partiallySimilarBodiesRemainAnalystReviewCandidates() {
-        String privileged = "account profile invoices payments api-key rotate-secret";
-        String replay = "account profile invoices payments access denied";
+        String privileged = "account profile invoices payments activity settings billing users api-key rotate-secret";
+        String replay = "account profile invoices payments activity settings billing users access denied";
 
         AccessControlEngine.Result result =
                 AccessControlEngine.classify(200, privileged, 200, replay);
