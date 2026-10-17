@@ -146,6 +146,7 @@ final class ActiveTestEngine {
     private final ThreadLocal<ScanRun> scanRun = new ThreadLocal<>();
     private final ThreadLocal<ActiveRequestGateway> requestGateway = new ThreadLocal<>();
     private final ThreadLocal<String> currentProbeId = ThreadLocal.withInitial(() -> "active-probe");
+    private final ThreadLocal<Boolean> lastRequestDispatched = ThreadLocal.withInitial(() -> false);
     private volatile CollaboratorClient collaborator;
 
     ActiveTestEngine(MontoyaApi api, long throttleMillis) {
@@ -226,6 +227,7 @@ final class ActiveTestEngine {
             scanRun.remove();
             requestGateway.remove();
             currentProbeId.remove();
+            lastRequestDispatched.remove();
         }
     }
 
@@ -276,6 +278,7 @@ final class ActiveTestEngine {
         String correlation = encodeCorrelation("SSRF", point.label(), base.url());
         CollaboratorPayload payload = client.generatePayload(correlation);
         HttpResponse response = sendMutated(base, point, "http://" + payload + "/");
+        if (!Boolean.TRUE.equals(lastRequestDispatched.get())) return 0;
         if (response != null && response.bodyToString().contains(payload.toString())) {
             out.add(new ActiveFinding("HIGH", "SSRF", point.label(),
                     "Collaborator host reflected in response (probable full-response SSRF)", true, base.url()));
@@ -292,6 +295,7 @@ final class ActiveTestEngine {
         String correlation = encodeCorrelation("XSS-blind", point.label(), base.url());
         CollaboratorPayload payload = client.generatePayload(correlation);
         sendMutated(base, point, "\"><script src=//" + payload + "></script>");
+        if (!Boolean.TRUE.equals(lastRequestDispatched.get())) return 0;
         out.add(new ActiveFinding("INFO", "XSS-blind", point.label(),
                 "Blind-XSS beacon sent; awaiting OOB interaction", false, base.url()));
         return 1;
@@ -644,6 +648,7 @@ final class ActiveTestEngine {
      * cancellation, and the one run-scoped budget are all enforced by {@link ActiveRequestGateway}.
      */
     private HttpRequestResponse sendRequest(HttpRequest request) {
+        lastRequestDispatched.set(false);
         if (request == null) return null;
         ScanRun run = scanRun.get();
         ActiveRequestGateway gateway = requestGateway.get();
@@ -659,6 +664,7 @@ final class ActiveTestEngine {
             return null;
         }
         if (!result.dispatched()) return null;
+        lastRequestDispatched.set(true);
         throttle();
         return result.response();
     }
