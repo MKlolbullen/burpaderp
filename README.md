@@ -346,18 +346,27 @@ Whatever you run here also shows up in the [AI feed](#ai-feed--watch-the-models-
 
 ![Reporting — where findings surface](docs/img/reporting.svg)
 
+Active results follow an explicit evidence lifecycle: **signal → candidate → reproduced → confirmed →
+exploitable** (or rejected). Signals and candidates stay visible in the Active tests table for analyst
+follow-up but are not promoted to native Burp issues. Reproduced-or-stronger findings are reportable;
+confirmed/exploitable evidence receives stronger issue confidence. Reflected metacharacters and one
+timing anomaly are candidates, absence of a rate-limit signal is only a signal, while evaluated SSTI,
+CRLF response-header injection, file-read canaries, and correlated Collaborator callbacks are
+confirmed evidence.
+
 Findings surface in several places:
 
 - the Recon Hound **suite tab** tables — **Findings**, **Discovered resources**, **Insertion points**,
   **XSS reflections**, **Active tests**, **Hosts / IPs**, **XSS vector library**, plus the AI views
   (**AI analysis**, **Agent team**, **AI feed**, **Nuclei templates (AI)**);
-- Burp's **Dashboard / Target issue list** as native audit issues — **every** finding is filed here
-  through a single deduplicated reporter, so results are in Burp's own reports and never live only in
-  the plugin tabs. This covers secrets, disclosure signals, reflected-parameter/XSS candidates,
+- Burp's **Dashboard / Target issue list** as native audit issues — reportable findings are filed
+  through a single deduplicated reporter; active signals/candidates deliberately remain in the plugin
+  until stronger evidence exists. This covers secrets, disclosure signals, reflected-parameter/XSS candidates,
   web-hygiene (CORS/CSP/JWT/cookie/CSRF), data-exposure/mass-assignment, OAuth/OIDC & SAML flaws,
   debug/BFLA candidates, exposed source maps and OpenAPI/GraphQL surface, gf-pattern hits,
-  broken-access-control/IDOR, confirmed active findings (SQLi, SSRF/SSTI/XSS incl. Collaborator OOB,
-  CORS, rate-limit, file-upload), vulnerable JS dependencies (SCA), JWT defects incl. offline
+  broken-access-control/IDOR, reproduced/confirmed active findings (SQLi, SSTI, CRLF, CORS,
+  path traversal/XXE, verified file upload, and Collaborator OOB), vulnerable JS dependencies (SCA),
+  JWT defects incl. offline
   weak-secret cracks, heuristic DOM-XSS, and LLM-identified JavaScript bugs (with PoC and chain).
   Informational results are filed at `INFORMATION` so nothing is dropped;
 - Burp's **native scan pipeline** — Recon Hound registers a **passive scan check**, so its detectors
