@@ -44,7 +44,7 @@ final class ScanRun {
     }
 
     record Allocation(boolean allowed, Quota exhaustedQuota, String key, int used, int limit) {
-        static Allocation allowed() {
+        static Allocation granted() {
             return new Allocation(true, null, "", 0, 0);
         }
 
@@ -138,7 +138,7 @@ final class ScanRun {
         hostUsage.put(host, hostUsed + 1);
         endpointUsage.put(endpoint, endpointUsed + 1);
         probeUsage.put(probe, probeUsed + 1);
-        return Allocation.allowed();
+        return Allocation.granted();
     }
 
     synchronized int hostRequests(String host) {
