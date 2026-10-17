@@ -31,7 +31,7 @@ final class ResponseComparator {
     private static final Pattern TOKEN_SPLIT = Pattern.compile("[^a-z0-9_]+");
 
     private static final Set<String> DEFAULT_VOLATILE_JSON_FIELDS = Set.of(
-            "timestamp", "time", "requestid", "request_id", "traceid", "trace_id",
+            "timestamp", "requestid", "request_id", "traceid", "trace_id",
             "correlationid", "correlation_id", "csrf", "csrftoken", "csrf_token",
             "xsrf", "xsrftoken", "xsrf_token", "nonce");
 
@@ -52,7 +52,7 @@ final class ResponseComparator {
         if (a.equals(b)) return true;
 
         double tokenSimilarity = similarityNormalized(a, b);
-        if (tokenSimilarity >= 0.92) return true;
+        if (tokenSimilarity >= 0.96) return true;
 
         int maxLen = Math.max(a.length(), b.length());
         int minLen = Math.min(a.length(), b.length());
