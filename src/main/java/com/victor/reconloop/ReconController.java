@@ -630,6 +630,10 @@ final class ReconController implements HttpHandler {
             api.logging().logToOutput("[Recon Hound] Active tests are disabled; enable the opt-in checkbox first.");
             return;
         }
+        if (!authLockoutActiveRequests.get()) {
+            api.logging().logToOutput("[Recon Hound] JWT forgery is an authentication probe; enable the auth / lockout permission first.");
+            return;
+        }
         activeWorker.submit(() -> {
             record JwtTarget(HttpRequest request, String token) {}
             List<JwtTarget> targets = new ArrayList<>();
@@ -910,6 +914,10 @@ final class ReconController implements HttpHandler {
     void runAccessControlTest(String sessionHeaders, boolean unauthenticated) {
         if (!activeTestsEnabled.get()) {
             api.logging().logToOutput("[Recon Hound] Active tests are disabled; enable the opt-in checkbox first.");
+            return;
+        }
+        if (!authLockoutActiveRequests.get()) {
+            api.logging().logToOutput("[Recon Hound] Alternate-identity replay is an authorization probe; enable the auth / lockout permission first.");
             return;
         }
         AccessControlEngine engine = new AccessControlEngine(sessionHeaders, unauthenticated);
