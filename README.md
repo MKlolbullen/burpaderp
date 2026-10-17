@@ -152,8 +152,11 @@ Confirming a passive lead still means firing a context-appropriate probe against
 ![Access-control / IDOR testing](docs/img/access-control.svg)
 
 An opt-in **Active testing** panel adds discovery and confirmation that require sending crafted
-traffic. It is **disabled by default**, scope-checked per request, throttled, and request-capped.
-Enable it only against targets you are authorised to test.
+traffic. It is **disabled by default**, scope-checked per request, throttled, and governed by
+hierarchical run quotas. High-impact behaviours are separately fail-closed: Collaborator/OAST,
+time-delay payloads, upload mutations, authentication/lockout replays, and non-safe HTTP methods each
+require their own operator opt-in. Persistent/destructive corpus entries remain blocked. Enable only
+the permissions your rules of engagement actually authorize.
 
 Every parameter-level probe below injects through a shared **insertion-point model** (`InsertionPoint`)
 rather than query/body parameters alone — so SQLi, NoSQLi, SSTI, path traversal, reflected/blind XSS,
@@ -402,7 +405,11 @@ Passive analysis observes only what the target already returned. Active behaviou
 
 - opt-in and **off by default**;
 - Burp-scope bounded, same-origin by default, and request/redirect capped;
-- gated by the per-run request policy and budget;
+- gated by the per-run request policy plus **global / per-host / per-endpoint / per-probe quotas**;
+- split into explicit risk permissions: non-safe HTTP methods, **OAST/Collaborator**, **time-delay**,
+  **upload mutation**, and **authentication/lockout** probes are all off until separately enabled;
+- persistent/destructive corpus payloads remain hard-disabled rather than being exposed behind a
+  convenient "do something regrettable" checkbox;
 - and, for the AI agent team, held behind a **fail-closed human-approval gate** — the team reasons
   but never touches the target on its own, and every gate decision is recorded in the AI feed.
 
