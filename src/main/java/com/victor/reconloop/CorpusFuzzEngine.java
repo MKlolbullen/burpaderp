@@ -177,7 +177,7 @@ final class CorpusFuzzEngine {
                                      RequestBudget categoryBudget, ScanRun run, ActiveRequestGateway gateway,
                                      String category) {
         try {
-            if (!categoryBudget.tryAcquire()) return null;
+            if (categoryBudget.exhausted()) return null;
             HttpParameter mutated = HttpParameter.parameter(parameter.name(), value, parameter.type());
             HttpRequest request = base.withUpdatedParameters(mutated);
             Set<RequestPolicy.Permission> permissions = ActiveTestEngine.isSafeMethod(request)
@@ -192,6 +192,9 @@ final class CorpusFuzzEngine {
                 return null;
             }
             if (!result.dispatched()) return null;
+            // This fuzzer is serialized per invocation, so charging the local category quota after
+            // gateway dispatch is safe and ensures policy/quota denials do not consume corpus quota.
+            if (!categoryBudget.tryAcquire()) return null;
             throttle();
             return result.response() == null ? null : result.response().response();
         } catch (Exception e) {
