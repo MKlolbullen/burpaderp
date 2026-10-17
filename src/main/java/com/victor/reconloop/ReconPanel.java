@@ -111,6 +111,14 @@ final class ReconPanel extends JPanel {
         JCheckBox activeEnabled = new JCheckBox("Enable active tests (fires payloads — authorized targets only)", false);
         JCheckBox mutatingActive = new JCheckBox("Allow mutating active replays (POST/PUT/PATCH/DELETE)", false);
         mutatingActive.setToolTipText("Default active tests replay only GET/HEAD/OPTIONS. Enable only when state-changing requests are explicitly authorized.");
+        JCheckBox oastActive = new JCheckBox("Allow OAST / Collaborator callbacks", false);
+        JCheckBox timeDelayActive = new JCheckBox("Allow time-delay probes", false);
+        JCheckBox uploadActive = new JCheckBox("Allow upload mutations", false);
+        JCheckBox authLockoutActive = new JCheckBox("Allow auth / lockout probes", false);
+        oastActive.setToolTipText("Required before SSRF/blind-XSS/CMDi/host-header and other Collaborator-backed payloads can leave Burp.");
+        timeDelayActive.setToolTipText("Required before SLEEP/PG_SLEEP/WAITFOR-style timing payloads are dispatched.");
+        uploadActive.setToolTipText("Required before multipart upload filenames/bodies are actively replayed.");
+        authLockoutActive.setToolTipText("Required before rate-limit, JWT forgery, or alternate-identity access-control replays are dispatched.");
         JSpinner activeBudget = new JSpinner(new SpinnerNumberModel(60, 1, 5000, 10));
         JSpinner activeHostBudget = new JSpinner(new SpinnerNumberModel(60, 1, 5000, 10));
         JSpinner activeEndpointBudget = new JSpinner(new SpinnerNumberModel(20, 1, 5000, 5));
@@ -148,6 +156,15 @@ final class ReconPanel extends JPanel {
         quotaRow.add(new JLabel("Per-probe:")); quotaRow.add(activeProbeBudget);
         quotaRow.add(new JLabel("(effective values are capped by the global run budget)"));
         activePanel.add(quotaRow);
+
+        JPanel riskRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        riskRow.add(new JLabel("Risk permissions:"));
+        riskRow.add(oastActive);
+        riskRow.add(timeDelayActive);
+        riskRow.add(uploadActive);
+        riskRow.add(authLockoutActive);
+        riskRow.add(new JLabel("(persistent/destructive payloads stay disabled)"));
+        activePanel.add(riskRow);
 
         JPanel activeRow2 = new JPanel(new FlowLayout(FlowLayout.LEFT));
         activeRow2.add(new JLabel("crt.sh domain:")); activeRow2.add(ctDomain); activeRow2.add(ctButton);
@@ -292,6 +309,10 @@ final class ReconPanel extends JPanel {
         reflections.addActionListener(e -> controller.setDetectReflections(reflections.isSelected()));
         activeEnabled.addActionListener(e -> controller.setActiveTestsEnabled(activeEnabled.isSelected()));
         mutatingActive.addActionListener(e -> controller.setMutatingActiveRequests(mutatingActive.isSelected()));
+        oastActive.addActionListener(e -> controller.setOastActiveRequests(oastActive.isSelected()));
+        timeDelayActive.addActionListener(e -> controller.setTimeDelayActiveRequests(timeDelayActive.isSelected()));
+        uploadActive.addActionListener(e -> controller.setUploadActiveRequests(uploadActive.isSelected()));
+        authLockoutActive.addActionListener(e -> controller.setAuthLockoutActiveRequests(authLockoutActive.isSelected()));
         activeBudget.addChangeListener(e -> controller.setActiveRequestBudget((Integer) activeBudget.getValue()));
         activeHostBudget.addChangeListener(e -> controller.setActivePerHostBudget((Integer) activeHostBudget.getValue()));
         activeEndpointBudget.addChangeListener(e -> controller.setActivePerEndpointBudget((Integer) activeEndpointBudget.getValue()));
