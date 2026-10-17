@@ -126,7 +126,8 @@ final class CorpusFuzzEngine {
                     CollaboratorClient client = collaborator;
                     if (client == null) continue;
                     CollaboratorPayload oobPayload = client.generatePayload(
-                            ActiveTestEngine.encodeCorrelation("CorpusFuzz-" + category, parameter.name(), base.url()));
+                            ActiveTestEngine.encodeCorrelation("CorpusFuzz-" + category, parameter.name(), base.url(),
+                                    run.id().toString()));
                     payload = rewriteCallbackHost(rawPayload, oobPayload.toString());
                 }
 
