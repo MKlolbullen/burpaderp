@@ -146,6 +146,8 @@ final class ActiveTestEngine {
     private final ThreadLocal<ScanRun> scanRun = new ThreadLocal<>();
     private final ThreadLocal<ActiveRequestGateway> requestGateway = new ThreadLocal<>();
     private final ThreadLocal<String> currentProbeId = ThreadLocal.withInitial(() -> "active-probe");
+    private final ThreadLocal<Set<RequestPolicy.Permission>> currentProbePermissions =
+            ThreadLocal.withInitial(Set::of);
     private final ThreadLocal<Boolean> lastRequestDispatched = ThreadLocal.withInitial(() -> false);
     private volatile CollaboratorClient collaborator;
 
@@ -171,9 +173,15 @@ final class ActiveTestEngine {
         if (!allowMutating && !isSafeMethod(base)) return List.of();
         ScanProfile profile = allowMutating ? ScanProfile.ACTIVE_MUTATION : ScanProfile.ACTIVE_SAFE;
         ScanRun run = ScanRun.begin(profile, ScopeSnapshot.forTargetUrl(base.url()), maxRequests);
-        Set<RequestPolicy.Permission> permissions = allowMutating
-                ? EnumSet.of(RequestPolicy.Permission.UNSAFE_HTTP_METHOD, RequestPolicy.Permission.STATE_CHANGING)
-                : Set.of();
+        EnumSet<RequestPolicy.Permission> permissions = EnumSet.of(
+                RequestPolicy.Permission.OAST,
+                RequestPolicy.Permission.TIME_DELAY,
+                RequestPolicy.Permission.UPLOAD,
+                RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT);
+        if (allowMutating) {
+            permissions.add(RequestPolicy.Permission.UNSAFE_HTTP_METHOD);
+            permissions.add(RequestPolicy.Permission.STATE_CHANGING);
+        }
         ActiveRequestGateway gateway = new ActiveRequestGateway(
                 new RequestPolicy(api.scope()::isInScope, permissions), api.http()::sendRequest);
         try {
@@ -208,25 +216,32 @@ final class ActiveTestEngine {
                 }
                 if (!budgetExhausted()) runProbe("reflected-xss", () -> testReflectedXss(base, point, findings));
                 if (!budgetExhausted()) runProbe("ssti", () -> testSsti(base, point, findings));
-                if (!budgetExhausted()) runProbe("ssrf", () -> testSsrf(base, point, findings));
-                if (!budgetExhausted()) runProbe("blind-xss", () -> testBlindXss(base, point, findings));
-                if (!budgetExhausted()) runProbe("command-injection", () -> testCommandInjection(base, point, findings));
+                if (!budgetExhausted()) runProbe("ssrf", Set.of(RequestPolicy.Permission.OAST),
+                        () -> testSsrf(base, point, findings));
+                if (!budgetExhausted()) runProbe("blind-xss", Set.of(RequestPolicy.Permission.OAST),
+                        () -> testBlindXss(base, point, findings));
+                if (!budgetExhausted()) runProbe("command-injection", Set.of(RequestPolicy.Permission.OAST),
+                        () -> testCommandInjection(base, point, findings));
                 if (!budgetExhausted()) runProbe("open-redirect", () -> testOpenRedirect(base, point, findings));
                 if (!budgetExhausted()) runProbe("crlf", () -> testCrlf(base, point, findings));
                 if (!budgetExhausted()) runProbe("sqli", () -> testSqli(base, point, findings));
                 if (!budgetExhausted()) runProbe("nosqli", () -> testNoSqlInjection(base, point, findings));
                 if (!budgetExhausted()) runProbe("path-traversal", () -> testPathTraversal(base, point, findings));
             }
-            if (!budgetExhausted()) runProbe("host-header", () -> testHostHeaderInjection(base, findings));
+            if (!budgetExhausted()) runProbe("host-header", Set.of(RequestPolicy.Permission.OAST),
+                    () -> testHostHeaderInjection(base, findings));
             if (!budgetExhausted()) runProbe("cors", () -> testCors(base, findings));
-            if (!budgetExhausted()) runProbe("rate-limit", () -> testRateLimit(base, findings));
-            if (!budgetExhausted()) runProbe("file-upload", () -> testFileUploadBypass(base, findings));
+            if (!budgetExhausted()) runProbe("rate-limit", Set.of(RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT),
+                    () -> testRateLimit(base, findings));
+            if (!budgetExhausted()) runProbe("file-upload", Set.of(RequestPolicy.Permission.UPLOAD),
+                    () -> testFileUploadBypass(base, findings));
             if (!budgetExhausted()) runProbe("xxe", () -> testXxe(base, findings));
             return findings;
         } finally {
             scanRun.remove();
             requestGateway.remove();
             currentProbeId.remove();
+            currentProbePermissions.remove();
             lastRequestDispatched.remove();
         }
     }
@@ -368,9 +383,11 @@ final class ActiveTestEngine {
         if (budgetExhausted()) return budgetUsed() - before;
 
         long baselineMillis = timeRequest(base, point, point.baseValue());
+        if (baselineMillis < 0) return budgetUsed() - before;
         for (String payload : SQLI_TIME_PAYLOADS) {
             if (budgetExhausted()) break;
             long payloadMillis = timeRequest(base, point, payload);
+            if (payloadMillis < 0) break;
             if (looksTimeBased(baselineMillis, payloadMillis, SQLI_TIME_DELAY_SECONDS)) {
                 out.add(new ActiveFinding("HIGH", "SQLi", point.label(),
                         "Time-based blind: response time increased by ~" + SQLI_TIME_DELAY_SECONDS
@@ -434,8 +451,9 @@ final class ActiveTestEngine {
 
     private long timeRequest(HttpRequest base, InsertionPoint point, String value) {
         long start = System.currentTimeMillis();
-        sendMutated(base, point, value);
-        return System.currentTimeMillis() - start;
+        sendMutated(base, point, value, Set.of(RequestPolicy.Permission.TIME_DELAY));
+        return Boolean.TRUE.equals(lastRequestDispatched.get())
+                ? System.currentTimeMillis() - start : -1;
     }
 
     /**
@@ -472,7 +490,8 @@ final class ActiveTestEngine {
         if (client != null && !budgetExhausted()) {
             String correlation = encodeCorrelation("XXE", "(body)", base.url());
             CollaboratorPayload payload = client.generatePayload(correlation);
-            HttpResponse response = sendBody(base, XxeEngine.buildOobPayload("http://" + payload + "/xxe"));
+            HttpResponse response = sendBody(base, XxeEngine.buildOobPayload("http://" + payload + "/xxe"),
+                    Set.of(RequestPolicy.Permission.OAST));
             if (response != null) {
                 out.add(new ActiveFinding("INFO", "XXE", "(request body)",
                         "External-entity OOB payload sent to " + payload + "; awaiting Collaborator callback",
@@ -484,8 +503,12 @@ final class ActiveTestEngine {
 
     /** Sends {@code base} with its body replaced by {@code body}, through the scope/budget gate. */
     private HttpResponse sendBody(HttpRequest base, String body) {
+        return sendBody(base, body, Set.of());
+    }
+
+    private HttpResponse sendBody(HttpRequest base, String body, Set<RequestPolicy.Permission> permissions) {
         try {
-            HttpRequestResponse rr = sendRequest(base.withBody(body));
+            HttpRequestResponse rr = sendRequest(base.withBody(body), permissions);
             return rr == null ? null : rr.response();
         } catch (Exception e) {
             api.logging().logToError("XXE probe failed for " + base.url(), e);
@@ -624,18 +647,31 @@ final class ActiveTestEngine {
     }
 
     private void runProbe(String probeId, Runnable probe) {
-        String previous = currentProbeId.get();
+        runProbe(probeId, Set.of(), probe);
+    }
+
+    private void runProbe(String probeId, Set<RequestPolicy.Permission> permissions, Runnable probe) {
+        String previousId = currentProbeId.get();
+        Set<RequestPolicy.Permission> previousPermissions = currentProbePermissions.get();
         currentProbeId.set(probeId == null || probeId.isBlank() ? "active-probe" : probeId);
+        currentProbePermissions.set(permissions == null || permissions.isEmpty()
+                ? Set.of() : Set.copyOf(permissions));
         try {
             probe.run();
         } finally {
-            currentProbeId.set(previous);
+            currentProbeId.set(previousId);
+            currentProbePermissions.set(previousPermissions);
         }
     }
 
     private HttpResponse sendMutated(HttpRequest base, InsertionPoint point, String value) {
+        return sendMutated(base, point, value, Set.of());
+    }
+
+    private HttpResponse sendMutated(HttpRequest base, InsertionPoint point, String value,
+                                     Set<RequestPolicy.Permission> permissions) {
         try {
-            HttpRequestResponse rr = sendRequest(point.apply(base, value));
+            HttpRequestResponse rr = sendRequest(point.apply(base, value), permissions);
             return rr == null ? null : rr.response();
         } catch (Exception e) {
             api.logging().logToError("Active probe failed for " + point.label(), e);
@@ -648,14 +684,25 @@ final class ActiveTestEngine {
      * cancellation, and the one run-scoped budget are all enforced by {@link ActiveRequestGateway}.
      */
     private HttpRequestResponse sendRequest(HttpRequest request) {
+        return sendRequest(request, Set.of());
+    }
+
+    private HttpRequestResponse sendRequest(HttpRequest request, Set<RequestPolicy.Permission> extraPermissions) {
         lastRequestDispatched.set(false);
         if (request == null) return null;
         ScanRun run = scanRun.get();
         ActiveRequestGateway gateway = requestGateway.get();
         if (run == null || gateway == null || !run.isRunning()) return null;
-        Set<RequestPolicy.Permission> permissions = isSafeMethod(request)
-                ? Set.of()
-                : EnumSet.of(RequestPolicy.Permission.UNSAFE_HTTP_METHOD, RequestPolicy.Permission.STATE_CHANGING);
+
+        EnumSet<RequestPolicy.Permission> permissions = EnumSet.noneOf(RequestPolicy.Permission.class);
+        Set<RequestPolicy.Permission> probePermissions = currentProbePermissions.get();
+        if (probePermissions != null) permissions.addAll(probePermissions);
+        if (extraPermissions != null) permissions.addAll(extraPermissions);
+        if (!isSafeMethod(request)) {
+            permissions.add(RequestPolicy.Permission.UNSAFE_HTTP_METHOD);
+            permissions.add(RequestPolicy.Permission.STATE_CHANGING);
+        }
+
         ActiveRequestGateway.Result result = gateway.send(run,
                 new RequestPolicy.PlannedRequest(request.method(), request.url(), currentProbeId.get(), permissions),
                 request);
