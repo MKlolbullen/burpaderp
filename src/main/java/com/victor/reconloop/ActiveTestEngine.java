@@ -32,11 +32,21 @@ final class ActiveTestEngine {
      * existing probes while they are migrated to name their evidence state directly.
      */
     record ActiveFinding(String severity, String testClass, String parameter,
-                         String evidence, VerificationState verificationState, String url) {
+                         String evidence, VerificationState verificationState, String url,
+                         FindingEvidence provenance) {
+        ActiveFinding {
+            provenance = provenance == null ? FindingEvidence.empty() : provenance;
+        }
+
+        ActiveFinding(String severity, String testClass, String parameter,
+                      String evidence, VerificationState verificationState, String url) {
+            this(severity, testClass, parameter, evidence, verificationState, url, FindingEvidence.empty());
+        }
+
         ActiveFinding(String severity, String testClass, String parameter,
                       String evidence, boolean legacyConfirmed, String url) {
             this(severity, testClass, parameter, evidence,
-                    VerificationState.fromLegacyConfirmed(legacyConfirmed), url);
+                    VerificationState.fromLegacyConfirmed(legacyConfirmed), url, FindingEvidence.empty());
         }
 
         /** Compatibility accessor for older UI/consumer code. */
@@ -58,6 +68,8 @@ final class ActiveTestEngine {
             SSTI_PREFIX + "${{7*777}}" + SSTI_SUFFIX,    // nested
             SSTI_PREFIX + "{7*777}" + SSTI_SUFFIX);      // simple brace
 
+    private static final String DETECTOR_VERSION = "active-engine/1";
+    private static final int MUTATION_PREVIEW_LIMIT = 240;
     private static final String XSS_TOKEN = "rhx";
     private static final String XSS_PROBE = "<img>\"'";
     private static final String WAF_PROBE = "<script>alert(1)</script>";
@@ -149,6 +161,7 @@ final class ActiveTestEngine {
     private final ThreadLocal<String> currentProbeId = ThreadLocal.withInitial(() -> "active-probe");
     private final ThreadLocal<Set<RequestPolicy.Permission>> currentProbePermissions =
             ThreadLocal.withInitial(Set::of);
+    private final ThreadLocal<String> lastMutationSummary = ThreadLocal.withInitial(() -> "");
     private final ThreadLocal<Boolean> lastRequestDispatched = ThreadLocal.withInitial(() -> false);
     private volatile CollaboratorClient collaborator;
 
@@ -243,6 +256,7 @@ final class ActiveTestEngine {
             requestGateway.remove();
             currentProbeId.remove();
             currentProbePermissions.remove();
+            lastMutationSummary.remove();
             lastRequestDispatched.remove();
         }
     }
@@ -252,7 +266,7 @@ final class ActiveTestEngine {
         if (response == null) return 1;
         Optional<String> waf = fingerprintWaf(response.statusCode(),
                 response.bodyToString(), response.headerValue("Server"));
-        waf.ifPresent(vendor -> out.add(new ActiveFinding("INFO", "WAF", point.label(),
+        waf.ifPresent(vendor -> out.add(finding("INFO", "WAF", point.label(),
                 "Likely WAF/filter: " + vendor + " (status " + response.statusCode() + ")", VerificationState.CANDIDATE, base.url())));
         return 1;
     }
@@ -264,7 +278,7 @@ final class ActiveTestEngine {
         String surviving = survivingXssChars(response.bodyToString(), token);
         if (!surviving.isEmpty()) {
             String severity = (surviving.contains("<") && surviving.contains(">")) ? "HIGH" : "MEDIUM";
-            out.add(new ActiveFinding(severity, "XSS", point.label(),
+            out.add(finding(severity, "XSS", point.label(),
                     "Reflected metacharacters survived unencoded: " + surviving, VerificationState.CANDIDATE, base.url()));
         }
         return 1;
@@ -279,7 +293,7 @@ final class ActiveTestEngine {
             if (response == null) continue;
             Optional<String> engine = detectSstiEval(response.bodyToString(), payload);
             if (engine.isPresent()) {
-                out.add(new ActiveFinding("HIGH", "SSTI", point.label(),
+                out.add(finding("HIGH", "SSTI", point.label(),
                         "Template arithmetic evaluated (" + SSTI_A + "*" + SSTI_B + "=" + SSTI_PRODUCT
                                 + ") via " + engine.get(), VerificationState.CONFIRMED, base.url()));
                 break;
@@ -296,10 +310,10 @@ final class ActiveTestEngine {
         HttpResponse response = sendMutated(base, point, "http://" + payload + "/");
         if (!Boolean.TRUE.equals(lastRequestDispatched.get())) return 0;
         if (response != null && response.bodyToString().contains(payload.toString())) {
-            out.add(new ActiveFinding("HIGH", "SSRF", point.label(),
+            out.add(finding("HIGH", "SSRF", point.label(),
                     "Collaborator host reflected in response (possible SSRF/reflection signal)", VerificationState.CANDIDATE, base.url()));
         } else {
-            out.add(new ActiveFinding("INFO", "SSRF", point.label(),
+            out.add(finding("INFO", "SSRF", point.label(),
                     "Collaborator SSRF payload sent; awaiting OOB interaction", VerificationState.SIGNAL, base.url()));
         }
         return 1;
@@ -312,7 +326,7 @@ final class ActiveTestEngine {
         CollaboratorPayload payload = client.generatePayload(correlation);
         sendMutated(base, point, "\"><script src=//" + payload + "></script>");
         if (!Boolean.TRUE.equals(lastRequestDispatched.get())) return 0;
-        out.add(new ActiveFinding("INFO", "XSS-blind", point.label(),
+        out.add(finding("INFO", "XSS-blind", point.label(),
                 "Blind-XSS beacon sent; awaiting OOB interaction", VerificationState.SIGNAL, base.url()));
         return 1;
     }
@@ -329,7 +343,7 @@ final class ActiveTestEngine {
         if (!budgetExhausted()) sendMutated(base, point, "$(nslookup " + payload + ")");
         int sent = budgetUsed() - before;
         if (sent > 0) {
-            out.add(new ActiveFinding("INFO", "CMDi", point.label(),
+            out.add(finding("INFO", "CMDi", point.label(),
                     "Blind command-injection DNS probes sent; awaiting OOB interaction", VerificationState.SIGNAL, base.url()));
         }
         return sent;
@@ -340,7 +354,7 @@ final class ActiveTestEngine {
         HttpResponse response = sendMutated(base, point, "https://" + marker + "/");
         if (response == null) return 1;
         Optional<String> hit = detectOpenRedirect(response.statusCode(), response.headerValue("Location"), marker);
-        hit.ifPresent(location -> out.add(new ActiveFinding("MEDIUM", "OpenRedirect", point.label(),
+        hit.ifPresent(location -> out.add(finding("MEDIUM", "OpenRedirect", point.label(),
                 "Redirect Location points to attacker-controlled host: " + location, VerificationState.CONFIRMED, base.url())));
         return 1;
     }
@@ -349,7 +363,7 @@ final class ActiveTestEngine {
         String injected = "rhcrlf%0d%0aX-Recon-Hound%3a%20injected";
         HttpResponse response = sendMutated(base, point, injected);
         if (response != null && response.headerValue("X-Recon-Hound") != null) {
-            out.add(new ActiveFinding("HIGH", "CRLF", point.label(),
+            out.add(finding("HIGH", "CRLF", point.label(),
                     "Injected CRLF produced a new response header (X-Recon-Hound)", VerificationState.CONFIRMED, base.url()));
         }
         return 1;
@@ -364,7 +378,7 @@ final class ActiveTestEngine {
 
         HttpResponse errorResponse = sendMutated(base, point, SQLI_ERROR_PAYLOAD);
         if (errorResponse != null && containsSqlError(errorResponse.bodyToString()) && !containsSqlError(baselineBody)) {
-            out.add(new ActiveFinding("HIGH", "SQLi", point.label(),
+            out.add(finding("HIGH", "SQLi", point.label(),
                     "Injecting a single quote produced a database error signature not present in the baseline response",
                     VerificationState.REPRODUCED, base.url()));
             return budgetUsed() - before;
@@ -376,7 +390,7 @@ final class ActiveTestEngine {
         HttpResponse falseResponse = sendMutated(base, point, SQLI_FALSE_PAYLOAD);
         if (trueResponse != null && falseResponse != null
                 && looksBooleanBased(baselineBody, trueResponse.bodyToString(), falseResponse.bodyToString())) {
-            out.add(new ActiveFinding("HIGH", "SQLi", point.label(),
+            out.add(finding("HIGH", "SQLi", point.label(),
                     "Boolean-based blind: the always-true condition matches the baseline response while the "
                             + "always-false condition diverges from both", VerificationState.REPRODUCED, base.url()));
             return budgetUsed() - before;
@@ -393,7 +407,7 @@ final class ActiveTestEngine {
             ResponseComparator.TimingAnalysis timing = ResponseComparator.analyzeTiming(
                     baselineTimings, payloadTimings, SQLI_TIME_DELAY_SECONDS * 1000L);
             if (timing.delayed()) {
-                out.add(new ActiveFinding("HIGH", "SQLi", point.label(),
+                out.add(finding("HIGH", "SQLi", point.label(),
                         "Repeated time-based blind signal for payload " + payload
                                 + ": baseline median=" + timing.baselineMedianMillis() + "ms"
                                 + " (MAD=" + timing.baselineMadMillis() + "ms), payload median="
@@ -424,7 +438,7 @@ final class ActiveTestEngine {
             HttpResponse response = sendMutated(base, point, payload);
             if (response == null) continue;
             if (containsNoSqlError(response.bodyToString())) {
-                out.add(new ActiveFinding("HIGH", "NoSQLi", point.label(),
+                out.add(finding("HIGH", "NoSQLi", point.label(),
                         "Injecting " + payload + " produced a NoSQL datastore error signature not present "
                                 + "in the baseline response", VerificationState.REPRODUCED, base.url()));
                 break;
@@ -450,7 +464,7 @@ final class ActiveTestEngine {
             if (response == null) continue;
             Optional<String> hit = detectPathTraversal(response.bodyToString(), baselineBody);
             if (hit.isPresent()) {
-                out.add(new ActiveFinding("HIGH", "PathTraversal", point.label(),
+                out.add(finding("HIGH", "PathTraversal", point.label(),
                         "Traversal payload returned " + hit.get() + " that was absent from the baseline "
                                 + "response (payload: " + payload + ")", VerificationState.CONFIRMED, base.url()));
                 break;
@@ -499,7 +513,7 @@ final class ActiveTestEngine {
             if (response == null) continue;
             Optional<String> hit = detectPathTraversal(response.bodyToString(), baselineBody);
             if (hit.isPresent()) {
-                out.add(new ActiveFinding("HIGH", "XXE", "(request body)",
+                out.add(finding("HIGH", "XXE", "(request body)",
                         "In-band XXE: an external entity returned " + hit.get() + " that was absent from "
                                 + "the baseline response", VerificationState.CONFIRMED, base.url()));
                 return budgetUsed() - before;
@@ -513,7 +527,7 @@ final class ActiveTestEngine {
             HttpResponse response = sendBody(base, XxeEngine.buildOobPayload("http://" + payload + "/xxe"),
                     Set.of(RequestPolicy.Permission.OAST));
             if (response != null) {
-                out.add(new ActiveFinding("INFO", "XXE", "(request body)",
+                out.add(finding("INFO", "XXE", "(request body)",
                         "External-entity OOB payload sent to " + payload + "; awaiting Collaborator callback",
                         VerificationState.SIGNAL, base.url()));
             }
@@ -528,6 +542,7 @@ final class ActiveTestEngine {
 
     private HttpResponse sendBody(HttpRequest base, String body, Set<RequestPolicy.Permission> permissions) {
         try {
+            rememberMutation("request body => " + body);
             HttpRequestResponse rr = sendRequest(base.withBody(body), permissions);
             return rr == null ? null : rr.response();
         } catch (Exception e) {
@@ -542,9 +557,10 @@ final class ActiveTestEngine {
         String correlation = encodeCorrelation("HostHeader", "Host", base.url());
         CollaboratorPayload payload = client.generatePayload(correlation);
         try {
+            rememberMutation("X-Forwarded-Host => " + payload);
             HttpRequestResponse rr = sendRequest(base.withUpdatedHeader("X-Forwarded-Host", payload.toString()));
             if (rr == null) return 0;
-            out.add(new ActiveFinding("INFO", "HostHeader", "X-Forwarded-Host",
+            out.add(finding("INFO", "HostHeader", "X-Forwarded-Host",
                     "X-Forwarded-Host set to Collaborator host; awaiting OOB (reset-poisoning/cache)", VerificationState.SIGNAL, base.url()));
         } catch (Exception e) {
             api.logging().logToError("Host-header probe failed", e);
@@ -564,6 +580,7 @@ final class ActiveTestEngine {
         for (String origin : origins) {
             if (budgetExhausted()) break;
             try {
+                rememberMutation("Origin => " + origin);
                 HttpRequestResponse rr = sendRequest(base.withUpdatedHeader("Origin", origin));
                 if (rr == null || rr.response() == null) continue;
                 HttpResponse response = rr.response();
@@ -572,7 +589,7 @@ final class ActiveTestEngine {
                     String acac = response.headerValue("Access-Control-Allow-Credentials");
                     boolean credentials = acac != null && acac.trim().equalsIgnoreCase("true");
                     String kind = CORS_NULL_ORIGIN.equalsIgnoreCase(origin) ? "null Origin" : "crafted attacker Origin (" + origin + ")";
-                    out.add(new ActiveFinding(credentials ? "HIGH" : "MEDIUM", "CORS", "Origin",
+                    out.add(finding(credentials ? "HIGH" : "MEDIUM", "CORS", "Origin",
                             "Server reflected a " + kind + " in Access-Control-Allow-Origin"
                                     + (credentials ? " with Allow-Credentials:true — full cross-origin credentialed read." : "."),
                             VerificationState.CONFIRMED, base.url()));
@@ -601,6 +618,7 @@ final class ActiveTestEngine {
         int before = budgetUsed();
         for (int i = 0; i < RATE_LIMIT_BURST_SIZE && !budgetExhausted(); i++) {
             try {
+                rememberMutation("replay original request for rate-limit burst");
                 HttpRequestResponse rr = sendRequest(base);
                 if (rr != null && rr.response() != null) {
                     statuses.add((int) rr.response().statusCode());
@@ -613,7 +631,7 @@ final class ActiveTestEngine {
         }
 
         if (!statuses.isEmpty() && !anyRateLimited(statuses, bodies, retryAfters)) {
-            out.add(new ActiveFinding("MEDIUM", "RateLimit", "burst",
+            out.add(finding("MEDIUM", "RateLimit", "burst",
                     statuses.size() + " consecutive identical requests to a sensitive-looking endpoint all "
                             + "succeeded with no rate-limit signal (no 429/503, Retry-After header, or lockout "
                             + "wording) observed", VerificationState.SIGNAL, base.url()));
@@ -647,12 +665,13 @@ final class ActiveTestEngine {
                 String mutatedBody = FileUploadEngine.withRenamedFilename(body, file.filename(), variant);
                 if (mutatedBody.equals(body)) continue;
                 try {
+                    rememberMutation("multipart filename " + file.filename() + " => " + variant);
                     HttpRequestResponse rr = sendRequest(base.withBody(mutatedBody));
                     if (rr == null || rr.response() == null) continue;
                     int status = rr.response().statusCode();
                     if (status >= 200 && status < 300) {
                         Optional<String> stored = FileUploadEngine.findStoredDangerousPath(rr.response().bodyToString(), variant);
-                        out.add(new ActiveFinding(stored.isPresent() ? "HIGH" : "MEDIUM", "FileUpload", file.partName(),
+                        out.add(finding(stored.isPresent() ? "HIGH" : "MEDIUM", "FileUpload", file.partName(),
                                 "Renamed upload \"" + file.filename() + "\" -> \"" + variant + "\" was accepted (status "
                                         + status + ")" + stored.map(p -> "; stored at " + p).orElse(""),
                                 stored.isPresent() ? VerificationState.REPRODUCED : VerificationState.SIGNAL,
@@ -665,6 +684,33 @@ final class ActiveTestEngine {
             }
         }
         return budgetUsed() - before;
+    }
+
+    private ActiveFinding finding(String severity, String testClass, String parameter,
+                                  String evidence, VerificationState state, String url) {
+        ScanRun run = scanRun.get();
+        FindingEvidence provenance = FindingEvidence.active(
+                run,
+                currentProbeId.get(),
+                DETECTOR_VERSION,
+                lastMutationSummary.get(),
+                state,
+                testClass,
+                parameter,
+                url,
+                evidence);
+        return new ActiveFinding(severity, testClass, parameter, evidence, state, url, provenance);
+    }
+
+    private void rememberMutation(String summary) {
+        lastMutationSummary.set(truncateMutation(summary));
+    }
+
+    private static String truncateMutation(String value) {
+        if (value == null) return "";
+        String clean = value.replace("\r", "\\r").replace("\n", "\\n");
+        return clean.length() <= MUTATION_PREVIEW_LIMIT
+                ? clean : clean.substring(0, MUTATION_PREVIEW_LIMIT) + "...";
     }
 
     private void runProbe(String probeId, Runnable probe) {
@@ -692,6 +738,7 @@ final class ActiveTestEngine {
     private HttpResponse sendMutated(HttpRequest base, InsertionPoint point, String value,
                                      Set<RequestPolicy.Permission> permissions) {
         try {
+            rememberMutation(point.label() + " => " + value);
             HttpRequestResponse rr = sendRequest(point.apply(base, value), permissions);
             return rr == null ? null : rr.response();
         } catch (Exception e) {
