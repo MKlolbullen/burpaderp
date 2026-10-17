@@ -143,8 +143,8 @@ final class ActiveTestEngine {
 
     private final MontoyaApi api;
     private final long throttleMillis;
-    private final ThreadLocal<RequestBudget> requestBudget = new ThreadLocal<>();
-    private final ThreadLocal<Boolean> allowMutatingRequests = new ThreadLocal<>();
+    private final ThreadLocal<ScanRun> scanRun = new ThreadLocal<>();
+    private final ThreadLocal<ActiveRequestGateway> requestGateway = new ThreadLocal<>();
     private volatile CollaboratorClient collaborator;
 
     ActiveTestEngine(MontoyaApi api, long throttleMillis) {
@@ -160,50 +160,70 @@ final class ActiveTestEngine {
     }
 
     /**
-     * Runs the enabled active probes against every non-cookie parameter of {@code base}.
-     * {@code allowMutating} must be true before non-safe HTTP methods are replayed.
+     * Compatibility entry point for tests and callers that do not yet own a first-class run.
+     * New orchestration should create one {@link ScanRun} for the whole pass and call
+     * {@link #test(HttpRequest, ScanRun, ActiveRequestGateway)} so all targets share one budget.
      */
     List<ActiveFinding> test(HttpRequest base, int maxRequests, boolean allowMutating) {
         if (base == null || maxRequests <= 0) return List.of();
         if (!allowMutating && !isSafeMethod(base)) return List.of();
+        ScanProfile profile = allowMutating ? ScanProfile.ACTIVE_MUTATION : ScanProfile.ACTIVE_SAFE;
+        ScanRun run = ScanRun.begin(profile, ScopeSnapshot.forTargetUrl(base.url()), maxRequests);
+        Set<RequestPolicy.Permission> permissions = allowMutating
+                ? EnumSet.of(RequestPolicy.Permission.UNSAFE_HTTP_METHOD, RequestPolicy.Permission.STATE_CHANGING)
+                : Set.of();
+        ActiveRequestGateway gateway = new ActiveRequestGateway(
+                new RequestPolicy(api.scope()::isInScope, permissions), api.http()::sendRequest);
+        try {
+            return test(base, run, gateway);
+        } finally {
+            if (run.isRunning()) run.complete();
+        }
+    }
+
+    /**
+     * Executes probes inside a caller-owned run. Every request in every target handled by the caller
+     * consumes the same run-scoped budget through {@code gateway}; no private per-target budget exists.
+     */
+    List<ActiveFinding> test(HttpRequest base, ScanRun run, ActiveRequestGateway gateway) {
+        if (base == null || run == null || gateway == null || !run.isRunning()) return List.of();
         List<ActiveFinding> findings = new ArrayList<>();
-        RequestBudget budget = new RequestBudget(maxRequests);
-        requestBudget.set(budget);
-        allowMutatingRequests.set(allowMutating);
+        scanRun.set(run);
+        requestGateway.set(gateway);
         try {
             // Insertion points span URL/body parameters and a curated allow-list of fuzzable headers
-            // (cookies excluded); parameters are enumerated first so they run before the budget is spent.
+            // (cookies excluded); parameters are enumerated first so they run before the run budget is spent.
             List<InsertionPoint> points = InsertionPoint.enumerate(base);
 
             boolean wafChecked = false;
             for (InsertionPoint point : points) {
                 if (point == null || point.name() == null || point.name().isBlank()) continue;
-                if (budget.exhausted()) break;
+                if (budgetExhausted()) break;
 
-                if (!wafChecked && !budget.exhausted()) {
+                if (!wafChecked && !budgetExhausted()) {
                     testWaf(base, point, findings);
                     wafChecked = true;
                 }
-                if (!budget.exhausted()) testReflectedXss(base, point, findings);
-                if (!budget.exhausted()) testSsti(base, point, findings);
-                if (!budget.exhausted()) testSsrf(base, point, findings);
-                if (!budget.exhausted()) testBlindXss(base, point, findings);
-                if (!budget.exhausted()) testCommandInjection(base, point, findings);
-                if (!budget.exhausted()) testOpenRedirect(base, point, findings);
-                if (!budget.exhausted()) testCrlf(base, point, findings);
-                if (!budget.exhausted()) testSqli(base, point, findings);
-                if (!budget.exhausted()) testNoSqlInjection(base, point, findings);
-                if (!budget.exhausted()) testPathTraversal(base, point, findings);
+                if (!budgetExhausted()) testReflectedXss(base, point, findings);
+                if (!budgetExhausted()) testSsti(base, point, findings);
+                if (!budgetExhausted()) testSsrf(base, point, findings);
+                if (!budgetExhausted()) testBlindXss(base, point, findings);
+                if (!budgetExhausted()) testCommandInjection(base, point, findings);
+                if (!budgetExhausted()) testOpenRedirect(base, point, findings);
+                if (!budgetExhausted()) testCrlf(base, point, findings);
+                if (!budgetExhausted()) testSqli(base, point, findings);
+                if (!budgetExhausted()) testNoSqlInjection(base, point, findings);
+                if (!budgetExhausted()) testPathTraversal(base, point, findings);
             }
-            if (!budget.exhausted()) testHostHeaderInjection(base, findings);
-            if (!budget.exhausted()) testCors(base, findings);
-            if (!budget.exhausted()) testRateLimit(base, findings);
-            if (!budget.exhausted()) testFileUploadBypass(base, findings);
-            if (!budget.exhausted()) testXxe(base, findings);
+            if (!budgetExhausted()) testHostHeaderInjection(base, findings);
+            if (!budgetExhausted()) testCors(base, findings);
+            if (!budgetExhausted()) testRateLimit(base, findings);
+            if (!budgetExhausted()) testFileUploadBypass(base, findings);
+            if (!budgetExhausted()) testXxe(base, findings);
             return findings;
         } finally {
-            requestBudget.remove();
-            allowMutatingRequests.remove();
+            scanRun.remove();
+            requestGateway.remove();
         }
     }
 
@@ -608,36 +628,37 @@ final class ActiveTestEngine {
     }
 
     /**
-     * Lowest target-directed send gate: method policy, then scope, then one atomic budget acquisition.
+     * Lowest target-directed send gate. Scope, protected-destination checks, method permissions,
+     * cancellation, and the one run-scoped budget are all enforced by {@link ActiveRequestGateway}.
      */
     private HttpRequestResponse sendRequest(HttpRequest request) {
         if (request == null) return null;
-        try {
-            if (!methodAllowed(request)) return null;
-            if (!api.scope().isInScope(request.url())) return null;
-            RequestBudget budget = requestBudget.get();
-            if (budget == null || !budget.tryAcquire()) return null;
-            HttpRequestResponse rr = api.http().sendRequest(request);
-            throttle();
-            return rr;
-        } catch (Exception e) {
-            api.logging().logToError("Active request failed for " + request.url(), e);
+        ScanRun run = scanRun.get();
+        ActiveRequestGateway gateway = requestGateway.get();
+        if (run == null || gateway == null || !run.isRunning()) return null;
+        Set<RequestPolicy.Permission> permissions = isSafeMethod(request)
+                ? Set.of()
+                : EnumSet.of(RequestPolicy.Permission.UNSAFE_HTTP_METHOD, RequestPolicy.Permission.STATE_CHANGING);
+        ActiveRequestGateway.Result result = gateway.send(run,
+                new RequestPolicy.PlannedRequest(request.method(), request.url(), "active-probe", permissions),
+                request);
+        if (result.error() != null) {
+            api.logging().logToError("Active request failed for " + request.url(), result.error());
             return null;
         }
+        if (!result.dispatched()) return null;
+        throttle();
+        return result.response();
     }
 
     private boolean budgetExhausted() {
-        RequestBudget budget = requestBudget.get();
-        return budget == null || budget.exhausted();
+        ScanRun run = scanRun.get();
+        return run == null || !run.isRunning() || run.requestBudget().exhausted();
     }
 
     private int budgetUsed() {
-        RequestBudget budget = requestBudget.get();
-        return budget == null ? 0 : budget.used();
-    }
-
-    private boolean methodAllowed(HttpRequest request) {
-        return Boolean.TRUE.equals(allowMutatingRequests.get()) || isSafeMethod(request);
+        ScanRun run = scanRun.get();
+        return run == null ? 0 : run.requestBudget().used();
     }
 
     static boolean isSafeMethod(HttpRequest request) {
