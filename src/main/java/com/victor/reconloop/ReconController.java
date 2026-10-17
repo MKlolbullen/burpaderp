@@ -2884,12 +2884,14 @@ final class ReconController implements HttpHandler {
                 detail += "<br><br><b>Runnable Nuclei PoC</b> (re-proves this finding — run against an "
                         + "authorised target):<br><pre>" + escape(NucleiTemplateBuilder.build(poc.get())) + "</pre>";
             }
+            AuditIssueConfidence confidence = state == VerificationState.REPRODUCED
+                    ? AuditIssueConfidence.FIRM : AuditIssueConfidence.CERTAIN;
             reporter.report(
                     "active-issue\0" + finding.testClass() + "\0" + finding.parameter() + "\0" + finding.url(),
                     finding.testClass() + " (" + finding.parameter() + ")",
-                    detail,
+                    detail + "<br>Verification state: <b>" + escape(state.displayLabel()) + "</b>",
                     activeRemediation(finding.testClass()),
-                    finding.url(), severity, AuditIssueConfidence.FIRM,
+                    finding.url(), severity, confidence,
                     "Recon Hound actively probes parameters for SSRF, SSTI and XSS when active testing is enabled. "
                             + "Verification state: " + state.displayLabel() + ".",
                     "Confirm the impact manually and only test targets you are authorised to assess.");
@@ -2927,7 +2929,8 @@ final class ReconController implements HttpHandler {
                 String evidence = interaction.type() + " interaction from "
                         + interaction.clientIp().getHostAddress();
 
-                addActiveRow("HIGH", testClass + "-OOB", parameter, "OOB confirmed", evidence, url);
+                addActiveRow("HIGH", testClass + "-OOB", parameter,
+                        VerificationState.CONFIRMED.displayLabel(), evidence, url);
 
                 reporter.report(
                         "oob-issue\0" + key,
