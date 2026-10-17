@@ -2865,7 +2865,15 @@ final class ReconController implements HttpHandler {
                 + "\0" + finding.url() + "\0" + finding.evidence();
         if (!activeDedupe.add(dedupe)) return;
 
-        addActiveRow(finding.severity(), finding.testClass(), finding.parameter(), status, finding.evidence(), finding.url());
+        FindingEvidence rowProvenance = finding.provenance() == null
+                ? FindingEvidence.empty() : finding.provenance();
+        String rowEvidence = finding.evidence();
+        if (rowProvenance.present()) {
+            rowEvidence += " [run=" + rowProvenance.runId()
+                    + ", probe=" + rowProvenance.probeId()
+                    + ", detector=" + rowProvenance.detectorVersion() + "]";
+        }
+        addActiveRow(finding.severity(), finding.testClass(), finding.parameter(), status, rowEvidence, finding.url());
 
         if (state.isReportable() && !"INFO".equals(finding.severity())) {
             AuditIssueSeverity severity = switch (finding.severity()) {
@@ -2873,9 +2881,20 @@ final class ReconController implements HttpHandler {
                 case "MEDIUM" -> AuditIssueSeverity.MEDIUM;
                 default -> AuditIssueSeverity.LOW;
             };
+            FindingEvidence provenance = finding.provenance() == null
+                    ? FindingEvidence.empty() : finding.provenance();
             String detail = "<b>Active test: " + escape(finding.testClass()) + "</b><br>"
                     + "Parameter: <code>" + escape(finding.parameter()) + "</code><br>"
                     + "Evidence: " + escape(finding.evidence());
+            if (provenance.present()) {
+                detail += "<br><br><b>Provenance</b><br>"
+                        + "Run: <code>" + escape(provenance.runId()) + "</code><br>"
+                        + "Probe: <code>" + escape(provenance.probeId()) + "</code><br>"
+                        + "Detector: <code>" + escape(provenance.detectorVersion()) + "</code><br>"
+                        + "Mutation: <code>" + escape(provenance.mutation()) + "</code><br>"
+                        + "Confidence rationale: " + escape(provenance.confidenceRationale()) + "<br>"
+                        + "Reproduce: " + escape(provenance.reproductionRecipe());
+            }
             java.util.Optional<NucleiTemplateBuilder.PocSpec> poc = NucleiTemplateBuilder.fromActiveFinding(
                     finding.testClass(), finding.severity(), finding.url(), finding.parameter(), finding.evidence());
             if (poc.isPresent()) {
