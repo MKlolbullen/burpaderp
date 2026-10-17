@@ -305,7 +305,7 @@ final class ActiveTestEngine {
     private int testSsrf(HttpRequest base, InsertionPoint point, List<ActiveFinding> out) {
         CollaboratorClient client = collaborator;
         if (client == null || budgetExhausted()) return 0;
-        String correlation = encodeCorrelation("SSRF", point.label(), base.url());
+        String correlation = correlationData("SSRF", point.label(), base.url());
         CollaboratorPayload payload = client.generatePayload(correlation);
         HttpResponse response = sendMutated(base, point, "http://" + payload + "/");
         if (!Boolean.TRUE.equals(lastRequestDispatched.get())) return 0;
@@ -322,7 +322,7 @@ final class ActiveTestEngine {
     private int testBlindXss(HttpRequest base, InsertionPoint point, List<ActiveFinding> out) {
         CollaboratorClient client = collaborator;
         if (client == null || budgetExhausted()) return 0;
-        String correlation = encodeCorrelation("XSS-blind", point.label(), base.url());
+        String correlation = correlationData("XSS-blind", point.label(), base.url());
         CollaboratorPayload payload = client.generatePayload(correlation);
         sendMutated(base, point, "\"><script src=//" + payload + "></script>");
         if (!Boolean.TRUE.equals(lastRequestDispatched.get())) return 0;
@@ -334,7 +334,7 @@ final class ActiveTestEngine {
     private int testCommandInjection(HttpRequest base, InsertionPoint point, List<ActiveFinding> out) {
         CollaboratorClient client = collaborator;
         if (client == null || budgetExhausted()) return 0;
-        String correlation = encodeCorrelation("CMDi", point.label(), base.url());
+        String correlation = correlationData("CMDi", point.label(), base.url());
         CollaboratorPayload payload = client.generatePayload(correlation);
         int before = budgetUsed();
         // Separator variants so at least one survives sh/cmd quoting contexts.
@@ -522,7 +522,7 @@ final class ActiveTestEngine {
 
         CollaboratorClient client = collaborator;
         if (client != null && !budgetExhausted()) {
-            String correlation = encodeCorrelation("XXE", "(body)", base.url());
+            String correlation = correlationData("XXE", "(body)", base.url());
             CollaboratorPayload payload = client.generatePayload(correlation);
             HttpResponse response = sendBody(base, XxeEngine.buildOobPayload("http://" + payload + "/xxe"),
                     Set.of(RequestPolicy.Permission.OAST));
@@ -554,7 +554,7 @@ final class ActiveTestEngine {
     private int testHostHeaderInjection(HttpRequest base, List<ActiveFinding> out) {
         CollaboratorClient client = collaborator;
         if (client == null || budgetExhausted()) return 0;
-        String correlation = encodeCorrelation("HostHeader", "Host", base.url());
+        String correlation = correlationData("HostHeader", "Host", base.url());
         CollaboratorPayload payload = client.generatePayload(correlation);
         try {
             rememberMutation("X-Forwarded-Host => " + payload);
@@ -684,6 +684,12 @@ final class ActiveTestEngine {
             }
         }
         return budgetUsed() - before;
+    }
+
+    private String correlationData(String testClass, String parameter, String url) {
+        ScanRun run = scanRun.get();
+        return encodeCorrelation(testClass, parameter, url,
+                run == null ? "" : run.id().toString());
     }
 
     private ActiveFinding finding(String severity, String testClass, String parameter,
@@ -995,13 +1001,48 @@ final class ActiveTestEngine {
     }
 
     static String encodeCorrelation(String testClass, String parameter, String url) {
-        return "AC|" + testClass + "|" + parameter + "|" + (url == null ? "" : url.replace("|", "%7C"));
+        return "AC|" + correlationEscape(testClass) + "|" + correlationEscape(parameter)
+                + "|" + correlationEscape(url);
     }
 
+    static String encodeCorrelation(String testClass, String parameter, String url, String runId) {
+        return "AC2|" + correlationEscape(runId) + "|" + correlationEscape(testClass)
+                + "|" + correlationEscape(parameter) + "|" + correlationEscape(url);
+    }
+
+    /**
+     * Returns {testClass, parameter, url} for legacy AC records and
+     * {testClass, parameter, url, runId} for AC2 records.
+     */
     static String[] decodeCorrelation(String customData) {
-        if (customData == null || !customData.startsWith("AC|")) return null;
-        String[] parts = customData.split("\\|", 4);
-        if (parts.length != 4) return null;
-        return new String[]{parts[1], parts[2], parts[3].replace("%7C", "|")};
+        if (customData == null) return null;
+        if (customData.startsWith("AC2|")) {
+            String[] parts = customData.split("\\|", 5);
+            if (parts.length != 5) return null;
+            return new String[]{
+                    correlationUnescape(parts[2]),
+                    correlationUnescape(parts[3]),
+                    correlationUnescape(parts[4]),
+                    correlationUnescape(parts[1])
+            };
+        }
+        if (customData.startsWith("AC|")) {
+            String[] parts = customData.split("\\|", 4);
+            if (parts.length != 4) return null;
+            return new String[]{
+                    correlationUnescape(parts[1]),
+                    correlationUnescape(parts[2]),
+                    correlationUnescape(parts[3])
+            };
+        }
+        return null;
+    }
+
+    private static String correlationEscape(String value) {
+        return value == null ? "" : value.replace("%", "%25").replace("|", "%7C");
+    }
+
+    private static String correlationUnescape(String value) {
+        return value == null ? "" : value.replace("%7C", "|").replace("%25", "%");
     }
 }
