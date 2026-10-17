@@ -134,9 +134,9 @@ final class CorpusFuzzEngine {
                         // quota and the global run quota. Never spend the final token on half a pair.
                         if (categoryBudget.remaining() < 2 || run.requestBudget().remaining() < 2) break;
                         long baselineMillis = timeRequest(base, parameter, parameter.value(),
-                                categoryBudget, run, gateway);
+                                categoryBudget, run, gateway, category);
                         long payloadMillis = timeRequest(base, parameter, encoded,
-                                categoryBudget, run, gateway);
+                                categoryBudget, run, gateway, category);
                         if (baselineMillis >= 0 && payloadMillis >= 0
                                 && ActiveTestEngine.looksTimeBased(baselineMillis, payloadMillis, TIME_BASED_DELAY_SECONDS)) {
                             out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-" + category, parameter.name(),
@@ -146,7 +146,7 @@ final class CorpusFuzzEngine {
                         continue;
                     }
 
-                    HttpResponse response = sendMutated(base, parameter, encoded, categoryBudget, run, gateway);
+                    HttpResponse response = sendMutated(base, parameter, encoded, categoryBudget, run, gateway, category);
                     if (response == null) continue;
                     String body = response.bodyToString();
 
@@ -174,9 +174,10 @@ final class CorpusFuzzEngine {
     }
 
     private HttpResponse sendMutated(HttpRequest base, HttpParameter parameter, String value,
-                                     RequestBudget categoryBudget, ScanRun run, ActiveRequestGateway gateway) {
+                                     RequestBudget categoryBudget, ScanRun run, ActiveRequestGateway gateway,
+                                     String category) {
         try {
-            if (!categoryBudget.tryAcquire()) return null;
+            if (categoryBudget.exhausted()) return null;
             HttpParameter mutated = HttpParameter.parameter(parameter.name(), value, parameter.type());
             HttpRequest request = base.withUpdatedParameters(mutated);
             Set<RequestPolicy.Permission> permissions = ActiveTestEngine.isSafeMethod(request)
@@ -184,13 +185,16 @@ final class CorpusFuzzEngine {
                     : EnumSet.of(RequestPolicy.Permission.UNSAFE_HTTP_METHOD, RequestPolicy.Permission.STATE_CHANGING);
             ActiveRequestGateway.Result result = gateway.send(run,
                     new RequestPolicy.PlannedRequest(request.method(), request.url(),
-                            "corpus-fuzz:" + parameter.name(), permissions),
+                            "corpus-fuzz:" + category, permissions),
                     request);
             if (result.error() != null) {
                 api.logging().logToError("Corpus fuzz probe failed for " + parameter.name(), result.error());
                 return null;
             }
             if (!result.dispatched()) return null;
+            // This fuzzer is serialized per invocation, so charging the local category quota after
+            // gateway dispatch is safe and ensures policy/quota denials do not consume corpus quota.
+            if (!categoryBudget.tryAcquire()) return null;
             throttle();
             return result.response() == null ? null : result.response().response();
         } catch (Exception e) {
@@ -200,12 +204,13 @@ final class CorpusFuzzEngine {
     }
 
     private long timeRequest(HttpRequest base, HttpParameter parameter, String value,
-                             RequestBudget categoryBudget, ScanRun run, ActiveRequestGateway gateway) {
+                             RequestBudget categoryBudget, ScanRun run, ActiveRequestGateway gateway,
+                             String category) {
         if (categoryBudget.exhausted() || run.requestBudget().exhausted() || !run.isRunning()) return -1;
         long start = System.currentTimeMillis();
         int categoryBefore = categoryBudget.used();
         int runBefore = run.requestBudget().used();
-        sendMutated(base, parameter, value, categoryBudget, run, gateway);
+        sendMutated(base, parameter, value, categoryBudget, run, gateway, category);
         if (categoryBudget.used() == categoryBefore || run.requestBudget().used() == runBefore) return -1;
         return System.currentTimeMillis() - start;
     }

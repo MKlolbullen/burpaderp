@@ -54,6 +54,32 @@ public class ActiveRequestGatewayTest {
         assertEquals(0, run.requestBudget().used());
     }
 
+
+    @Test
+    public void endpointQuotaDenialDoesNotSpendGlobalBudgetOrDispatch() {
+        AtomicInteger sent = new AtomicInteger();
+        ActiveRequestGateway gateway = new ActiveRequestGateway(RequestPolicy.safeDefault(url -> true), request -> {
+            sent.incrementAndGet();
+            return null;
+        });
+        ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(),
+                new ScanRun.RequestLimits(5, 5, 1, 5));
+
+        HttpRequest first = fakeRequest("GET", "https://api.example.test/items?id=1");
+        HttpRequest second = fakeRequest("GET", "https://api.example.test/items?id=2");
+
+        assertTrue(gateway.send(run,
+                RequestPolicy.PlannedRequest.safe("GET", first.url(), "parameter-test"), first).dispatched());
+
+        ActiveRequestGateway.Result denied = gateway.send(run,
+                RequestPolicy.PlannedRequest.safe("GET", second.url(), "parameter-test"), second);
+
+        assertFalse(denied.dispatched());
+        assertEquals(RequestPolicy.DecisionCode.ENDPOINT_BUDGET_EXHAUSTED, denied.decision().code());
+        assertEquals(1, sent.get());
+        assertEquals(1, run.requestBudget().used());
+    }
+
     private static HttpRequest fakeRequest(String methodValue, String urlValue) {
         return (HttpRequest) Proxy.newProxyInstance(HttpRequest.class.getClassLoader(),
                 new Class<?>[]{HttpRequest.class}, (proxy, method, args) -> switch (method.getName()) {

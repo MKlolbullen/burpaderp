@@ -32,7 +32,10 @@ final class RequestPolicy {
         OUT_OF_SCOPE,
         PROTECTED_DESTINATION,
         MISSING_PERMISSION,
-        BUDGET_EXHAUSTED
+        BUDGET_EXHAUSTED,
+        HOST_BUDGET_EXHAUSTED,
+        ENDPOINT_BUDGET_EXHAUSTED,
+        PROBE_BUDGET_EXHAUSTED
     }
 
     record PlannedRequest(String method, String url, String probeId, Set<Permission> requiredPermissions) {
