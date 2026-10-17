@@ -24,6 +24,7 @@ import java.util.regex.Pattern;
  * invoked implicitly by crawling or passive scanning — only a deliberate user action runs this.
  */
 final class CorpusFuzzEngine {
+    private static final String DETECTOR_VERSION = "corpus-fuzz/1";
 
     // Never auto-fired regardless of settings: persistent/destructive changes, not test signals.
     // Bind/listen netcat shells, Windows account/group and firewall/registry changes, and writing an
@@ -148,9 +149,9 @@ final class CorpusFuzzEngine {
                                 categoryBudget, run, gateway, category, timingPermissions);
                         if (baselineMillis >= 0 && payloadMillis >= 0
                                 && ActiveTestEngine.looksTimeBased(baselineMillis, payloadMillis, TIME_BASED_DELAY_SECONDS)) {
-                            out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-" + category, parameter.name(),
+                            out.add(finding("HIGH", "CorpusFuzz-" + category, parameter.name(),
                                     "[" + encoding + "] time-based signal from corpus payload: " + truncate(rawPayload),
-                                    VerificationState.CANDIDATE, base.url()));
+                                    VerificationState.CANDIDATE, base.url(), run, category, encoded));
                         }
                         continue;
                     }
@@ -163,26 +164,44 @@ final class CorpusFuzzEngine {
                     String body = response.bodyToString();
 
                     if (("sqli".equals(category) || "sqli2".equals(category)) && ActiveTestEngine.containsSqlError(body)) {
-                        out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-" + category, parameter.name(),
+                        out.add(finding("HIGH", "CorpusFuzz-" + category, parameter.name(),
                                 "[" + encoding + "] database error signature from corpus payload: " + truncate(rawPayload),
-                                VerificationState.REPRODUCED, base.url()));
+                                VerificationState.REPRODUCED, base.url(), run, category, encoded));
                     } else if ("lfi".equals(category) && containsPasswdMarker(body)) {
-                        out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-lfi", parameter.name(),
+                        out.add(finding("HIGH", "CorpusFuzz-lfi", parameter.name(),
                                 "[" + encoding + "] /etc/passwd contents returned for corpus payload: " + truncate(rawPayload),
-                                VerificationState.REPRODUCED, base.url()));
+                                VerificationState.REPRODUCED, base.url(), run, category, encoded));
                     } else if ("rce_payloads".equals(category) && containsIdOutput(body)) {
-                        out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-rce", parameter.name(),
+                        out.add(finding("HIGH", "CorpusFuzz-rce", parameter.name(),
                                 "[" + encoding + "] command output (uid=.../gid=...) returned for corpus payload: " + truncate(rawPayload),
-                                VerificationState.CONFIRMED, base.url()));
+                                VerificationState.CONFIRMED, base.url(), run, category, encoded));
                     } else if (body != null && !rawPayload.isBlank() && body.contains(rawPayload)) {
-                        out.add(new ActiveTestEngine.ActiveFinding("MEDIUM", "CorpusFuzz-" + category, parameter.name(),
+                        out.add(finding("MEDIUM", "CorpusFuzz-" + category, parameter.name(),
                                 "[" + encoding + "] payload reflected unencoded in response: " + truncate(rawPayload),
-                                VerificationState.CANDIDATE, base.url()));
+                                VerificationState.CANDIDATE, base.url(), run, category, encoded));
                     }
                 }
             }
         }
         return out;
+    }
+
+    private ActiveTestEngine.ActiveFinding finding(
+            String severity, String testClass, String parameter, String evidence,
+            VerificationState state, String url, ScanRun run, String category, String mutation) {
+        String mutationSummary = parameter + " => " + truncate(mutation);
+        FindingEvidence provenance = FindingEvidence.active(
+                run,
+                "corpus-fuzz:" + category,
+                DETECTOR_VERSION,
+                mutationSummary,
+                state,
+                testClass,
+                parameter,
+                url,
+                evidence);
+        return new ActiveTestEngine.ActiveFinding(
+                severity, testClass, parameter, evidence, state, url, provenance);
     }
 
     private HttpResponse sendMutated(HttpRequest base, HttpParameter parameter, String value,
