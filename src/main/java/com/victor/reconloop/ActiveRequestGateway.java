@@ -49,9 +49,18 @@ final class ActiveRequestGateway {
 
         RequestPolicy.Decision decision = policy.evaluate(run, planned);
         if (!decision.allowed()) return Result.denied(decision);
-        if (!run.requestBudget().tryAcquire()) {
-            return Result.denied(RequestPolicy.Decision.deny(RequestPolicy.DecisionCode.BUDGET_EXHAUSTED,
-                    "run request budget is exhausted"));
+        ScanRun.Allocation allocation = run.tryAcquire(planned);
+        if (!allocation.allowed()) {
+            RequestPolicy.DecisionCode code = switch (allocation.exhaustedQuota()) {
+                case HOST -> RequestPolicy.DecisionCode.HOST_BUDGET_EXHAUSTED;
+                case ENDPOINT -> RequestPolicy.DecisionCode.ENDPOINT_BUDGET_EXHAUSTED;
+                case PROBE -> RequestPolicy.DecisionCode.PROBE_BUDGET_EXHAUSTED;
+                case GLOBAL -> RequestPolicy.DecisionCode.BUDGET_EXHAUSTED;
+            };
+            return Result.denied(RequestPolicy.Decision.deny(code,
+                    allocation.exhaustedQuota().name().toLowerCase(java.util.Locale.ROOT)
+                            + " request budget exhausted for " + allocation.key()
+                            + " (" + allocation.used() + "/" + allocation.limit() + ")"));
         }
         if (!run.isRunning()) {
             RequestPolicy.DecisionCode code = run.isCancelled()
