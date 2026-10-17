@@ -2943,6 +2943,7 @@ final class ReconController implements HttpHandler {
                 String testClass = context != null ? context[0] : "OOB";
                 String parameter = context != null ? context[1] : "(unknown)";
                 String url = context != null ? context[2] : "(unknown)";
+                String runId = context != null && context.length > 3 ? context[3] : "";
                 String evidence = interaction.type() + " interaction from "
                         + interaction.clientIp().getHostAddress();
 
@@ -2954,13 +2955,20 @@ final class ReconController implements HttpHandler {
                         "out-of-band " + testClass + " interaction",
                         "<b>Confirmed OOB interaction</b><br>Class: " + escape(testClass) + "<br>"
                                 + "Parameter: <code>" + escape(parameter) + "</code><br>"
+                                + "Run: <code>" + escape(runId) + "</code><br>"
+                                + "Probe: <code>" + escape(testClass) + "</code><br>"
+                                + "Detector: <code>collaborator-correlator/1</code><br>"
+                                + "Mutation: Collaborator payload emitted for <code>" + escape(parameter) + "</code><br>"
                                 + "Interaction: " + escape(evidence) + "<br>"
-                                + "The Collaborator payload injected into this parameter triggered a "
-                                + interaction.type() + " callback, confirming server-side request forgery "
-                                + "or blind script execution.",
+                                + "Confidence rationale: a correlated out-of-band callback is direct proof "
+                                + "that target-side processing reached the supplied Collaborator endpoint.<br>"
+                                + "Reproduce: replay the captured request with a fresh Collaborator payload at "
+                                + "<code>" + escape(parameter) + "</code> and verify a correlated callback.<br>"
+                                + "The Collaborator payload triggered a " + interaction.type()
+                                + " callback, confirming the OOB condition.",
                         activeRemediation(testClass),
                         "(unknown)".equals(url) ? "https://" + interaction.clientIp().getHostAddress() : url,
-                        AuditIssueSeverity.HIGH, AuditIssueConfidence.FIRM,
+                        AuditIssueSeverity.HIGH, AuditIssueConfidence.CERTAIN,
                         "Recon Hound correlates Burp Collaborator interactions back to the injected parameter.",
                         "OOB interactions are strong evidence; verify the affected functionality manually.");
             }
