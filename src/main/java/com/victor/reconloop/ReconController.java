@@ -331,7 +331,7 @@ final class ReconController implements HttpHandler {
             if (!api.scope().isInScope(target)) { api.logging().logToError("Target not in scope: " + target); return; }
             HttpRequest base = httpRequestFromUrl(target);
             ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.forTargetUrl(target),
-                    activeRequestBudget.get() * 3);
+                    activeRequestBudget.get());
             ActiveRequestGateway gateway = new ActiveRequestGateway(
                     RequestPolicy.safeDefault(api.scope()::isInScope), api.http()::sendRequest);
             api.logging().logToOutput("[Recon Hound] Arjun-style parameter discovery on " + target
@@ -486,17 +486,33 @@ final class ReconController implements HttpHandler {
                     .values().stream().toList();
 
             boolean allowMutating = mutatingActiveRequests.get();
+            ScanProfile profile = allowMutating ? ScanProfile.ACTIVE_MUTATION : ScanProfile.ACTIVE_SAFE;
+            ScanRun run = ScanRun.begin(profile, ScopeSnapshot.empty(), activeRequestBudget.get());
+            ActiveRequestGateway gateway = newTargetGateway(allowMutating);
             api.logging().logToOutput("[Recon Hound] Active testing " + targets.size()
-                    + " in-scope parameterised request(s)"
-                    + (allowMutating ? " including mutating methods." : " using safe methods only."));
-            for (HttpRequest base : targets) {
-                if (!activeTestsEnabled.get()) break;
-                for (ActiveTestEngine.ActiveFinding finding : activeTestEngine.test(base, activeRequestBudget.get(), allowMutating)) {
-                    reportActiveFinding(finding, base);
+                    + " in-scope parameterised request(s) with one run budget of "
+                    + run.requestBudget().limit() + " request(s)"
+                    + (allowMutating ? " including non-safe methods." : " using safe methods only.")
+                    + " Run=" + run.id());
+            try {
+                for (HttpRequest base : targets) {
+                    if (!activeTestsEnabled.get()) {
+                        run.cancel();
+                        break;
+                    }
+                    if (run.requestBudget().exhausted()) break;
+                    for (ActiveTestEngine.ActiveFinding finding : activeTestEngine.test(base, run, gateway)) {
+                        reportActiveFinding(finding, base);
+                    }
+                    publishStatus();
                 }
-                publishStatus();
+            } finally {
+                if (run.isRunning()) run.complete();
             }
-            api.logging().logToOutput("[Recon Hound] Active testing pass complete. OOB results will arrive asynchronously.");
+            api.logging().logToOutput("[Recon Hound] Active testing pass complete: "
+                    + run.requestBudget().used() + "/" + run.requestBudget().limit()
+                    + " request(s), status=" + run.status() + ", run=" + run.id()
+                    + ". OOB results may arrive asynchronously.");
         });
     }
 
@@ -522,27 +538,48 @@ final class ReconController implements HttpHandler {
                     .values().stream().toList();
 
             boolean allowMutating = mutatingActiveRequests.get();
-            api.logging().logToOutput("[Recon Hound] Corpus-fuzzing " + targets.size() + " in-scope parameterised request(s) "
-                    + "(" + payloadLibrary.totalPayloads() + " corpus payloads available, encodings=" + encodings + ")"
-                    + (allowMutating ? " including mutating methods." : " using safe methods only."));
-            for (HttpRequest base : targets) {
-                if (!activeTestsEnabled.get()) break;
-                try {
-                    for (HttpParameter parameter : base.parameters()) {
-                        if (!activeTestsEnabled.get()) break;
-                        if (parameter == null || parameter.name() == null || parameter.name().isBlank()) continue;
-                        if ("COOKIE".equalsIgnoreCase(String.valueOf(parameter.type()))) continue;
-                        for (ActiveTestEngine.ActiveFinding finding :
-                                corpusFuzzEngine.fuzz(base, parameter, encodings, maxPerCategory, allowMutating)) {
-                            reportActiveFinding(finding, base);
-                        }
+            ScanProfile profile = allowMutating ? ScanProfile.ACTIVE_MUTATION : ScanProfile.ACTIVE_SAFE;
+            ScanRun run = ScanRun.begin(profile, ScopeSnapshot.empty(), activeRequestBudget.get());
+            ActiveRequestGateway gateway = newTargetGateway(allowMutating);
+            api.logging().logToOutput("[Recon Hound] Corpus-fuzzing " + targets.size()
+                    + " in-scope parameterised request(s) (" + payloadLibrary.totalPayloads()
+                    + " corpus payloads available, encodings=" + encodings + ", local category cap="
+                    + maxPerCategory + ", global run cap=" + run.requestBudget().limit() + ")"
+                    + (allowMutating ? " including non-safe methods." : " using safe methods only.")
+                    + " Run=" + run.id());
+            try {
+                for (HttpRequest base : targets) {
+                    if (!activeTestsEnabled.get()) {
+                        run.cancel();
+                        break;
                     }
-                } catch (Exception e) {
-                    api.logging().logToError("Corpus fuzz failed for " + base.url(), e);
+                    if (run.requestBudget().exhausted()) break;
+                    try {
+                        for (HttpParameter parameter : base.parameters()) {
+                            if (!activeTestsEnabled.get()) {
+                                run.cancel();
+                                break;
+                            }
+                            if (run.requestBudget().exhausted()) break;
+                            if (parameter == null || parameter.name() == null || parameter.name().isBlank()) continue;
+                            if ("COOKIE".equalsIgnoreCase(String.valueOf(parameter.type()))) continue;
+                            for (ActiveTestEngine.ActiveFinding finding :
+                                    corpusFuzzEngine.fuzz(base, parameter, encodings, maxPerCategory, run, gateway)) {
+                                reportActiveFinding(finding, base);
+                            }
+                        }
+                    } catch (Exception e) {
+                        api.logging().logToError("Corpus fuzz failed for " + base.url(), e);
+                    }
+                    publishStatus();
                 }
-                publishStatus();
+            } finally {
+                if (run.isRunning()) run.complete();
             }
-            api.logging().logToOutput("[Recon Hound] Corpus fuzz pass complete. OOB results will arrive asynchronously.");
+            api.logging().logToOutput("[Recon Hound] Corpus fuzz pass complete: "
+                    + run.requestBudget().used() + "/" + run.requestBudget().limit()
+                    + " request(s), status=" + run.status() + ", run=" + run.id()
+                    + ". OOB results may arrive asynchronously.");
         });
     }
 
@@ -707,7 +744,7 @@ final class ReconController implements HttpHandler {
         activeWorker.submit(() -> {
             List<String> hosts = new ArrayList<>(assetHosts);
             api.logging().logToOutput("[Recon Hound] Subdomain-takeover check on " + hosts.size() + " enumerated host(s).");
-            ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestBudget.get() * 2);
+            ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestBudget.get());
             ActiveRequestGateway gateway = newSafeTargetGateway();
             try {
                 for (String host : hosts) {
@@ -832,6 +869,10 @@ final class ReconController implements HttpHandler {
     private static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "OPTIONS");
 
     void runAccessControlTest(String sessionHeaders, boolean unauthenticated) {
+        if (!activeTestsEnabled.get()) {
+            api.logging().logToOutput("[Recon Hound] Active tests are disabled; enable the opt-in checkbox first.");
+            return;
+        }
         AccessControlEngine engine = new AccessControlEngine(sessionHeaders, unauthenticated);
         if (!engine.configured()) {
             api.logging().logToError("Access-control test needs alternate session headers or the unauthenticated option.");
@@ -849,12 +890,25 @@ final class ReconController implements HttpHandler {
 
             api.logging().logToOutput("[Recon Hound] Access-control replay of " + targets.size()
                     + " safe (GET/HEAD/OPTIONS) in-scope request(s) under the alternate identity.");
+            ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestBudget.get());
+            ActiveRequestGateway gateway = newSafeTargetGateway();
 
             for (HttpRequestResponse original : targets) {
+                if (!activeTestsEnabled.get()) { run.cancel(); break; }
+                if (run.requestBudget().exhausted()) break;
                 try {
                     HttpRequest replayRequest = engine.applyIdentity(original.request());
-                    if (!api.scope().isInScope(replayRequest.url())) continue;
-                    HttpRequestResponse replay = api.http().sendRequest(replayRequest);
+                    ActiveRequestGateway.Result replayResult = gateway.send(run,
+                            RequestPolicy.PlannedRequest.safe(replayRequest.method(), replayRequest.url(),
+                                    "access-control-replay"),
+                            replayRequest);
+                    if (replayResult.error() != null) {
+                        api.logging().logToError("Access-control replay failed for " + replayRequest.url(),
+                                replayResult.error());
+                        continue;
+                    }
+                    if (!replayResult.dispatched()) continue;
+                    HttpRequestResponse replay = replayResult.response();
                     if (replay == null || replay.response() == null) continue;
 
                     int origLen = original.response().bodyToString().length();
@@ -892,7 +946,9 @@ final class ReconController implements HttpHandler {
                     api.logging().logToError("Access-control replay failed", e);
                 }
             }
-            api.logging().logToOutput("[Recon Hound] Access-control test complete.");
+            if (run.isRunning()) run.complete();
+            api.logging().logToOutput("[Recon Hound] Access-control test complete ("
+                    + run.requestBudget().used() + " request(s), run " + run.id() + ").");
         });
     }
 
@@ -1145,7 +1201,20 @@ final class ReconController implements HttpHandler {
 
     /** Shared safe-method gateway for native discovery and read-only replay paths. */
     private ActiveRequestGateway newSafeTargetGateway() {
-        return new ActiveRequestGateway(RequestPolicy.safeDefault(api.scope()::isInScope), api.http()::sendRequest);
+        return newTargetGateway(false);
+    }
+
+    /**
+     * Creates the single target-directed dispatch policy used by controller-owned active runs.
+     * Non-safe methods require both method and state-changing permissions and are granted only after
+     * the operator enables the explicit non-safe-method checkbox.
+     */
+    private ActiveRequestGateway newTargetGateway(boolean allowMutating) {
+        Set<RequestPolicy.Permission> permissions = allowMutating
+                ? EnumSet.of(RequestPolicy.Permission.UNSAFE_HTTP_METHOD, RequestPolicy.Permission.STATE_CHANGING)
+                : Set.of();
+        return new ActiveRequestGateway(
+                new RequestPolicy(api.scope()::isInScope, permissions), api.http()::sendRequest);
     }
 
     private HttpRequest buildAuthenticatedGet(URI uri) {
@@ -2456,16 +2525,27 @@ final class ReconController implements HttpHandler {
     }
 
     void introspectGraphql(String url) {
+        if (!activeTestsEnabled.get()) {
+            api.logging().logToOutput("[Recon Hound] Active tests are disabled; enable the opt-in checkbox first.");
+            return;
+        }
+        if (!mutatingActiveRequests.get()) {
+            api.logging().logToOutput("[Recon Hound] GraphQL introspection uses POST; enable the non-safe-method opt-in first.");
+            return;
+        }
         activeWorker.submit(() -> {
             String target = url == null ? "" : url.trim();
             if (!target.startsWith("http")) { api.logging().logToError("Invalid GraphQL URL: " + target); return; }
             if (!api.scope().isInScope(target)) { api.logging().logToError("GraphQL target not in scope: " + target); return; }
+            ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_MUTATION, ScopeSnapshot.forTargetUrl(target),
+                    Math.min(1, activeRequestBudget.get()));
+            ActiveRequestGateway gateway = newTargetGateway(true);
             try {
                 HttpRequest request = httpRequestFromUrl(target)
                         .withMethod("POST")
                         .withUpdatedHeader("Content-Type", "application/json")
                         .withBody(ApiSurfaceEngine.introspectionQuery());
-                HttpRequestResponse rr = api.http().sendRequest(request);
+                HttpRequestResponse rr = gqlPost(request, run, gateway, "graphql-introspection");
                 if (rr == null || rr.response() == null) return;
                 ApiSurfaceEngine.IntrospectionDetail detail = ApiSurfaceEngine.analyzeIntrospection(rr.response().bodyToString());
                 String summary = ApiSurfaceEngine.describe(detail);
@@ -2499,21 +2579,37 @@ final class ReconController implements HttpHandler {
                                 rr);
                     }
                 }
-                api.logging().logToOutput("[Recon Hound] GraphQL introspection on " + target + ": " + summary);
+                api.logging().logToOutput("[Recon Hound] GraphQL introspection on " + target + ": " + summary
+                        + " (run " + run.id() + ")");
             } catch (Exception e) {
+                run.fail(e.getMessage());
                 api.logging().logToError("GraphQL introspection failed for " + target, e);
+            } finally {
+                if (run.isRunning()) run.complete();
             }
         });
     }
 
     /** Active GraphQL fuzzing beyond introspection: field-suggestion leakage, alias amplification, batching. */
     void fuzzGraphql(String url) {
+        if (!activeTestsEnabled.get()) {
+            api.logging().logToOutput("[Recon Hound] Active tests are disabled; enable the opt-in checkbox first.");
+            return;
+        }
+        if (!mutatingActiveRequests.get()) {
+            api.logging().logToOutput("[Recon Hound] GraphQL fuzzing uses POST; enable the non-safe-method opt-in first.");
+            return;
+        }
         activeWorker.submit(() -> {
             String target = url == null ? "" : url.trim();
             if (!target.startsWith("http")) { api.logging().logToError("Invalid GraphQL URL: " + target); return; }
             if (!api.scope().isInScope(target)) { api.logging().logToError("GraphQL target not in scope: " + target); return; }
+            ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_MUTATION, ScopeSnapshot.forTargetUrl(target),
+                    Math.min(3, activeRequestBudget.get()));
+            ActiveRequestGateway gateway = newTargetGateway(true);
             try {
-                HttpRequestResponse suggest = gqlPost(target, GraphQlFuzzEngine.suggestionQuery());
+                HttpRequestResponse suggest = gqlPost(target, GraphQlFuzzEngine.suggestionQuery(),
+                        run, gateway, "graphql-field-suggestions");
                 if (bodyOf(suggest) != null && GraphQlFuzzEngine.hasFieldSuggestions(bodyOf(suggest))) {
                     addActiveRow("LOW", "GraphQL", "field-suggestions", "enabled", "'Did you mean' leaks schema", target);
                     reporter.report("gql-suggest\0" + target, "GraphQL field suggestions enabled",
@@ -2526,7 +2622,8 @@ final class ReconController implements HttpHandler {
                 }
 
                 int aliases = 100;
-                HttpRequestResponse alias = gqlPost(target, GraphQlFuzzEngine.aliasQuery(aliases));
+                HttpRequestResponse alias = gqlPost(target, GraphQlFuzzEngine.aliasQuery(aliases),
+                        run, gateway, "graphql-alias-amplification");
                 if (bodyOf(alias) != null && GraphQlFuzzEngine.aliasingProcessed(bodyOf(alias), aliases)) {
                     addActiveRow("MEDIUM", "GraphQL", "alias-amplification", "enabled", aliases + " aliases in one request", target);
                     reporter.report("gql-alias\0" + target, "GraphQL alias-based amplification",
@@ -2539,7 +2636,8 @@ final class ReconController implements HttpHandler {
                             "Confirm the amplification is usable against a sensitive operation.", alias);
                 }
 
-                HttpRequestResponse batch = gqlPost(target, GraphQlFuzzEngine.batchQuery());
+                HttpRequestResponse batch = gqlPost(target, GraphQlFuzzEngine.batchQuery(),
+                        run, gateway, "graphql-query-batching");
                 if (bodyOf(batch) != null && GraphQlFuzzEngine.batchingProcessed(bodyOf(batch))) {
                     addActiveRow("MEDIUM", "GraphQL", "query-batching", "enabled", "array of operations processed", target);
                     reporter.report("gql-batch\0" + target, "GraphQL query batching enabled",
@@ -2550,20 +2648,38 @@ final class ReconController implements HttpHandler {
                             "Recon Hound sends a batched operation array to test whether batching is enabled.",
                             "Confirm batching is usable against a sensitive operation.", batch);
                 }
-                api.logging().logToOutput("[Recon Hound] GraphQL fuzzing complete for " + target);
+                api.logging().logToOutput("[Recon Hound] GraphQL fuzzing complete for " + target
+                        + " (" + run.requestBudget().used() + " request(s), run " + run.id() + ")");
             } catch (Exception e) {
+                run.fail(e.getMessage());
                 api.logging().logToError("GraphQL fuzzing failed for " + target, e);
+            } finally {
+                if (run.isRunning()) run.complete();
             }
             publishStatus();
         });
     }
 
-    private HttpRequestResponse gqlPost(String url, String jsonBody) {
+    private HttpRequestResponse gqlPost(String url, String jsonBody, ScanRun run,
+                                           ActiveRequestGateway gateway, String probeId) {
         HttpRequest request = httpRequestFromUrl(url)
                 .withMethod("POST")
                 .withUpdatedHeader("Content-Type", "application/json")
                 .withBody(jsonBody);
-        return api.http().sendRequest(request);
+        return gqlPost(request, run, gateway, probeId);
+    }
+
+    private HttpRequestResponse gqlPost(HttpRequest request, ScanRun run,
+                                        ActiveRequestGateway gateway, String probeId) {
+        Set<RequestPolicy.Permission> permissions = EnumSet.of(
+                RequestPolicy.Permission.UNSAFE_HTTP_METHOD, RequestPolicy.Permission.STATE_CHANGING);
+        ActiveRequestGateway.Result result = gateway.send(run,
+                new RequestPolicy.PlannedRequest(request.method(), request.url(), probeId, permissions), request);
+        if (result.error() != null) {
+            api.logging().logToError("GraphQL request failed for " + request.url(), result.error());
+            return null;
+        }
+        return result.dispatched() ? result.response() : null;
     }
 
     private static String bodyOf(HttpRequestResponse rr) {
