@@ -145,6 +145,7 @@ final class ActiveTestEngine {
     private final long throttleMillis;
     private final ThreadLocal<ScanRun> scanRun = new ThreadLocal<>();
     private final ThreadLocal<ActiveRequestGateway> requestGateway = new ThreadLocal<>();
+    private final ThreadLocal<String> currentProbeId = ThreadLocal.withInitial(() -> "active-probe");
     private volatile CollaboratorClient collaborator;
 
     ActiveTestEngine(MontoyaApi api, long throttleMillis) {
@@ -201,29 +202,30 @@ final class ActiveTestEngine {
                 if (budgetExhausted()) break;
 
                 if (!wafChecked && !budgetExhausted()) {
-                    testWaf(base, point, findings);
+                    runProbe("waf", () -> testWaf(base, point, findings));
                     wafChecked = true;
                 }
-                if (!budgetExhausted()) testReflectedXss(base, point, findings);
-                if (!budgetExhausted()) testSsti(base, point, findings);
-                if (!budgetExhausted()) testSsrf(base, point, findings);
-                if (!budgetExhausted()) testBlindXss(base, point, findings);
-                if (!budgetExhausted()) testCommandInjection(base, point, findings);
-                if (!budgetExhausted()) testOpenRedirect(base, point, findings);
-                if (!budgetExhausted()) testCrlf(base, point, findings);
-                if (!budgetExhausted()) testSqli(base, point, findings);
-                if (!budgetExhausted()) testNoSqlInjection(base, point, findings);
-                if (!budgetExhausted()) testPathTraversal(base, point, findings);
+                if (!budgetExhausted()) runProbe("reflected-xss", () -> testReflectedXss(base, point, findings));
+                if (!budgetExhausted()) runProbe("ssti", () -> testSsti(base, point, findings));
+                if (!budgetExhausted()) runProbe("ssrf", () -> testSsrf(base, point, findings));
+                if (!budgetExhausted()) runProbe("blind-xss", () -> testBlindXss(base, point, findings));
+                if (!budgetExhausted()) runProbe("command-injection", () -> testCommandInjection(base, point, findings));
+                if (!budgetExhausted()) runProbe("open-redirect", () -> testOpenRedirect(base, point, findings));
+                if (!budgetExhausted()) runProbe("crlf", () -> testCrlf(base, point, findings));
+                if (!budgetExhausted()) runProbe("sqli", () -> testSqli(base, point, findings));
+                if (!budgetExhausted()) runProbe("nosqli", () -> testNoSqlInjection(base, point, findings));
+                if (!budgetExhausted()) runProbe("path-traversal", () -> testPathTraversal(base, point, findings));
             }
-            if (!budgetExhausted()) testHostHeaderInjection(base, findings);
-            if (!budgetExhausted()) testCors(base, findings);
-            if (!budgetExhausted()) testRateLimit(base, findings);
-            if (!budgetExhausted()) testFileUploadBypass(base, findings);
-            if (!budgetExhausted()) testXxe(base, findings);
+            if (!budgetExhausted()) runProbe("host-header", () -> testHostHeaderInjection(base, findings));
+            if (!budgetExhausted()) runProbe("cors", () -> testCors(base, findings));
+            if (!budgetExhausted()) runProbe("rate-limit", () -> testRateLimit(base, findings));
+            if (!budgetExhausted()) runProbe("file-upload", () -> testFileUploadBypass(base, findings));
+            if (!budgetExhausted()) runProbe("xxe", () -> testXxe(base, findings));
             return findings;
         } finally {
             scanRun.remove();
             requestGateway.remove();
+            currentProbeId.remove();
         }
     }
 
@@ -617,6 +619,16 @@ final class ActiveTestEngine {
         return budgetUsed() - before;
     }
 
+    private void runProbe(String probeId, Runnable probe) {
+        String previous = currentProbeId.get();
+        currentProbeId.set(probeId == null || probeId.isBlank() ? "active-probe" : probeId);
+        try {
+            probe.run();
+        } finally {
+            currentProbeId.set(previous);
+        }
+    }
+
     private HttpResponse sendMutated(HttpRequest base, InsertionPoint point, String value) {
         try {
             HttpRequestResponse rr = sendRequest(point.apply(base, value));
@@ -640,7 +652,7 @@ final class ActiveTestEngine {
                 ? Set.of()
                 : EnumSet.of(RequestPolicy.Permission.UNSAFE_HTTP_METHOD, RequestPolicy.Permission.STATE_CHANGING);
         ActiveRequestGateway.Result result = gateway.send(run,
-                new RequestPolicy.PlannedRequest(request.method(), request.url(), "active-probe", permissions),
+                new RequestPolicy.PlannedRequest(request.method(), request.url(), currentProbeId.get(), permissions),
                 request);
         if (result.error() != null) {
             api.logging().logToError("Active request failed for " + request.url(), result.error());
