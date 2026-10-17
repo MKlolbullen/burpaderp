@@ -31,8 +31,8 @@ public class ResponseComparatorTest {
 
     @Test
     public void canonicalJsonIgnoresConfiguredVolatileFieldsAndKeyOrder() {
-        String first = "{"requestId":"abc","name":"alice","roles":["user"]}";
-        String second = "{"roles":["user"],"name":"alice","requestId":"xyz"}";
+        String first = "{\"requestId\":\"abc\",\"name\":\"alice\",\"roles\":[\"user\"]}";
+        String second = "{\"roles\":[\"user\"],\"name\":\"alice\",\"requestId\":\"xyz\"}";
 
         assertEquals(
                 ResponseComparator.canonicalizeJson(first, Set.of("requestId")),
