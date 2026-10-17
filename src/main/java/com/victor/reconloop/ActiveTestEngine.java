@@ -79,6 +79,7 @@ final class ActiveTestEngine {
             "'; SELECT PG_SLEEP(5)-- -",     // PostgreSQL
             "'; WAITFOR DELAY '0:0:5'-- -"); // MSSQL
     private static final int SQLI_TIME_DELAY_SECONDS = 5;
+    private static final int SQLI_TIMING_SAMPLES = 3;
 
     // NoSQL injection: values that break a Mongo-style query or its $where JavaScript so the datastore
     // surfaces a parser/driver error. Detection is error-based and baseline-differenced (like SQLi) —
@@ -382,16 +383,25 @@ final class ActiveTestEngine {
         }
         if (budgetExhausted()) return budgetUsed() - before;
 
-        long baselineMillis = timeRequest(base, point, point.baseValue());
-        if (baselineMillis < 0) return budgetUsed() - before;
+        List<Long> baselineTimings = timingSamples(base, point, point.baseValue(), SQLI_TIMING_SAMPLES);
+        if (baselineTimings.size() < SQLI_TIMING_SAMPLES) return budgetUsed() - before;
         for (String payload : SQLI_TIME_PAYLOADS) {
             if (budgetExhausted()) break;
-            long payloadMillis = timeRequest(base, point, payload);
-            if (payloadMillis < 0) break;
-            if (looksTimeBased(baselineMillis, payloadMillis, SQLI_TIME_DELAY_SECONDS)) {
+            List<Long> payloadTimings = timingSamples(base, point, payload, SQLI_TIMING_SAMPLES);
+            if (payloadTimings.size() < SQLI_TIMING_SAMPLES) break;
+
+            ResponseComparator.TimingAnalysis timing = ResponseComparator.analyzeTiming(
+                    baselineTimings, payloadTimings, SQLI_TIME_DELAY_SECONDS * 1000L);
+            if (timing.delayed()) {
                 out.add(new ActiveFinding("HIGH", "SQLi", point.label(),
-                        "Time-based blind: response time increased by ~" + SQLI_TIME_DELAY_SECONDS
-                                + "s in response to payload " + payload, VerificationState.CANDIDATE, base.url()));
+                        "Repeated time-based blind signal for payload " + payload
+                                + ": baseline median=" + timing.baselineMedianMillis() + "ms"
+                                + " (MAD=" + timing.baselineMadMillis() + "ms), payload median="
+                                + timing.payloadMedianMillis() + "ms (MAD=" + timing.payloadMadMillis()
+                                + "ms), delta=" + timing.medianDeltaMillis() + "ms across "
+                                + timing.consistentDelayedSamples() + "/" + payloadTimings.size()
+                                + " consistently delayed samples",
+                        VerificationState.REPRODUCED, base.url()));
                 break;
             }
         }
@@ -454,6 +464,16 @@ final class ActiveTestEngine {
         sendMutated(base, point, value, Set.of(RequestPolicy.Permission.TIME_DELAY));
         return Boolean.TRUE.equals(lastRequestDispatched.get())
                 ? System.currentTimeMillis() - start : -1;
+    }
+
+    private List<Long> timingSamples(HttpRequest base, InsertionPoint point, String value, int count) {
+        List<Long> samples = new ArrayList<>(count);
+        for (int i = 0; i < count && !budgetExhausted(); i++) {
+            long millis = timeRequest(base, point, value);
+            if (millis < 0) break;
+            samples.add(millis);
+        }
+        return samples;
     }
 
     /**
@@ -856,11 +876,7 @@ final class ActiveTestEngine {
 
     /** Two response bodies are "the same page" if identical, or within ~1% (min 5 chars) in length. */
     static boolean closeEnough(String a, String b) {
-        if (a == null || b == null) return false;
-        if (a.equals(b)) return true;
-        int diff = Math.abs(a.length() - b.length());
-        int tolerance = Math.max(5, Math.max(a.length(), b.length()) / 100);
-        return diff <= tolerance;
+        return ResponseComparator.samePage(a, b);
     }
 
     /** Time-based blind confirmation: the payload response took at least ~{@code delaySeconds} longer. */

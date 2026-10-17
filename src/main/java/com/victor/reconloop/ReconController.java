@@ -959,11 +959,9 @@ final class ReconController implements HttpHandler {
                     HttpRequestResponse replay = replayResult.response();
                     if (replay == null || replay.response() == null) continue;
 
-                    int origLen = original.response().bodyToString().length();
-                    int replayLen = replay.response().bodyToString().length();
                     AccessControlEngine.Result result = AccessControlEngine.classify(
-                            original.response().statusCode(), origLen,
-                            replay.response().statusCode(), replayLen);
+                            original.response().statusCode(), original.response().bodyToString(),
+                            replay.response().statusCode(), replay.response().bodyToString());
 
                     String url = original.request().url();
                     String dedupe = "ac\0" + url + "\0" + result.verdict();
