@@ -80,6 +80,38 @@ public class ActiveRequestGatewayTest {
         assertEquals(1, run.requestBudget().used());
     }
 
+
+    @Test
+    public void riskPermissionDenialDoesNotDispatchOrSpendQuota() {
+        AtomicInteger sent = new AtomicInteger();
+        HttpRequest request = fakeRequest("GET", "https://api.example.test/callback");
+        RequestPolicy.PlannedRequest oast = new RequestPolicy.PlannedRequest(
+                "GET", request.url(), "ssrf", Set.of(RequestPolicy.Permission.OAST));
+
+        ScanRun deniedRun = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), 5);
+        ActiveRequestGateway deniedGateway = new ActiveRequestGateway(
+                RequestPolicy.safeDefault(url -> true), req -> {
+                    sent.incrementAndGet();
+                    return null;
+                });
+
+        ActiveRequestGateway.Result denied = deniedGateway.send(deniedRun, oast, request);
+        assertFalse(denied.dispatched());
+        assertEquals(RequestPolicy.DecisionCode.MISSING_PERMISSION, denied.decision().code());
+        assertEquals(0, deniedRun.requestBudget().used());
+        assertEquals(0, sent.get());
+
+        ScanRun allowedRun = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), 5);
+        ActiveRequestGateway allowedGateway = new ActiveRequestGateway(
+                new RequestPolicy(url -> true, Set.of(RequestPolicy.Permission.OAST)), req -> {
+                    sent.incrementAndGet();
+                    return null;
+                });
+        assertTrue(allowedGateway.send(allowedRun, oast, request).dispatched());
+        assertEquals(1, allowedRun.requestBudget().used());
+        assertEquals(1, sent.get());
+    }
+
     private static HttpRequest fakeRequest(String methodValue, String urlValue) {
         return (HttpRequest) Proxy.newProxyInstance(HttpRequest.class.getClassLoader(),
                 new Class<?>[]{HttpRequest.class}, (proxy, method, args) -> switch (method.getName()) {
