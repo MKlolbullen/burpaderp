@@ -71,34 +71,54 @@ final class CorpusFuzzEngine {
 
     /**
      * Fuzzes one parameter with the relevant corpus categories, in every requested encoding.
-     * {@code maxPerCategory} is a hard outbound-request cap for each category. Timing probes consume
-     * two budget tokens (baseline + mutated request), so they cannot silently overshoot the cap.
+     * {@code maxPerCategory} remains a local category cap, while the caller-owned {@link ScanRun}
+     * provides the hard whole-run cap shared across every target/parameter/category.
      */
     List<ActiveTestEngine.ActiveFinding> fuzz(HttpRequest base, HttpParameter parameter,
                                                Set<PayloadEncoder.Encoding> encodings, int maxPerCategory) {
         return fuzz(base, parameter, encodings, maxPerCategory, false);
     }
 
-    /**
-     * {@code allowMutating} must be true before non-safe HTTP methods are replayed with corpus payloads.
-     */
+    /** Compatibility entry point for callers that do not yet own a first-class run. */
     List<ActiveTestEngine.ActiveFinding> fuzz(HttpRequest base, HttpParameter parameter,
                                                Set<PayloadEncoder.Encoding> encodings, int maxPerCategory,
                                                boolean allowMutating) {
+        if (base == null || parameter == null || maxPerCategory <= 0) return List.of();
+        if (!allowMutating && !ActiveTestEngine.isSafeMethod(base)) return List.of();
+        int categories = Math.max(1, relevantCategories(parameter.name(), parameter.value(),
+                rceParamHints, library.categories()).size());
+        ScanProfile profile = allowMutating ? ScanProfile.ACTIVE_MUTATION : ScanProfile.ACTIVE_SAFE;
+        ScanRun run = ScanRun.begin(profile, ScopeSnapshot.forTargetUrl(base.url()),
+                Math.max(1, maxPerCategory * categories));
+        Set<RequestPolicy.Permission> permissions = allowMutating
+                ? EnumSet.of(RequestPolicy.Permission.UNSAFE_HTTP_METHOD, RequestPolicy.Permission.STATE_CHANGING)
+                : Set.of();
+        ActiveRequestGateway gateway = new ActiveRequestGateway(
+                new RequestPolicy(api.scope()::isInScope, permissions), api.http()::sendRequest);
+        try {
+            return fuzz(base, parameter, encodings, maxPerCategory, run, gateway);
+        } finally {
+            if (run.isRunning()) run.complete();
+        }
+    }
+
+    List<ActiveTestEngine.ActiveFinding> fuzz(HttpRequest base, HttpParameter parameter,
+                                               Set<PayloadEncoder.Encoding> encodings, int maxPerCategory,
+                                               ScanRun run, ActiveRequestGateway gateway) {
         List<ActiveTestEngine.ActiveFinding> out = new ArrayList<>();
-        if (base == null || parameter == null || encodings == null || encodings.isEmpty() || maxPerCategory <= 0) return out;
-        if (!allowMutating && !ActiveTestEngine.isSafeMethod(base)) return out;
+        if (base == null || parameter == null || encodings == null || encodings.isEmpty()
+                || maxPerCategory <= 0 || run == null || gateway == null || !run.isRunning()) return out;
 
         for (String category : relevantCategories(parameter.name(), parameter.value(), rceParamHints, library.categories())) {
-            RequestBudget budget = new RequestBudget(maxPerCategory);
+            RequestBudget categoryBudget = new RequestBudget(maxPerCategory);
             for (String rawPayload : library.get(category)) {
-                if (budget.exhausted()) break;
+                if (categoryBudget.exhausted() || run.requestBudget().exhausted() || !run.isRunning()) break;
                 if (isDestructive(rawPayload)) continue;
 
                 String payload = rawPayload;
                 if (findCallbackHost(rawPayload).isPresent()) {
                     CollaboratorClient client = collaborator;
-                    if (client == null) continue; // no controlled destination to rewrite to -- skip rather than call a stranger's host
+                    if (client == null) continue;
                     CollaboratorPayload oobPayload = client.generatePayload(
                             ActiveTestEngine.encodeCorrelation("CorpusFuzz-" + category, parameter.name(), base.url()));
                     payload = rewriteCallbackHost(rawPayload, oobPayload.toString());
@@ -106,44 +126,46 @@ final class CorpusFuzzEngine {
 
                 boolean timeBased = mentionsSleep(payload);
                 for (PayloadEncoder.Encoding encoding : encodings) {
-                    if (budget.exhausted()) break;
+                    if (categoryBudget.exhausted() || run.requestBudget().exhausted() || !run.isRunning()) break;
                     String encoded = PayloadEncoder.encode(payload, encoding);
 
                     if (timeBased) {
-                        // A meaningful timing comparison needs both requests. Do not spend the final
-                        // token on a baseline that can never be paired with its mutation.
-                        if (budget.remaining() < 2) break;
-                        long baselineMillis = timeRequest(base, parameter, parameter.value(), budget, allowMutating);
-                        long payloadMillis = timeRequest(base, parameter, encoded, budget, allowMutating);
+                        // A timing comparison needs baseline + mutation from both the local category
+                        // quota and the global run quota. Never spend the final token on half a pair.
+                        if (categoryBudget.remaining() < 2 || run.requestBudget().remaining() < 2) break;
+                        long baselineMillis = timeRequest(base, parameter, parameter.value(),
+                                categoryBudget, run, gateway);
+                        long payloadMillis = timeRequest(base, parameter, encoded,
+                                categoryBudget, run, gateway);
                         if (baselineMillis >= 0 && payloadMillis >= 0
                                 && ActiveTestEngine.looksTimeBased(baselineMillis, payloadMillis, TIME_BASED_DELAY_SECONDS)) {
                             out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-" + category, parameter.name(),
                                     "[" + encoding + "] time-based signal from corpus payload: " + truncate(rawPayload),
-                                    true, base.url()));
+                                    VerificationState.CANDIDATE, base.url()));
                         }
                         continue;
                     }
 
-                    HttpResponse response = sendMutated(base, parameter, encoded, budget, allowMutating);
+                    HttpResponse response = sendMutated(base, parameter, encoded, categoryBudget, run, gateway);
                     if (response == null) continue;
                     String body = response.bodyToString();
 
                     if (("sqli".equals(category) || "sqli2".equals(category)) && ActiveTestEngine.containsSqlError(body)) {
                         out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-" + category, parameter.name(),
                                 "[" + encoding + "] database error signature from corpus payload: " + truncate(rawPayload),
-                                true, base.url()));
+                                VerificationState.REPRODUCED, base.url()));
                     } else if ("lfi".equals(category) && containsPasswdMarker(body)) {
                         out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-lfi", parameter.name(),
                                 "[" + encoding + "] /etc/passwd contents returned for corpus payload: " + truncate(rawPayload),
-                                true, base.url()));
+                                VerificationState.REPRODUCED, base.url()));
                     } else if ("rce_payloads".equals(category) && containsIdOutput(body)) {
                         out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-rce", parameter.name(),
                                 "[" + encoding + "] command output (uid=.../gid=...) returned for corpus payload: " + truncate(rawPayload),
-                                true, base.url()));
+                                VerificationState.CONFIRMED, base.url()));
                     } else if (body != null && !rawPayload.isBlank() && body.contains(rawPayload)) {
                         out.add(new ActiveTestEngine.ActiveFinding("MEDIUM", "CorpusFuzz-" + category, parameter.name(),
                                 "[" + encoding + "] payload reflected unencoded in response: " + truncate(rawPayload),
-                                true, base.url()));
+                                VerificationState.CANDIDATE, base.url()));
                     }
                 }
             }
@@ -152,15 +174,25 @@ final class CorpusFuzzEngine {
     }
 
     private HttpResponse sendMutated(HttpRequest base, HttpParameter parameter, String value,
-                                     RequestBudget budget, boolean allowMutating) {
+                                     RequestBudget categoryBudget, ScanRun run, ActiveRequestGateway gateway) {
         try {
-            if (!allowMutating && !ActiveTestEngine.isSafeMethod(base)) return null;
-            if (!api.scope().isInScope(base.url())) return null;
-            if (!budget.tryAcquire()) return null;
+            if (!categoryBudget.tryAcquire()) return null;
             HttpParameter mutated = HttpParameter.parameter(parameter.name(), value, parameter.type());
-            HttpRequestResponse rr = api.http().sendRequest(base.withUpdatedParameters(mutated));
+            HttpRequest request = base.withUpdatedParameters(mutated);
+            Set<RequestPolicy.Permission> permissions = ActiveTestEngine.isSafeMethod(request)
+                    ? Set.of()
+                    : EnumSet.of(RequestPolicy.Permission.UNSAFE_HTTP_METHOD, RequestPolicy.Permission.STATE_CHANGING);
+            ActiveRequestGateway.Result result = gateway.send(run,
+                    new RequestPolicy.PlannedRequest(request.method(), request.url(),
+                            "corpus-fuzz:" + parameter.name(), permissions),
+                    request);
+            if (result.error() != null) {
+                api.logging().logToError("Corpus fuzz probe failed for " + parameter.name(), result.error());
+                return null;
+            }
+            if (!result.dispatched()) return null;
             throttle();
-            return rr == null ? null : rr.response();
+            return result.response() == null ? null : result.response().response();
         } catch (Exception e) {
             api.logging().logToError("Corpus fuzz probe failed for " + parameter.name(), e);
             return null;
@@ -168,12 +200,13 @@ final class CorpusFuzzEngine {
     }
 
     private long timeRequest(HttpRequest base, HttpParameter parameter, String value,
-                             RequestBudget budget, boolean allowMutating) {
-        if (budget.exhausted()) return -1;
+                             RequestBudget categoryBudget, ScanRun run, ActiveRequestGateway gateway) {
+        if (categoryBudget.exhausted() || run.requestBudget().exhausted() || !run.isRunning()) return -1;
         long start = System.currentTimeMillis();
-        int before = budget.used();
-        sendMutated(base, parameter, value, budget, allowMutating);
-        if (budget.used() == before) return -1;
+        int categoryBefore = categoryBudget.used();
+        int runBefore = run.requestBudget().used();
+        sendMutated(base, parameter, value, categoryBudget, run, gateway);
+        if (categoryBudget.used() == categoryBefore || run.requestBudget().used() == runBefore) return -1;
         return System.currentTimeMillis() - start;
     }
 

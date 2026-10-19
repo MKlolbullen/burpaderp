@@ -132,7 +132,7 @@ final class ReconPanel extends JPanel {
         JPanel activeRow1 = new JPanel(new FlowLayout(FlowLayout.LEFT));
         activeRow1.add(activeEnabled);
         activeRow1.add(mutatingActive);
-        activeRow1.add(new JLabel("Per-request budget:")); activeRow1.add(activeBudget);
+        activeRow1.add(new JLabel("Run request budget:")); activeRow1.add(activeBudget);
         activeRow1.add(runActive);
         activePanel.add(activeRow1);
 
