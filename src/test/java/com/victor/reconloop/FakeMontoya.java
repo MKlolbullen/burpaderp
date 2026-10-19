@@ -1,6 +1,7 @@
 package com.victor.reconloop;
 
 import burp.api.montoya.MontoyaApi;
+import burp.api.montoya.core.ByteArray;
 import burp.api.montoya.http.HttpService;
 import burp.api.montoya.http.RedirectionMode;
 import burp.api.montoya.http.RequestOptions;
@@ -32,6 +33,7 @@ final class FakeMontoya implements AutoCloseable {
     final List<HttpRequest> sent = new CopyOnWriteArrayList<>();
     final List<RedirectionMode> redirectModes = new CopyOnWriteArrayList<>();
     final List<HttpRequestResponse> siteMap = new CopyOnWriteArrayList<>();
+    final List<String> apiAccesses = new CopyOnWriteArrayList<>();
     final List<String> errors = new CopyOnWriteArrayList<>();
     private final Map<RequestOptions, RedirectionMode> options = Collections.synchronizedMap(new IdentityHashMap<>());
     Predicate<String> inScope = url -> true;
@@ -54,7 +56,9 @@ final class FakeMontoya implements AutoCloseable {
             });
             default -> empty(method.getReturnType());
         });
-        api = proxy(MontoyaApi.class, (self, method, args) -> switch (method.getName()) {
+        api = proxy(MontoyaApi.class, (self, method, args) -> {
+            apiAccesses.add(method.getName());
+            return switch (method.getName()) {
             case "http" -> proxy(method.getReturnType(), (http, call, parameters) -> {
                 if (!call.getName().equals("sendRequest")) throw new AssertionError("Uncontrolled HTTP API: " + call);
                 HttpRequest request = (HttpRequest) parameters[0];
@@ -81,6 +85,7 @@ final class FakeMontoya implements AutoCloseable {
                 return empty(call.getReturnType());
             });
             default -> empty(method.getReturnType());
+            };
         });
     }
 
@@ -147,11 +152,12 @@ final class FakeMontoya implements AutoCloseable {
 
     private final class Request {
         String url, method = "GET", body = "";
+        HttpService serviceOverride;
         final Map<String, String> headers = new LinkedHashMap<>();
         final List<HttpParameter> params = new ArrayList<>();
         Request(String url) { this.url = url; }
         Request copy() {
-            Request result = new Request(url); result.method = method; result.body = body;
+            Request result = new Request(url); result.method = method; result.body = body; result.serviceOverride = serviceOverride;
             result.headers.putAll(headers); result.params.addAll(params); return result;
         }
         HttpRequest value() {
@@ -161,8 +167,11 @@ final class FakeMontoya implements AutoCloseable {
                     case "url": return url;
                     case "method": return method;
                     case "bodyToString": return body;
+                    case "toByteArray": return bytes(self.toString());
                     case "isInScope": return inScope.test(url);
                     case "parameters": return List.copyOf(params);
+                    case "parameterValue": return params.stream().filter(p -> p.name().equals(args[0]))
+                            .map(HttpParameter::value).findFirst().orElse(null);
                     case "hasParameters": return !params.isEmpty();
                     case "headerValue": return getHeader(headers, (String) args[0]);
                     case "hasHeader": return getHeader(headers, (String) args[0]) != null;
@@ -170,6 +179,7 @@ final class FakeMontoya implements AutoCloseable {
                     case "pathWithoutQuery": return URI.create(url).getRawPath();
                     case "path": return URI.create(url).getRawPath() + (URI.create(url).getRawQuery() == null ? "" : "?" + URI.create(url).getRawQuery());
                     case "httpService": {
+                        if (serviceOverride != null) return serviceOverride;
                         URI uri = URI.create(url);
                         return proxy(HttpService.class, (service, m, a) -> switch (m.getName()) {
                             case "host" -> uri.getHost();
@@ -184,6 +194,7 @@ final class FakeMontoya implements AutoCloseable {
                 }
                 Request next = copy();
                 switch (call.getName()) {
+                    case "withService": next.serviceOverride = (HttpService) args[0]; break;
                     case "withMethod": next.method = (String) args[0]; break;
                     case "withBody": next.body = args[0].toString(); break;
                     case "withPath": next.url = URI.create(url).resolve((String) args[0]).toString(); break;
@@ -209,6 +220,16 @@ final class FakeMontoya implements AutoCloseable {
                 return next.value();
             });
         }
+    }
+
+    static ByteArray bytes(String text) {
+        byte[] data = text.getBytes(StandardCharsets.UTF_8);
+        return proxy(ByteArray.class, (self, method, args) -> switch (method.getName()) {
+            case "getBytes" -> data.clone();
+            case "length" -> data.length;
+            case "toString" -> text;
+            default -> empty(method.getReturnType());
+        });
     }
 
     private static String getHeader(Map<String, String> headers, String name) {

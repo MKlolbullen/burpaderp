@@ -64,6 +64,14 @@ create their own authorization or reset the run budget. The transport uses `Redi
 A crawler redirect is checked against current scope before the discovery auto-add setting is allowed
 to observe it, and every followed hop is admitted and charged separately.
 
+The gateway requires a `RequestPlan`, not metadata alone. It binds method/URL and a SHA-256 digest
+of `HttpRequest.toByteArray()` to the service host, effective port and TLS flag. The URL and service
+destination must agree. Missing inspection data, substituted requests, changed authentication
+headers/body, or a changed transport destination fail closed before quota acquisition. Binding is
+checked again after policy callbacks/quota acquisition; a change in that interval may conservatively
+spend a token but cannot dispatch. This binds the immutable Montoya message at the dispatch boundary,
+not bytes after Burp session handling, other extensions, DNS resolution or connection establishment.
+
 The caller owns one run for an active/corpus pass, including its targets, parameters, baselines and
 payload categories. The crawler reuses one run across queued URLs and redirects. Pausing cancels that
 run; resuming uses only the unspent crawl cap. Reset explicitly starts new accounting. Host/endpoint/
@@ -80,6 +88,27 @@ These are Montoya dispatch counts, not a claim to meter internal Burp TCP retrie
 Persistent payload permission has no UI grant. Blind-XSS beacons require it as well as OAST and stay
 blocked. An OAST grant alone must not silently authorize a potentially stored browser payload.
 
+### Dry-run preview
+
+The **Preview params…**, **Preview introspection…** and **Preview GraphQL fuzz…** buttons work even
+with active sending disabled. They do not enqueue active work, send HTTP, allocate Collaborator
+payloads, add scope/site-map entries, or reserve live quota. The preview assumes active sending will
+be enabled and reports current policy decisions, missing risk grants, all four budget limits and
+admissible request counts. Actual execution still checks scope, permissions, cancellation and quota.
+
+| Action | Shared request construction | Estimate |
+| --- | --- | --- |
+| Parameter discovery | `ParameterDiscoveryEngine.probes` / `plan`: GET baseline, then chunks of at most 20 new URL parameters with generated canaries | Upper bound; chunks require a baseline response. A denied baseline skips dependent steps. Added names/counts are shown; captured values are hidden. |
+| GraphQL introspection | `GraphQlRequestPlanner.introspection`: POST + JSON content type + introspection body | One candidate request, subject to policy and quotas. |
+| GraphQL fuzz | `GraphQlRequestPlanner.fuzz`: suggestion, 100-alias and batch bodies | Three candidate requests, subject to policy and quotas. |
+| Other native paths | Byte/service binding applies at every gateway call | Full pre-execution mutation preview remains outstanding for active/corpus, JWT, access-control, takeover and crawler paths. Response-dependent branches need explicit conditional plans. |
+
+`RequestPreview.inspect` uses an isolated copy of the existing run ledger and the same admission
+routine as dispatch. It does not reserve capacity: concurrent sends or changed settings can change
+the subsequent result. At most 500 steps are evaluated; a truncated preview explicitly describes
+only that prefix. Original URL paths/query values, headers and body never enter the display report,
+including quota-denial messages. No synthetic responses are used to speculate about dynamic probes.
+
 ### Verification
 
 `OutboundGatewayInvariantTest` resolves Java API owners and catches method references, aliases,
@@ -93,6 +122,11 @@ it uses one-hop options too, and its origin/redirect behavior has an integration
 They meter actual transport calls, including shared engine budgets and concurrent dispatches, rather
 than asserting only on a local integer. Run them with the existing JDK 21 `./gradlew test` task.
 
+`RequestPlanIntegrationTest` checks byte/transport substitution, missing inspection data and changes
+during policy evaluation. `RequestPreviewIntegrationTest` compares the shared builders against actual
+transport calls, checks each quota dimension against a populated ledger, tests denied prerequisites,
+conditional/truncated estimates, redaction, and controller previews with active sending disabled.
+
 ### Remaining release gates
 
 This invariant is scoped to native Montoya target traffic. The standalone JDK CLI, external sqlmap,
@@ -101,7 +135,7 @@ not meter their downstream traffic. Their process flags or validated output reco
 a per-request gateway. They need controlled egress or a fail-closed execution boundary before the
 product can claim a unified outbound guarantee.
 
-Issue #44 also still requires minimal dry-run/mutation preview, plan binding to concrete request
-bytes and service destination, destination validation tied to the actual DNS/connection path, and
-versioned structured evidence persistence. Do not interpret passing native tests as closing #44 or
-approving v1.0.
+Issue #44 also still requires dry-run coverage for the remaining native flows, destination validation
+tied to the actual DNS/connection path, and versioned structured evidence persistence. Plans here
+are in-memory dispatch bindings, not persisted approval artifacts or run audit trails. Do not
+interpret passing native tests as closing #44 or approving v1.0.

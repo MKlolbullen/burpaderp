@@ -162,7 +162,7 @@ final class CorpusFuzzEngine {
                 permissions.add(RequestPolicy.Permission.STATE_CHANGING);
             }
             ActiveRequestGateway.Result result = gateway.send(run,
-                    new RequestPolicy.PlannedRequest(request.method(), request.url(),
+                    RequestPlan.create(request,
                             "corpus-fuzz:" + category, permissions),
                     request);
             if (result.error() != null) {

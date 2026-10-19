@@ -29,6 +29,7 @@ final class RequestPolicy {
         RUN_NOT_ACTIVE,
         CANCELLED,
         INVALID_REQUEST,
+        PREREQUISITE_DENIED,
         OUT_OF_SCOPE,
         PROTECTED_DESTINATION,
         MISSING_PERMISSION,
