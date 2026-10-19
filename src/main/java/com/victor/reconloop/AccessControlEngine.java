@@ -31,6 +31,12 @@ final class AccessControlEngine {
 
     boolean configured() { return unauthenticated || !sessionHeaders.isEmpty(); }
 
+    NativeRequestStep plan(HttpRequest request) {
+        return new NativeRequestRecipe(() -> applyIdentity(request), "access-control-replay",
+                Set.of(RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT), NativeRequestStep.Mutation.ACCESS_CONTROL,
+                NativeRequestStep.Condition.ALWAYS, "identity header values hidden", false).build();
+    }
+
     /** Rebuilds {@code request} under the alternate identity (auth stripped and/or replaced). */
     HttpRequest applyIdentity(HttpRequest request) {
         HttpRequest modified = request

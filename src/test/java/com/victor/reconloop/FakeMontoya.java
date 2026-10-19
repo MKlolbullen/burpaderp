@@ -33,6 +33,7 @@ final class FakeMontoya implements AutoCloseable {
     final List<HttpRequest> sent = new CopyOnWriteArrayList<>();
     final List<RedirectionMode> redirectModes = new CopyOnWriteArrayList<>();
     final List<HttpRequestResponse> siteMap = new CopyOnWriteArrayList<>();
+    final List<String> scopeChanges = new CopyOnWriteArrayList<>();
     final List<String> apiAccesses = new CopyOnWriteArrayList<>();
     final List<String> errors = new CopyOnWriteArrayList<>();
     private final Map<RequestOptions, RedirectionMode> options = Collections.synchronizedMap(new IdentityHashMap<>());
@@ -72,8 +73,11 @@ final class FakeMontoya implements AutoCloseable {
                 onSend.accept(request);
                 return pair(request, responder.apply(request));
             });
-            case "scope" -> proxy(method.getReturnType(), (scope, call, parameters) ->
-                    call.getName().equals("isInScope") ? inScope.test((String) parameters[0]) : empty(call.getReturnType()));
+            case "scope" -> proxy(method.getReturnType(), (scope, call, parameters) -> {
+                if (call.getName().equals("isInScope")) return inScope.test((String) parameters[0]);
+                if (call.getName().equals("includeInScope") || call.getName().equals("excludeFromScope")) scopeChanges.add(call.getName());
+                return empty(call.getReturnType());
+            });
             case "siteMap" -> proxy(method.getReturnType(), (map, call, parameters) -> switch (call.getName()) {
                 case "requestResponses" -> new ArrayList<>(siteMap);
                 case "issues" -> List.of();
@@ -101,15 +105,16 @@ final class FakeMontoya implements AutoCloseable {
     }
 
     private HttpRequest parseRequest(HttpService service, String raw) {
-        String[] lines = raw.split("\\r?\\n", -1);
+        String[] sections = raw.split("\\r?\\n\\r?\\n", 2);
+        String[] lines = sections[0].split("\\r?\\n");
         String[] first = lines[0].split(" ", 3);
         String url = (service.secure() ? "https://" : "http://") + service.host() + ":" + service.port() + first[1];
-        Request state = new Request(url); state.method = first[0];
+        HttpRequest request = request(url).withMethod(first[0]);
         for (int i = 1; i < lines.length; i++) {
             int colon = lines[i].indexOf(':');
-            if (colon > 0) state.headers.put(lines[i].substring(0, colon), lines[i].substring(colon + 1).strip());
+            if (colon > 0) request = request.withHeader(lines[i].substring(0, colon), lines[i].substring(colon + 1).strip());
         }
-        return state.value();
+        return request.withBody(sections.length == 2 ? sections[1] : "");
     }
 
     static HttpParameter parameter(String name, String value, HttpParameterType type) {

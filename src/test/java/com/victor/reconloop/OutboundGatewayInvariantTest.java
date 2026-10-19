@@ -73,6 +73,20 @@ public class OutboundGatewayInvariantTest {
         assertFalse(violations(List.of(source)).isEmpty());
     }
 
+    @Test
+    public void partialTemplateAssessmentCannotBeUsedByExecutionCodeOrMethodReferences() throws Exception {
+        for (String operation : List.of("policy.assessTemplate(run, plan);",
+                "java.util.function.BiFunction<ScanRun, RequestPolicy.PlannedRequest, RequestPolicy.Decision> assess = policy::assessTemplate;")) {
+            JavaFileObject source = new SimpleJavaFileObject(URI.create("string:///Bypass.java"), JavaFileObject.Kind.SOURCE) {
+                @Override public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                    return "package com.victor.reconloop; class Bypass { void run(RequestPolicy policy, ScanRun run, RequestPolicy.PlannedRequest plan) { "
+                            + operation + " } }";
+                }
+            };
+            assertFalse(operation, violations(List.of(source)).isEmpty());
+        }
+    }
+
     private static JavaFileObject fixture(String operation) {
         return new SimpleJavaFileObject(URI.create("string:///Bypass.java"), JavaFileObject.Kind.SOURCE) {
             @Override public CharSequence getCharContent(boolean ignoreEncodingErrors) {
@@ -115,6 +129,8 @@ public class OutboundGatewayInvariantTest {
                         } else if (Set.of("sendRequests", "createRequestEngine").contains(name)) forbidden = true;
                     } else if (type.equals(PACKAGE + "ActiveRequestGateway.Sender") && name.equals("send")) {
                         forbidden = !caller.equals(PACKAGE + "ActiveRequestGateway");
+                    } else if (type.equals(PACKAGE + "RequestPolicy") && name.equals("assessTemplate")) {
+                        forbidden = !caller.equals(PACKAGE + "RequestPreview");
                     } else if (type.equals(PACKAGE + "MontoyaTargetTransport")) {
                         forbidden = !name.equals("<init>") || !caller.equals(PACKAGE + "ReconController");
                     } else if (type.equals("java.net.http.HttpClient") && Set.of("send", "sendAsync").contains(name)) {

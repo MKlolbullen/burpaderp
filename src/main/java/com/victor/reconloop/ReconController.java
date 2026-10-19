@@ -548,6 +548,37 @@ final class ReconController implements HttpHandler {
                 "External tool output is evidence, not final proof. Reproduce the result in the current Burp session.");
     }
 
+    private List<HttpRequest> parameterizedTargets() {
+        return api.siteMap().requestResponses().stream().map(HttpRequestResponse::request)
+                .filter(Objects::nonNull).filter(HttpRequest::isInScope).filter(HttpRequest::hasParameters)
+                .collect(java.util.stream.Collectors.toMap(HttpRequest::url, r -> r, (a, b) -> a, LinkedHashMap::new))
+                .values().stream().toList();
+    }
+
+    private record JwtTarget(HttpRequest request, String token) {}
+
+    private List<JwtTarget> jwtTargets() {
+        List<JwtTarget> targets = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (HttpRequestResponse rr : api.siteMap().requestResponses()) {
+            HttpRequest req = rr.request();
+            if (req == null || !req.isInScope() || !SAFE_METHODS.contains(req.method().toUpperCase(Locale.ROOT))) continue;
+            for (String token : JwtAttackEngine.extractJwts(req)) {
+                if (seen.add(req.url() + "\0" + token)) targets.add(new JwtTarget(req, token));
+            }
+        }
+        return targets;
+    }
+
+    private List<HttpRequestResponse> accessControlTargets() {
+        return api.siteMap().requestResponses().stream()
+                .filter(rr -> rr.request() != null && rr.hasResponse() && rr.response() != null)
+                .filter(rr -> rr.request().isInScope())
+                .filter(rr -> SAFE_METHODS.contains(rr.request().method().toUpperCase(Locale.ROOT)))
+                .collect(java.util.stream.Collectors.toMap(rr -> rr.request().method() + " " + rr.request().url(),
+                        rr -> rr, (a, b) -> a, LinkedHashMap::new)).values().stream().toList();
+    }
+
     void runActiveTests() {
         if (!activeTestsEnabled.get()) {
             api.logging().logToOutput("[Recon Hound] Active tests are disabled; enable the opt-in checkbox first.");
@@ -555,13 +586,7 @@ final class ReconController implements HttpHandler {
         }
         if (oastActiveRequests.get()) ensureCollaborator();
         submitNativeActive(ticket -> {
-            List<HttpRequest> targets = api.siteMap().requestResponses().stream()
-                    .map(HttpRequestResponse::request)
-                    .filter(Objects::nonNull)
-                    .filter(HttpRequest::isInScope)
-                    .filter(HttpRequest::hasParameters)
-                    .collect(java.util.stream.Collectors.toMap(HttpRequest::url, r -> r, (a, b) -> a, LinkedHashMap::new))
-                    .values().stream().toList();
+            List<HttpRequest> targets = parameterizedTargets();
 
             boolean allowMutating = mutatingActiveRequests.get();
             ScanProfile profile = allowMutating ? ScanProfile.ACTIVE_MUTATION : ScanProfile.ACTIVE_SAFE;
@@ -612,13 +637,7 @@ final class ReconController implements HttpHandler {
         }
         if (oastActiveRequests.get()) ensureCollaborator();
         submitNativeActive(ticket -> {
-            List<HttpRequest> targets = api.siteMap().requestResponses().stream()
-                    .map(HttpRequestResponse::request)
-                    .filter(Objects::nonNull)
-                    .filter(HttpRequest::isInScope)
-                    .filter(HttpRequest::hasParameters)
-                    .collect(java.util.stream.Collectors.toMap(HttpRequest::url, r -> r, (a, b) -> a, LinkedHashMap::new))
-                    .values().stream().toList();
+            List<HttpRequest> targets = parameterizedTargets();
 
             boolean allowMutating = mutatingActiveRequests.get();
             ScanProfile profile = allowMutating ? ScanProfile.ACTIVE_MUTATION : ScanProfile.ACTIVE_SAFE;
@@ -682,17 +701,7 @@ final class ReconController implements HttpHandler {
             return;
         }
         submitNativeActive(ticket -> {
-            record JwtTarget(HttpRequest request, String token) {}
-            List<JwtTarget> targets = new ArrayList<>();
-            Set<String> seen = new HashSet<>();
-            for (HttpRequestResponse rr : api.siteMap().requestResponses()) {
-                HttpRequest req = rr.request();
-                if (req == null || !req.isInScope()) continue;
-                if (!SAFE_METHODS.contains(req.method().toUpperCase(Locale.ROOT))) continue;
-                for (String token : JwtAttackEngine.extractJwts(req)) {
-                    if (seen.add(req.url() + "\0" + token)) targets.add(new JwtTarget(req, token));
-                }
-            }
+            List<JwtTarget> targets = jwtTargets();
             api.logging().logToOutput("[Recon Hound] JWT alg:none test on " + targets.size() + " JWT-bearing request(s).");
 
             ScanRun run = activeRuns.begin(ticket, ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestLimits());
@@ -702,10 +711,8 @@ final class ReconController implements HttpHandler {
                 if (run.requestBudget().exhausted()) break;
                 try {
                     HttpRequest originalRequest = target.request();
-                    ActiveRequestGateway.Result validResult = gateway.send(run,
-                            RequestPlan.create(originalRequest, "jwt-baseline",
-                                    Set.of(RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT)),
-                            originalRequest);
+                    NativeRequestStep baseline = JwtRequestPlanner.baseline(originalRequest);
+                    ActiveRequestGateway.Result validResult = gateway.send(run, baseline.plan(), baseline.request());
                     if (validResult.error() != null) {
                         api.logging().logToError("JWT baseline request failed for " + originalRequest.url(), validResult.error());
                         continue;
@@ -718,13 +725,10 @@ final class ReconController implements HttpHandler {
                     int validLen = valid.response().bodyToString().length();
 
                     boolean reported = false;
-                    for (String forgedToken : JwtAttackEngine.forgeNoneVariants(target.token())) {
+                    for (NativeRequestStep variant : JwtRequestPlanner.noneVariants(target.request(), target.token())) {
                         if (run.requestBudget().exhausted()) break;
-                        HttpRequest forgedReq = httpRequestFromString(target.request(),
-                                target.request().toString().replace(target.token(), forgedToken));
-                        ActiveRequestGateway.Result forgedResult = gateway.send(run,
-                                RequestPlan.create(forgedReq, "jwt-alg-none",
-                                        Set.of(RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT)), forgedReq);
+                        HttpRequest forgedReq = variant.request();
+                        ActiveRequestGateway.Result forgedResult = gateway.send(run, variant.plan(), forgedReq);
                         if (forgedResult.error() != null) {
                             api.logging().logToError("JWT alg:none request failed for " + target.request().url(), forgedResult.error());
                             continue;
@@ -763,17 +767,12 @@ final class ReconController implements HttpHandler {
 
                     // Weak-secret forgery: if the HMAC secret is a known weak value, mint a tampered token
                     // signed with it and confirm the server accepts a token it never issued.
-                    String alg = JwtAttackEngine.headerAlg(target.token());
-                    String[] parts = target.token().split("\\.");
-                    if (alg != null && alg.startsWith("hs") && parts.length >= 3 && !run.requestBudget().exhausted()) {
-                        String secret = WebHygieneEngine.crackHmac(parts[0] + "." + parts[1], parts[2], alg);
-                        String forgedToken = secret == null ? null : JwtAttackEngine.forgeWithSecret(target.token(), secret, alg);
-                        if (forgedToken != null) {
-                            HttpRequest forgedReq = httpRequestFromString(target.request(),
-                                    target.request().toString().replace(target.token(), forgedToken));
-                            ActiveRequestGateway.Result forgedResult = gateway.send(run,
-                                    RequestPlan.create(forgedReq, "jwt-weak-secret",
-                                            Set.of(RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT)), forgedReq);
+                    if (!run.requestBudget().exhausted()) {
+                        JwtRequestPlanner.WeakForgery weak = JwtRequestPlanner.weakSecret(target.request(), target.token());
+                        if (weak != null) {
+                            String secret = weak.secret();
+                            HttpRequest forgedReq = weak.step().request();
+                            ActiveRequestGateway.Result forgedResult = gateway.send(run, weak.step().plan(), forgedReq);
                             if (forgedResult.error() != null) {
                                 api.logging().logToError("JWT weak-secret request failed for " + target.request().url(), forgedResult.error());
                                 continue;
@@ -832,7 +831,7 @@ final class ReconController implements HttpHandler {
             return;
         }
         submitNativeActive(ticket -> {
-            List<String> hosts = new ArrayList<>(assetHosts);
+            List<String> hosts = assetHosts.stream().sorted().toList();
             api.logging().logToOutput("[Recon Hound] Subdomain-takeover check on " + hosts.size() + " enumerated host(s).");
             ScanRun run = activeRuns.begin(ticket, ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestLimits());
             ActiveRequestGateway gateway = newSafeTargetGateway();
@@ -844,9 +843,8 @@ final class ReconController implements HttpHandler {
                         if (run.requestBudget().exhausted()) break;
                         String url = scheme + host + "/";
                         try {
-                            HttpRequest request = httpRequestFromUrl(url);
-                            ActiveRequestGateway.Result result = gateway.send(run,
-                                    RequestPlan.safe(request, "subdomain-takeover"), request);
+                            NativeRequestStep step = TakeoverRequestPlanner.step(host, scheme);
+                            ActiveRequestGateway.Result result = gateway.send(run, step.plan(), step.request());
                             if (result.error() != null) {
                                 api.logging().logToError("Takeover check failed for " + host, result.error());
                                 continue;
@@ -952,10 +950,6 @@ final class ReconController implements HttpHandler {
         });
     }
 
-    private static HttpRequest httpRequestFromString(HttpRequest template, String raw) {
-        return HttpRequest.httpRequest(template.httpService(), raw);
-    }
-
     private static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "OPTIONS");
 
     void runAccessControlTest(String sessionHeaders, boolean unauthenticated) {
@@ -973,14 +967,7 @@ final class ReconController implements HttpHandler {
             return;
         }
         submitNativeActive(ticket -> {
-            List<HttpRequestResponse> targets = api.siteMap().requestResponses().stream()
-                    .filter(rr -> rr.request() != null && rr.hasResponse() && rr.response() != null)
-                    .filter(rr -> rr.request().isInScope())
-                    .filter(rr -> SAFE_METHODS.contains(rr.request().method().toUpperCase(Locale.ROOT)))
-                    .collect(java.util.stream.Collectors.toMap(
-                            rr -> rr.request().method() + " " + rr.request().url(),
-                            rr -> rr, (a, b) -> a, LinkedHashMap::new))
-                    .values().stream().toList();
+            List<HttpRequestResponse> targets = accessControlTargets();
 
             api.logging().logToOutput("[Recon Hound] Access-control replay of " + targets.size()
                     + " safe (GET/HEAD/OPTIONS) in-scope request(s) under the alternate identity.");
@@ -991,12 +978,9 @@ final class ReconController implements HttpHandler {
                 if (!activeTestsEnabled.get()) { run.cancel(); break; }
                 if (run.requestBudget().exhausted()) break;
                 try {
-                    HttpRequest replayRequest = engine.applyIdentity(original.request());
-                    ActiveRequestGateway.Result replayResult = gateway.send(run,
-                            RequestPlan.create(replayRequest,
-                                    "access-control-replay",
-                                    Set.of(RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT)),
-                            replayRequest);
+                    NativeRequestStep step = engine.plan(original.request());
+                    HttpRequest replayRequest = step.request();
+                    ActiveRequestGateway.Result replayResult = gateway.send(run, step.plan(), replayRequest);
                     if (replayResult.error() != null) {
                         api.logging().logToError("Access-control replay failed for " + replayRequest.url(),
                                 replayResult.error());
@@ -1276,9 +1260,8 @@ final class ReconController implements HttpHandler {
             if (sentRequests.get() >= maxRequests.get()) return;
             if (!redirectSeen.add(current.toString())) return;
 
-            HttpRequest request = buildAuthenticatedGet(current);
-            ActiveRequestGateway.Result result = gateway.send(run,
-                    RequestPlan.safe(request, "discovery-crawl"), request);
+            NativeRequestStep step = crawlStep(current);
+            ActiveRequestGateway.Result result = gateway.send(run, step.plan(), step.request());
             synchronized (crawlRuns) {
                 if (run == crawlRun) sentRequests.set(previousCrawlUsage + run.requestBudget().used());
             }
@@ -2822,6 +2805,97 @@ final class ReconController implements HttpHandler {
         } catch (RuntimeException e) {
             return "Could not prepare this request preview. No requests sent.";
         }
+    }
+
+    String previewActiveTests(String probeFilter) {
+        return previewSafely(() -> {
+            Iterable<NativeRequestStep> steps = () -> parameterizedTargets().stream()
+                    .flatMap(base -> stream(activeTestEngine.plan(base, probeFilter))).iterator();
+            String report = inspectActivePreview(steps, targetPolicy(mutatingActiveRequests.get()));
+            return probeFilter == null || probeFilter.isBlank() ? report
+                    : "Filtered preview: counts cover the selected probe alone. Running active tests still executes the full pass.\n\n" + report;
+        });
+    }
+
+    String previewCorpusFuzz(Set<PayloadEncoder.Encoding> encodings, int maxPerCategory) {
+        return previewCorpusFuzz(encodings, maxPerCategory, null);
+    }
+
+    String previewCorpusFuzz(Set<PayloadEncoder.Encoding> encodings, int maxPerCategory, String categoryFilter) {
+        return previewSafely(() -> {
+            if (encodings == null || encodings.isEmpty() || maxPerCategory <= 0) return "Choose encodings and a positive category cap. No requests sent.";
+            Iterable<NativeRequestStep> steps = () -> parameterizedTargets().stream().flatMap(base -> base.parameters().stream()
+                    .filter(p -> p != null && p.name() != null && !p.name().isBlank() && p.type() != burp.api.montoya.http.message.params.HttpParameterType.COOKIE)
+                    .flatMap(p -> stream(corpusFuzzEngine.plan(base, p, encodings, maxPerCategory, categoryFilter)))).iterator();
+            String report = inspectActivePreview(steps, targetPolicy(mutatingActiveRequests.get()));
+            return categoryFilter == null ? report : "Filtered preview: counts cover the selected category alone. Running corpus fuzz still uses all relevant categories.\n\n" + report;
+        });
+    }
+
+    String previewJwtAttacks() {
+        return previewSafely(() -> {
+            Iterable<NativeRequestStep> steps = () -> jwtTargets().stream()
+                    .flatMap(target -> stream(JwtRequestPlanner.plan(target.request(), target.token()))).iterator();
+            return inspectActivePreview(steps, targetPolicy(false));
+        });
+    }
+
+    String previewTakeover() {
+        return previewSafely(() -> inspectActivePreview(() -> assetHosts.stream().sorted()
+                .flatMap(host -> stream(TakeoverRequestPlanner.plan(host))).iterator(), targetPolicy(false)));
+    }
+
+    String previewAccessControl(String headers, boolean unauthenticated) {
+        return previewSafely(() -> {
+            AccessControlEngine engine = new AccessControlEngine(headers, unauthenticated);
+            if (!engine.configured()) return "Choose an alternate identity or unauthenticated replay. No requests sent.";
+            return inspectActivePreview(() -> accessControlTargets().stream().map(rr -> engine.plan(rr.request())).iterator(), targetPolicy(false));
+        });
+    }
+
+    private NativeRequestStep crawlStep(URI uri) {
+        return new NativeRequestRecipe(() -> buildAuthenticatedGet(uri), "discovery-crawl", Set.of(), NativeRequestStep.Mutation.CRAWL_GET,
+                NativeRequestStep.Condition.ALWAYS, "origin authentication values hidden", false).build();
+    }
+
+    String previewCrawl(String seedText) {
+        return previewSafely(() -> {
+            ScanRun run;
+            synchronized (crawlRuns) {
+                run = crawlRun == null ? ScanRun.begin(ScanProfile.DISCOVERY, ScopeSnapshot.empty(),
+                        ScanRun.RequestLimits.globalOnly(Math.max(0, maxRequests.get() - previousCrawlUsage))) : crawlRun.previewCopy();
+            }
+            List<URI> queued = queue.stream().map(QueueItem::uri).toList();
+            Iterable<NativeRequestStep> steps = () -> java.util.stream.Stream.concat(
+                    queued.stream(), Arrays.stream((seedText == null ? "" : seedText).split("\\R"))
+                            .map(String::trim).filter(line -> !line.isEmpty() && !line.startsWith("#")).map(URI::create))
+                    .distinct().flatMap(uri -> {
+                        Object rootAdmission = new Object();
+                        java.util.stream.Stream<NativeRequestStep> first = java.util.stream.Stream.of(crawlStep(uri).withConstraints(
+                                new NativeRequestStep.Constraints(null, 0, 1, null, rootAdmission)));
+                        java.util.stream.Stream<NativeRequestStep> redirects = java.util.stream.IntStream.range(0, followRedirects.get() ? maxRedirects.get() : 0)
+                                .mapToObj(i -> new NativeRequestStep(null, null, NativeRequestStep.Mutation.CRAWL_REDIRECT, List.of(),
+                                        NativeRequestStep.Condition.REDIRECT_RESPONSE, "possible hop " + (i + 1) + "; current scope required",
+                                        RequestPolicy.PlannedRequest.safe("GET", uri.toString(), "discovery-crawl"))
+                                        .withConstraints(new NativeRequestStep.Constraints(null, 0, 1, rootAdmission, null)));
+                        return java.util.stream.Stream.concat(first, redirects);
+                    }).iterator();
+            return RequestPreview.inspect(run, RequestPolicy.safeDefault(api.scope()::isInScope), steps).render();
+        });
+    }
+
+    private String inspectActivePreview(Iterable<NativeRequestStep> steps, RequestPolicy policy) {
+        ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestLimits());
+        return RequestPreview.inspect(run, policy, steps).render();
+    }
+
+    private static java.util.stream.Stream<NativeRequestStep> stream(Iterable<NativeRequestStep> steps) {
+        return java.util.stream.StreamSupport.stream(steps.spliterator(), false);
+    }
+
+    private static String previewSafely(java.util.function.Supplier<String> preview) {
+        try { return preview.get(); }
+        catch (RuntimeException e) { return "Could not prepare this request preview. No requests sent."; }
     }
 
     private static String bodyOf(HttpRequestResponse rr) {
