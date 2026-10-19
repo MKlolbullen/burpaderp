@@ -171,7 +171,10 @@ final class ScanRun {
         try {
             URI uri = URI.create(url);
             String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
-            String authority = uri.getRawAuthority() == null ? "" : uri.getRawAuthority().toLowerCase(Locale.ROOT);
+            String host = normalizeHost(uri.getHost());
+            int port = uri.getPort();
+            if (port == -1) port = "https".equals(scheme) ? 443 : 80;
+            String authority = host + ":" + port;
             String path = uri.getRawPath();
             if (path == null || path.isBlank()) path = "/";
             return normalizedMethod + " " + scheme + "://" + authority + path;

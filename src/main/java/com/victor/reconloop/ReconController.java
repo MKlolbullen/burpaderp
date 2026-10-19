@@ -86,11 +86,15 @@ final class ReconController implements HttpHandler {
         return t;
     });
 
-    private final ExecutorService activeWorker = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "Burp-Recon-Hound-Active");
-        t.setDaemon(true);
-        return t;
-    });
+    private final ExecutorService activeWorker;
+
+    private static ExecutorService newActiveWorker() {
+        return Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "Burp-Recon-Hound-Active");
+            t.setDaemon(true);
+            return t;
+        });
+    }
 
     // Dedicated pool for LLM API calls only (never target-directed traffic), sized to the number of
     // providers so enabling all of them runs genuinely in parallel. Kept separate from activeWorker,
@@ -115,6 +119,12 @@ final class ReconController implements HttpHandler {
     });
 
     private volatile CollaboratorClient collaborator;
+
+    private final NativeRunRegistry activeRuns = new NativeRunRegistry(false);
+    private final NativeRunRegistry crawlRuns = new NativeRunRegistry(true);
+    private ScanRun crawlRun; // guarded by crawlRuns
+    private int previousCrawlUsage; // retired sessions; pause/resume never refills the crawl cap
+    private final ActiveRequestGateway.Sender targetTransport;
 
     private final AtomicBoolean running = new AtomicBoolean(true);
     private final AtomicBoolean crawlEnabled = new AtomicBoolean(true);
@@ -148,7 +158,21 @@ final class ReconController implements HttpHandler {
                     ReconModel.ReflectionTableModel reflectionModel,
                     ReconModel.ActiveTableModel activeModel,
                     ReconModel.AssetTableModel assetModel) {
+        this(api, findingModel, discoveryModel, parameterModel, reflectionModel, activeModel,
+                assetModel, newActiveWorker(), true);
+    }
+
+    ReconController(MontoyaApi api,
+                    ReconModel.FindingTableModel findingModel,
+                    ReconModel.DiscoveryTableModel discoveryModel,
+                    ReconModel.ParameterTableModel parameterModel,
+                    ReconModel.ReflectionTableModel reflectionModel,
+                    ReconModel.ActiveTableModel activeModel,
+                    ReconModel.AssetTableModel assetModel,
+                    ExecutorService activeWorker, boolean startBackgroundWorkers) {
+        this.activeWorker = Objects.requireNonNull(activeWorker, "activeWorker");
         this.api = api;
+        this.targetTransport = new MontoyaTargetTransport(api);
         this.reporter = new IssueReporter(api);
         this.findingModel = findingModel;
         this.discoveryModel = discoveryModel;
@@ -167,9 +191,11 @@ final class ReconController implements HttpHandler {
             api.logging().logToError("Persisted-state restore skipped", e);
         }
         this.sqlmapClient = new SqlmapClient(null);
-        worker.submit(this::workerLoop);
-        oobPoller.scheduleWithFixedDelay(this::pollCollaborator, 12, 12, TimeUnit.SECONDS);
-        oobPoller.scheduleWithFixedDelay(this::saveState, 60, 60, TimeUnit.SECONDS);
+        if (startBackgroundWorkers) {
+            worker.submit(this::workerLoop);
+            oobPoller.scheduleWithFixedDelay(this::pollCollaborator, 12, 12, TimeUnit.SECONDS);
+            oobPoller.scheduleWithFixedDelay(this::saveState, 60, 60, TimeUnit.SECONDS);
+        }
     }
 
     /** Restores dedupe keys, asset inventory, and Findings/Hosts rows from the Burp project. */
@@ -209,19 +235,40 @@ final class ReconController implements HttpHandler {
     record QueueItem(URI uri, URI rootOrigin, String source) {}
 
     void setStatusListener(StatusListener listener) { this.statusListener = listener == null ? s -> {} : listener; }
-    void setCrawlEnabled(boolean value) { crawlEnabled.set(value); }
+    void setCrawlEnabled(boolean value) {
+        synchronized (crawlRuns) {
+            crawlEnabled.set(value);
+            crawlRuns.setEnabled(value);
+            if (!value && crawlRun != null) {
+                previousCrawlUsage += crawlRun.requestBudget().used();
+                sentRequests.set(previousCrawlUsage);
+                crawlRun = null;
+            }
+        }
+    }
     void setAddToScope(boolean value) { addToScope.set(value); }
     void setSameOriginOnly(boolean value) { sameOriginOnly.set(value); }
     void setIncludeInfoFindings(boolean value) { includeInfoFindings.set(value); }
     void setScanGfPatterns(boolean value) { scanGfPatterns.set(value); }
     void setFollowRedirects(boolean value) { followRedirects.set(value); }
     void setDetectReflections(boolean value) { detectReflections.set(value); }
-    void setActiveTestsEnabled(boolean value) { activeTestsEnabled.set(value); }
-    void setMutatingActiveRequests(boolean value) { mutatingActiveRequests.set(value); }
-    void setOastActiveRequests(boolean value) { oastActiveRequests.set(value); }
-    void setTimeDelayActiveRequests(boolean value) { timeDelayActiveRequests.set(value); }
-    void setUploadActiveRequests(boolean value) { uploadActiveRequests.set(value); }
-    void setAuthLockoutActiveRequests(boolean value) { authLockoutActiveRequests.set(value); }
+    void setActiveTestsEnabled(boolean value) {
+        synchronized (activeRuns) {
+            activeRuns.setEnabled(value);
+            activeTestsEnabled.set(value);
+        }
+    }
+    void setMutatingActiveRequests(boolean value) { setActivePermission(mutatingActiveRequests, value); }
+    void setOastActiveRequests(boolean value) { setActivePermission(oastActiveRequests, value); }
+    void setTimeDelayActiveRequests(boolean value) { setActivePermission(timeDelayActiveRequests, value); }
+    void setUploadActiveRequests(boolean value) { setActivePermission(uploadActiveRequests, value); }
+    void setAuthLockoutActiveRequests(boolean value) { setActivePermission(authLockoutActiveRequests, value); }
+    private void setActivePermission(AtomicBoolean permission, boolean value) {
+        synchronized (activeRuns) {
+            if (permission.getAndSet(value) != value) activeRuns.invalidate();
+        }
+    }
+
     void setMaxRequests(int value) { maxRequests.set(Math.max(1, value)); }
     void setMaxRedirects(int value) { maxRedirects.set(Math.max(0, value)); }
     void setActiveRequestBudget(int value) { activeRequestBudget.set(Math.max(1, value)); }
@@ -356,15 +403,15 @@ final class ReconController implements HttpHandler {
             api.logging().logToOutput("[Recon Hound] Parameter discovery sends active traffic; enable the opt-in checkbox first.");
             return;
         }
-        activeWorker.submit(() -> {
+        submitNativeActive(ticket -> {
             String target = url == null ? "" : url.trim();
             if (!target.startsWith("http")) { api.logging().logToError("Invalid parameter-discovery URL: " + target); return; }
             if (!api.scope().isInScope(target)) { api.logging().logToError("Target not in scope: " + target); return; }
             HttpRequest base = httpRequestFromUrl(target);
-            ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.forTargetUrl(target),
+            ScanRun run = activeRuns.begin(ticket, ScanProfile.ACTIVE_SAFE, ScopeSnapshot.forTargetUrl(target),
                     activeRequestLimits());
             ActiveRequestGateway gateway = new ActiveRequestGateway(
-                    RequestPolicy.safeDefault(api.scope()::isInScope), api.http()::sendRequest);
+                    RequestPolicy.safeDefault(api.scope()::isInScope), targetTransport);
             api.logging().logToOutput("[Recon Hound] Arjun-style parameter discovery on " + target
                     + " (" + parameterDiscovery.wordlistSize() + " candidates, run " + run.id() + ")");
             try {
@@ -507,7 +554,7 @@ final class ReconController implements HttpHandler {
             return;
         }
         if (oastActiveRequests.get()) ensureCollaborator();
-        activeWorker.submit(() -> {
+        submitNativeActive(ticket -> {
             List<HttpRequest> targets = api.siteMap().requestResponses().stream()
                     .map(HttpRequestResponse::request)
                     .filter(Objects::nonNull)
@@ -518,7 +565,7 @@ final class ReconController implements HttpHandler {
 
             boolean allowMutating = mutatingActiveRequests.get();
             ScanProfile profile = allowMutating ? ScanProfile.ACTIVE_MUTATION : ScanProfile.ACTIVE_SAFE;
-            ScanRun run = ScanRun.begin(profile, ScopeSnapshot.empty(), activeRequestLimits());
+            ScanRun run = activeRuns.begin(ticket, profile, ScopeSnapshot.empty(), activeRequestLimits());
             ActiveRequestGateway gateway = newTargetGateway(allowMutating);
             api.logging().logToOutput("[Recon Hound] Active testing " + targets.size()
                     + " in-scope parameterised request(s) with quotas global/host/endpoint/probe="
@@ -564,7 +611,7 @@ final class ReconController implements HttpHandler {
             return;
         }
         if (oastActiveRequests.get()) ensureCollaborator();
-        activeWorker.submit(() -> {
+        submitNativeActive(ticket -> {
             List<HttpRequest> targets = api.siteMap().requestResponses().stream()
                     .map(HttpRequestResponse::request)
                     .filter(Objects::nonNull)
@@ -575,7 +622,7 @@ final class ReconController implements HttpHandler {
 
             boolean allowMutating = mutatingActiveRequests.get();
             ScanProfile profile = allowMutating ? ScanProfile.ACTIVE_MUTATION : ScanProfile.ACTIVE_SAFE;
-            ScanRun run = ScanRun.begin(profile, ScopeSnapshot.empty(), activeRequestLimits());
+            ScanRun run = activeRuns.begin(ticket, profile, ScopeSnapshot.empty(), activeRequestLimits());
             ActiveRequestGateway gateway = newTargetGateway(allowMutating);
             api.logging().logToOutput("[Recon Hound] Corpus-fuzzing " + targets.size()
                     + " in-scope parameterised request(s) (" + payloadLibrary.totalPayloads()
@@ -634,7 +681,7 @@ final class ReconController implements HttpHandler {
             api.logging().logToOutput("[Recon Hound] JWT forgery is an authentication probe; enable the auth / lockout permission first.");
             return;
         }
-        activeWorker.submit(() -> {
+        submitNativeActive(ticket -> {
             record JwtTarget(HttpRequest request, String token) {}
             List<JwtTarget> targets = new ArrayList<>();
             Set<String> seen = new HashSet<>();
@@ -648,7 +695,7 @@ final class ReconController implements HttpHandler {
             }
             api.logging().logToOutput("[Recon Hound] JWT alg:none test on " + targets.size() + " JWT-bearing request(s).");
 
-            ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestLimits());
+            ScanRun run = activeRuns.begin(ticket, ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestLimits());
             ActiveRequestGateway gateway = newSafeTargetGateway();
             for (JwtTarget target : targets) {
                 if (!activeTestsEnabled.get()) { run.cancel(); break; }
@@ -784,10 +831,10 @@ final class ReconController implements HttpHandler {
             api.logging().logToOutput("[Recon Hound] Active tests are disabled; enable the opt-in checkbox first.");
             return;
         }
-        activeWorker.submit(() -> {
+        submitNativeActive(ticket -> {
             List<String> hosts = new ArrayList<>(assetHosts);
             api.logging().logToOutput("[Recon Hound] Subdomain-takeover check on " + hosts.size() + " enumerated host(s).");
-            ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestLimits());
+            ScanRun run = activeRuns.begin(ticket, ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestLimits());
             ActiveRequestGateway gateway = newSafeTargetGateway();
             try {
                 for (String host : hosts) {
@@ -925,7 +972,7 @@ final class ReconController implements HttpHandler {
             api.logging().logToError("Access-control test needs alternate session headers or the unauthenticated option.");
             return;
         }
-        activeWorker.submit(() -> {
+        submitNativeActive(ticket -> {
             List<HttpRequestResponse> targets = api.siteMap().requestResponses().stream()
                     .filter(rr -> rr.request() != null && rr.hasResponse() && rr.response() != null)
                     .filter(rr -> rr.request().isInScope())
@@ -937,7 +984,7 @@ final class ReconController implements HttpHandler {
 
             api.logging().logToOutput("[Recon Hound] Access-control replay of " + targets.size()
                     + " safe (GET/HEAD/OPTIONS) in-scope request(s) under the alternate identity.");
-            ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestLimits());
+            ScanRun run = activeRuns.begin(ticket, ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestLimits());
             ActiveRequestGateway gateway = newSafeTargetGateway();
 
             for (HttpRequestResponse original : targets) {
@@ -1030,10 +1077,17 @@ final class ReconController implements HttpHandler {
         });
     }
 
-    void pause() { crawlEnabled.set(false); publishStatus(); }
-    void resume() { crawlEnabled.set(true); publishStatus(); }
+    void pause() { setCrawlEnabled(false); publishStatus(); }
+    void resume() { setCrawlEnabled(true); publishStatus(); }
 
     void reset() {
+        activeRuns.invalidate();
+        synchronized (crawlRuns) {
+            crawlRuns.invalidate();
+            crawlRun = null;
+            previousCrawlUsage = 0;
+            sentRequests.set(0);
+        }
         queue.clear();
         queuedOrVisited.clear();
         discoveredUrls.clear();
@@ -1049,7 +1103,6 @@ final class ReconController implements HttpHandler {
         llmJsAnalyzed.clear();
         assetHosts.clear();
         assetIps.clear();
-        sentRequests.set(0);
         SwingUtilities.invokeLater(() -> {
             findingModel.clear();
             discoveryModel.clear();
@@ -1064,6 +1117,8 @@ final class ReconController implements HttpHandler {
 
     void shutdown() {
         running.set(false);
+        activeRuns.close();
+        crawlRuns.close();
         // Stop the periodic saver first so it can't race the final blocking save on the PersistedObject.
         oobPoller.shutdownNow();
         saveStateBlocking();
@@ -1197,52 +1252,73 @@ final class ReconController implements HttpHandler {
         }
     }
 
-    private void crawlOne(QueueItem item) {
+    ScanRun currentCrawlRun() {
+        synchronized (crawlRuns) { return crawlRun; }
+    }
+
+    void crawlOne(QueueItem item) {
         URI current = item.uri();
         Set<String> redirectSeen = new HashSet<>();
         int hop = 0;
-        int remainingGlobalBudget = Math.max(0, maxRequests.get() - sentRequests.get());
-        if (remainingGlobalBudget == 0) return;
-        ScanRun run = ScanRun.begin(ScanProfile.DISCOVERY, ScopeSnapshot.forTargetUrl(current.toString()),
-                Math.min(remainingGlobalBudget, maxRedirects.get() + 1));
-        ActiveRequestGateway gateway = newSafeTargetGateway();
-        try {
-            while (current != null && hop <= maxRedirects.get() && running.get()) {
-                if (sentRequests.get() >= maxRequests.get()) return;
-                if (!redirectSeen.add(current.toString())) return;
-
-                HttpRequest request = buildAuthenticatedGet(current);
-                ActiveRequestGateway.Result result = gateway.send(run,
-                        RequestPolicy.PlannedRequest.safe(request.method(), request.url(), "discovery-crawl"), request);
-                if (result.error() != null) {
-                    api.logging().logToError("Discovery request failed for " + current, result.error());
-                    return;
-                }
-                if (!result.dispatched()) return;
-                sentRequests.incrementAndGet();
-                api.logging().logToOutput("[Recon Hound] GET " + current + (hop > 0 ? " [redirect hop " + hop + "]" : ""));
-
-                HttpRequestResponse rr = result.response();
-                if (rr == null || !rr.hasResponse() || rr.response() == null) return;
-
-                api.siteMap().add(rr);
-                processActivePair(rr, hop);
-
-                HttpResponse response = rr.response();
-                short code = response.statusCode();
-                if (!followRedirects.get() || code < 300 || code >= 400) return;
-
-                String location = response.headerValue("Location");
-                URI next = discovery.redirectTarget(current, location);
-                if (next == null) return;
-                addDiscovered(next, item.rootOrigin(), "redirect " + code + " from " + current, false);
-                current = next;
-                hop++;
+        ScanRun run;
+        synchronized (crawlRuns) {
+            if (!running.get() || !crawlEnabled.get()) return;
+            if (crawlRun == null) {
+                int remaining = Math.max(0, maxRequests.get() - previousCrawlUsage);
+                crawlRun = crawlRuns.begin(crawlRuns.ticket(), ScanProfile.DISCOVERY, ScopeSnapshot.empty(),
+                        ScanRun.RequestLimits.globalOnly(remaining));
             }
-        } finally {
-            if (!running.get()) run.cancel();
-            else run.complete();
+            run = crawlRun;
         }
+        ActiveRequestGateway gateway = newSafeTargetGateway();
+        while (current != null && hop <= maxRedirects.get() && running.get()
+                && crawlEnabled.get() && run.isRunning()) {
+            if (sentRequests.get() >= maxRequests.get()) return;
+            if (!redirectSeen.add(current.toString())) return;
+
+            HttpRequest request = buildAuthenticatedGet(current);
+            ActiveRequestGateway.Result result = gateway.send(run,
+                    RequestPolicy.PlannedRequest.safe(request.method(), request.url(), "discovery-crawl"), request);
+            synchronized (crawlRuns) {
+                if (run == crawlRun) sentRequests.set(previousCrawlUsage + run.requestBudget().used());
+            }
+            if (result.error() != null) {
+                api.logging().logToError("Discovery request failed for " + current, result.error());
+                return;
+            }
+            if (!result.dispatched()) return;
+            api.logging().logToOutput("[Recon Hound] GET " + current + (hop > 0 ? " [redirect hop " + hop + "]" : ""));
+
+            HttpRequestResponse rr = result.response();
+            if (!run.isRunning() || rr == null || !rr.hasResponse() || rr.response() == null) return;
+
+            api.siteMap().add(rr);
+            processActivePair(rr, hop);
+
+            HttpResponse response = rr.response();
+            short code = response.statusCode();
+            if (!followRedirects.get() || code < 300 || code >= 400) return;
+
+            String location = response.headerValue("Location");
+            URI next = discovery.redirectTarget(current, location);
+            // Do not let auto-add-to-scope turn an unapproved redirect into an approved hop.
+            if (next == null || !api.scope().isInScope(next.toString())) return;
+            addDiscovered(next, item.rootOrigin(), "redirect " + code + " from " + current, false);
+            current = next;
+            hop++;
+        }
+    }
+
+    private void submitNativeActive(Consumer<NativeRunRegistry.Ticket> work) {
+        NativeRunRegistry.Ticket ticket = activeRuns.ticket();
+        activeWorker.submit(() -> {
+            if (!activeRuns.isCurrent(ticket)) return;
+            try {
+                work.accept(ticket);
+            } finally {
+                activeRuns.finish(ticket);
+            }
+        });
     }
 
     /** Shared safe-method gateway for native discovery and read-only replay paths. */
@@ -1270,7 +1346,7 @@ final class ReconController implements HttpHandler {
         // PERSISTENT_PAYLOAD deliberately has no UI grant: destructive/persistent corpus entries
         // remain hard-disabled and are filtered before planning.
         return new ActiveRequestGateway(
-                new RequestPolicy(api.scope()::isInScope, permissions), api.http()::sendRequest);
+                new RequestPolicy(api.scope()::isInScope, permissions), targetTransport);
     }
 
     private HttpRequest buildAuthenticatedGet(URI uri) {
@@ -2589,11 +2665,11 @@ final class ReconController implements HttpHandler {
             api.logging().logToOutput("[Recon Hound] GraphQL introspection uses POST; enable the non-safe-method opt-in first.");
             return;
         }
-        activeWorker.submit(() -> {
+        submitNativeActive(ticket -> {
             String target = url == null ? "" : url.trim();
             if (!target.startsWith("http")) { api.logging().logToError("Invalid GraphQL URL: " + target); return; }
             if (!api.scope().isInScope(target)) { api.logging().logToError("GraphQL target not in scope: " + target); return; }
-            ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_MUTATION, ScopeSnapshot.forTargetUrl(target),
+            ScanRun run = activeRuns.begin(ticket, ScanProfile.ACTIVE_MUTATION, ScopeSnapshot.forTargetUrl(target),
                     activeRequestLimits(1));
             ActiveRequestGateway gateway = newTargetGateway(true);
             try {
@@ -2656,11 +2732,11 @@ final class ReconController implements HttpHandler {
             api.logging().logToOutput("[Recon Hound] GraphQL fuzzing uses POST; enable the non-safe-method opt-in first.");
             return;
         }
-        activeWorker.submit(() -> {
+        submitNativeActive(ticket -> {
             String target = url == null ? "" : url.trim();
             if (!target.startsWith("http")) { api.logging().logToError("Invalid GraphQL URL: " + target); return; }
             if (!api.scope().isInScope(target)) { api.logging().logToError("GraphQL target not in scope: " + target); return; }
-            ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_MUTATION, ScopeSnapshot.forTargetUrl(target),
+            ScanRun run = activeRuns.begin(ticket, ScanProfile.ACTIVE_MUTATION, ScopeSnapshot.forTargetUrl(target),
                     activeRequestLimits(3));
             ActiveRequestGateway gateway = newTargetGateway(true);
             try {

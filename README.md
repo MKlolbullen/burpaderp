@@ -156,7 +156,9 @@ traffic. It is **disabled by default**, scope-checked per request, throttled, an
 hierarchical run quotas. High-impact behaviours are separately fail-closed: Collaborator/OAST,
 time-delay payloads, upload mutations, authentication/lockout replays, and non-safe HTTP methods each
 require their own operator opt-in. Persistent/destructive corpus entries remain blocked. Enable only
-the permissions your rules of engagement actually authorize.
+the permissions your rules of engagement actually authorize. Changing a permission or disabling active
+tests cancels current native runs and invalidates queued jobs. Blind-XSS beacons additionally require
+persistent-payload permission and remain blocked until a separate authorization path exists.
 
 Every parameter-level probe below injects through a shared **insertion-point model** (`InsertionPoint`)
 rather than query/body parameters alone — so SQLi, NoSQLi, SSTI, path traversal, reflected/blind XSS,
@@ -401,8 +403,8 @@ uploads the SARIF artifact.
 ## Run governance & the `reconctl` sidecar
 
 Active behaviour is governed by an explicit control plane: a per-run request policy and hard request
-**budget** gate every target-directed send, and each active run carries a scope snapshot and a
-verification state rather than a loose "confirmed" flag. An optional typed Go **`reconctl`** sidecar
+**budget** gate every native Montoya target dispatch. Each active run carries a scope snapshot,
+and findings carry an explicit verification state rather than a loose "confirmed" flag. An optional typed Go **`reconctl`** sidecar
 keeps external network scans and active fuzzing behind explicit command flags and typed input/output
 contracts; Burp **re-checks scope** when importing its JSONL, and importing never launches a tool or
 sends a request. See **[run governance and the sidecar handoff](docs/RUN_GOVERNANCE.md)** and the

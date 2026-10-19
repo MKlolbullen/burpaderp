@@ -159,39 +159,6 @@ final class ActiveTestEngine {
 
     void setCollaborator(CollaboratorClient collaborator) { this.collaborator = collaborator; }
 
-    /** Runs safe-method probes against every non-cookie parameter of {@code base}. */
-    List<ActiveFinding> test(HttpRequest base, int maxRequests) {
-        return test(base, maxRequests, false);
-    }
-
-    /**
-     * Compatibility entry point for tests and callers that do not yet own a first-class run.
-     * New orchestration should create one {@link ScanRun} for the whole pass and call
-     * {@link #test(HttpRequest, ScanRun, ActiveRequestGateway)} so all targets share one budget.
-     */
-    List<ActiveFinding> test(HttpRequest base, int maxRequests, boolean allowMutating) {
-        if (base == null || maxRequests <= 0) return List.of();
-        if (!allowMutating && !isSafeMethod(base)) return List.of();
-        ScanProfile profile = allowMutating ? ScanProfile.ACTIVE_MUTATION : ScanProfile.ACTIVE_SAFE;
-        ScanRun run = ScanRun.begin(profile, ScopeSnapshot.forTargetUrl(base.url()), maxRequests);
-        EnumSet<RequestPolicy.Permission> permissions = EnumSet.of(
-                RequestPolicy.Permission.OAST,
-                RequestPolicy.Permission.TIME_DELAY,
-                RequestPolicy.Permission.UPLOAD,
-                RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT);
-        if (allowMutating) {
-            permissions.add(RequestPolicy.Permission.UNSAFE_HTTP_METHOD);
-            permissions.add(RequestPolicy.Permission.STATE_CHANGING);
-        }
-        ActiveRequestGateway gateway = new ActiveRequestGateway(
-                new RequestPolicy(api.scope()::isInScope, permissions), api.http()::sendRequest);
-        try {
-            return test(base, run, gateway);
-        } finally {
-            if (run.isRunning()) run.complete();
-        }
-    }
-
     /**
      * Executes probes inside a caller-owned run. Every request in every target handled by the caller
      * consumes the same run-scoped budget through {@code gateway}; no private per-target budget exists.
@@ -219,7 +186,7 @@ final class ActiveTestEngine {
                 if (!budgetExhausted()) runProbe("ssti", () -> testSsti(base, point, findings));
                 if (!budgetExhausted()) runProbe("ssrf", Set.of(RequestPolicy.Permission.OAST),
                         () -> testSsrf(base, point, findings));
-                if (!budgetExhausted()) runProbe("blind-xss", Set.of(RequestPolicy.Permission.OAST),
+                if (!budgetExhausted()) runProbe("blind-xss", Set.of(RequestPolicy.Permission.OAST, RequestPolicy.Permission.PERSISTENT_PAYLOAD),
                         () -> testBlindXss(base, point, findings));
                 if (!budgetExhausted()) runProbe("command-injection", Set.of(RequestPolicy.Permission.OAST),
                         () -> testCommandInjection(base, point, findings));

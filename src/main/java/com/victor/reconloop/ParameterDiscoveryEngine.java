@@ -37,22 +37,6 @@ final class ParameterDiscoveryEngine {
     int wordlistSize() { return wordlist.size(); }
 
     /**
-     * Compatibility entry point.  New callers should create a {@link ScanRun} and use the overload
-     * below so request accounting and cancellation are visible to the coordinator.
-     */
-    List<Discovered> discover(HttpRequest base, int maxRequests, long throttleMillis) {
-        if (base == null || maxRequests <= 0) return List.of();
-        ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.forTargetUrl(base.url()), maxRequests);
-        ActiveRequestGateway gateway = new ActiveRequestGateway(
-                RequestPolicy.safeDefault(api.scope()::isInScope), api.http()::sendRequest);
-        try {
-            return discover(base, run, gateway, throttleMillis);
-        } finally {
-            run.complete();
-        }
-    }
-
-    /**
      * Discovers parameters through the run-scoped request gateway.  Every baseline and chunk probe
      * is checked against the exact same scope, method, cancellation, and budget policy.
      */
