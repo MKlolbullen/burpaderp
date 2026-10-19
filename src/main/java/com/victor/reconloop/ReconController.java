@@ -130,6 +130,9 @@ final class ReconController implements HttpHandler {
     private final AtomicInteger maxRedirects = new AtomicInteger(8);
     private final AtomicInteger activeThrottleMillis = new AtomicInteger(150);
     private final AtomicInteger activeRequestBudget = new AtomicInteger(60);
+    private final AtomicInteger activePerHostBudget = new AtomicInteger(60);
+    private final AtomicInteger activePerEndpointBudget = new AtomicInteger(20);
+    private final AtomicInteger activePerProbeBudget = new AtomicInteger(20);
     private final AtomicInteger sentRequests = new AtomicInteger(0);
 
     private volatile StatusListener statusListener = s -> {};
@@ -214,6 +217,26 @@ final class ReconController implements HttpHandler {
     void setMaxRequests(int value) { maxRequests.set(Math.max(1, value)); }
     void setMaxRedirects(int value) { maxRedirects.set(Math.max(0, value)); }
     void setActiveRequestBudget(int value) { activeRequestBudget.set(Math.max(1, value)); }
+    void setActivePerHostBudget(int value) { activePerHostBudget.set(Math.max(1, value)); }
+    void setActivePerEndpointBudget(int value) { activePerEndpointBudget.set(Math.max(1, value)); }
+    void setActivePerProbeBudget(int value) { activePerProbeBudget.set(Math.max(1, value)); }
+
+    private ScanRun.RequestLimits activeRequestLimits() {
+        return new ScanRun.RequestLimits(
+                activeRequestBudget.get(),
+                activePerHostBudget.get(),
+                activePerEndpointBudget.get(),
+                activePerProbeBudget.get());
+    }
+
+    private ScanRun.RequestLimits activeRequestLimits(int globalCap) {
+        int global = Math.min(Math.max(0, globalCap), activeRequestBudget.get());
+        return new ScanRun.RequestLimits(
+                global,
+                Math.min(activePerHostBudget.get(), Math.max(1, global)),
+                Math.min(activePerEndpointBudget.get(), Math.max(1, global)),
+                Math.min(activePerProbeBudget.get(), Math.max(1, global)));
+    }
 
     int gfPackCount() { return gfPatterns.packCount(); }
     int payloadCount() { return payloadLibrary.totalPayloads(); }
@@ -331,7 +354,7 @@ final class ReconController implements HttpHandler {
             if (!api.scope().isInScope(target)) { api.logging().logToError("Target not in scope: " + target); return; }
             HttpRequest base = httpRequestFromUrl(target);
             ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.forTargetUrl(target),
-                    activeRequestBudget.get());
+                    activeRequestLimits());
             ActiveRequestGateway gateway = new ActiveRequestGateway(
                     RequestPolicy.safeDefault(api.scope()::isInScope), api.http()::sendRequest);
             api.logging().logToOutput("[Recon Hound] Arjun-style parameter discovery on " + target
@@ -487,11 +510,12 @@ final class ReconController implements HttpHandler {
 
             boolean allowMutating = mutatingActiveRequests.get();
             ScanProfile profile = allowMutating ? ScanProfile.ACTIVE_MUTATION : ScanProfile.ACTIVE_SAFE;
-            ScanRun run = ScanRun.begin(profile, ScopeSnapshot.empty(), activeRequestBudget.get());
+            ScanRun run = ScanRun.begin(profile, ScopeSnapshot.empty(), activeRequestLimits());
             ActiveRequestGateway gateway = newTargetGateway(allowMutating);
             api.logging().logToOutput("[Recon Hound] Active testing " + targets.size()
-                    + " in-scope parameterised request(s) with one run budget of "
-                    + run.requestBudget().limit() + " request(s)"
+                    + " in-scope parameterised request(s) with quotas global/host/endpoint/probe="
+                    + run.requestLimits().global() + "/" + run.requestLimits().perHost() + "/"
+                    + run.requestLimits().perEndpoint() + "/" + run.requestLimits().perProbe()
                     + (allowMutating ? " including non-safe methods." : " using safe methods only.")
                     + " Run=" + run.id());
             try {
@@ -539,7 +563,7 @@ final class ReconController implements HttpHandler {
 
             boolean allowMutating = mutatingActiveRequests.get();
             ScanProfile profile = allowMutating ? ScanProfile.ACTIVE_MUTATION : ScanProfile.ACTIVE_SAFE;
-            ScanRun run = ScanRun.begin(profile, ScopeSnapshot.empty(), activeRequestBudget.get());
+            ScanRun run = ScanRun.begin(profile, ScopeSnapshot.empty(), activeRequestLimits());
             ActiveRequestGateway gateway = newTargetGateway(allowMutating);
             api.logging().logToOutput("[Recon Hound] Corpus-fuzzing " + targets.size()
                     + " in-scope parameterised request(s) (" + payloadLibrary.totalPayloads()
@@ -608,7 +632,7 @@ final class ReconController implements HttpHandler {
             }
             api.logging().logToOutput("[Recon Hound] JWT alg:none test on " + targets.size() + " JWT-bearing request(s).");
 
-            ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestBudget.get());
+            ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestLimits());
             ActiveRequestGateway gateway = newSafeTargetGateway();
             for (JwtTarget target : targets) {
                 if (!activeTestsEnabled.get()) { run.cancel(); break; }
@@ -744,7 +768,7 @@ final class ReconController implements HttpHandler {
         activeWorker.submit(() -> {
             List<String> hosts = new ArrayList<>(assetHosts);
             api.logging().logToOutput("[Recon Hound] Subdomain-takeover check on " + hosts.size() + " enumerated host(s).");
-            ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestBudget.get());
+            ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestLimits());
             ActiveRequestGateway gateway = newSafeTargetGateway();
             try {
                 for (String host : hosts) {
@@ -890,7 +914,7 @@ final class ReconController implements HttpHandler {
 
             api.logging().logToOutput("[Recon Hound] Access-control replay of " + targets.size()
                     + " safe (GET/HEAD/OPTIONS) in-scope request(s) under the alternate identity.");
-            ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestBudget.get());
+            ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestLimits());
             ActiveRequestGateway gateway = newSafeTargetGateway();
 
             for (HttpRequestResponse original : targets) {
@@ -2538,7 +2562,7 @@ final class ReconController implements HttpHandler {
             if (!target.startsWith("http")) { api.logging().logToError("Invalid GraphQL URL: " + target); return; }
             if (!api.scope().isInScope(target)) { api.logging().logToError("GraphQL target not in scope: " + target); return; }
             ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_MUTATION, ScopeSnapshot.forTargetUrl(target),
-                    Math.min(1, activeRequestBudget.get()));
+                    activeRequestLimits(1));
             ActiveRequestGateway gateway = newTargetGateway(true);
             try {
                 HttpRequest request = httpRequestFromUrl(target)
@@ -2605,7 +2629,7 @@ final class ReconController implements HttpHandler {
             if (!target.startsWith("http")) { api.logging().logToError("Invalid GraphQL URL: " + target); return; }
             if (!api.scope().isInScope(target)) { api.logging().logToError("GraphQL target not in scope: " + target); return; }
             ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_MUTATION, ScopeSnapshot.forTargetUrl(target),
-                    Math.min(3, activeRequestBudget.get()));
+                    activeRequestLimits(3));
             ActiveRequestGateway gateway = newTargetGateway(true);
             try {
                 HttpRequestResponse suggest = gqlPost(target, GraphQlFuzzEngine.suggestionQuery(),
