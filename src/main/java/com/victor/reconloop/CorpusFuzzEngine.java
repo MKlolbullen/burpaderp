@@ -69,43 +69,6 @@ final class CorpusFuzzEngine {
 
     void setCollaborator(CollaboratorClient collaborator) { this.collaborator = collaborator; }
 
-    /**
-     * Fuzzes one parameter with the relevant corpus categories, in every requested encoding.
-     * {@code maxPerCategory} remains a local category cap, while the caller-owned {@link ScanRun}
-     * provides the hard whole-run cap shared across every target/parameter/category.
-     */
-    List<ActiveTestEngine.ActiveFinding> fuzz(HttpRequest base, HttpParameter parameter,
-                                               Set<PayloadEncoder.Encoding> encodings, int maxPerCategory) {
-        return fuzz(base, parameter, encodings, maxPerCategory, false);
-    }
-
-    /** Compatibility entry point for callers that do not yet own a first-class run. */
-    List<ActiveTestEngine.ActiveFinding> fuzz(HttpRequest base, HttpParameter parameter,
-                                               Set<PayloadEncoder.Encoding> encodings, int maxPerCategory,
-                                               boolean allowMutating) {
-        if (base == null || parameter == null || maxPerCategory <= 0) return List.of();
-        if (!allowMutating && !ActiveTestEngine.isSafeMethod(base)) return List.of();
-        int categories = Math.max(1, relevantCategories(parameter.name(), parameter.value(),
-                rceParamHints, library.categories()).size());
-        ScanProfile profile = allowMutating ? ScanProfile.ACTIVE_MUTATION : ScanProfile.ACTIVE_SAFE;
-        ScanRun run = ScanRun.begin(profile, ScopeSnapshot.forTargetUrl(base.url()),
-                Math.max(1, maxPerCategory * categories));
-        EnumSet<RequestPolicy.Permission> permissions = EnumSet.of(
-                RequestPolicy.Permission.OAST,
-                RequestPolicy.Permission.TIME_DELAY);
-        if (allowMutating) {
-            permissions.add(RequestPolicy.Permission.UNSAFE_HTTP_METHOD);
-            permissions.add(RequestPolicy.Permission.STATE_CHANGING);
-        }
-        ActiveRequestGateway gateway = new ActiveRequestGateway(
-                new RequestPolicy(api.scope()::isInScope, permissions), api.http()::sendRequest);
-        try {
-            return fuzz(base, parameter, encodings, maxPerCategory, run, gateway);
-        } finally {
-            if (run.isRunning()) run.complete();
-        }
-    }
-
     List<ActiveTestEngine.ActiveFinding> fuzz(HttpRequest base, HttpParameter parameter,
                                                Set<PayloadEncoder.Encoding> encodings, int maxPerCategory,
                                                ScanRun run, ActiveRequestGateway gateway) {

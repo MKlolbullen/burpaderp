@@ -112,6 +112,37 @@ public class ActiveRequestGatewayTest {
         assertEquals(1, sent.get());
     }
 
+    @Test
+    public void dispatchExceptionDoesNotRefundQuotaOrPermitRetry() {
+        AtomicInteger sent = new AtomicInteger();
+        ActiveRequestGateway gateway = new ActiveRequestGateway(RequestPolicy.safeDefault(url -> true), request -> {
+            sent.incrementAndGet(); throw new java.io.IOException("simulated transport failure");
+        });
+        ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), 1);
+        HttpRequest request = fakeRequest("GET", "https://api.example.test/a");
+        var planned = RequestPolicy.PlannedRequest.safe("GET", request.url(), "test");
+        var first = gateway.send(run, planned, request);
+        assertTrue(first.dispatched()); assertNotNull(first.error());
+        assertFalse(gateway.send(run, planned, request).dispatched());
+        assertEquals(1, sent.get()); assertEquals(1, run.requestBudget().used());
+    }
+
+    @Test
+    public void cancellationDuringPolicyEvaluationPreventsDispatch() {
+        ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), 2);
+        AtomicInteger sent = new AtomicInteger();
+        ActiveRequestGateway gateway = new ActiveRequestGateway(RequestPolicy.safeDefault(url -> {
+            run.cancel(); return true;
+        }), request -> { sent.incrementAndGet(); return null; });
+        HttpRequest request = fakeRequest("GET", "https://api.example.test/a");
+        var result = gateway.send(run, RequestPolicy.PlannedRequest.safe("GET", request.url(), "test"), request);
+        assertFalse(result.dispatched());
+        assertEquals(RequestPolicy.DecisionCode.CANCELLED, result.decision().code());
+        assertEquals(0, sent.get());
+        // A cancellation race may conservatively consume a token, but never emits a request.
+        assertTrue(run.requestBudget().used() <= 1);
+    }
+
     private static HttpRequest fakeRequest(String methodValue, String urlValue) {
         return (HttpRequest) Proxy.newProxyInstance(HttpRequest.class.getClassLoader(),
                 new Class<?>[]{HttpRequest.class}, (proxy, method, args) -> switch (method.getName()) {

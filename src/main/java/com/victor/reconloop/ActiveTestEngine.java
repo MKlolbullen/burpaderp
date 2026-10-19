@@ -79,6 +79,7 @@ final class ActiveTestEngine {
             "'; SELECT PG_SLEEP(5)-- -",     // PostgreSQL
             "'; WAITFOR DELAY '0:0:5'-- -"); // MSSQL
     private static final int SQLI_TIME_DELAY_SECONDS = 5;
+    private static final int SQLI_TIMING_SAMPLES = 3;
 
     // NoSQL injection: values that break a Mongo-style query or its $where JavaScript so the datastore
     // surfaces a parser/driver error. Detection is error-based and baseline-differenced (like SQLi) —
@@ -158,39 +159,6 @@ final class ActiveTestEngine {
 
     void setCollaborator(CollaboratorClient collaborator) { this.collaborator = collaborator; }
 
-    /** Runs safe-method probes against every non-cookie parameter of {@code base}. */
-    List<ActiveFinding> test(HttpRequest base, int maxRequests) {
-        return test(base, maxRequests, false);
-    }
-
-    /**
-     * Compatibility entry point for tests and callers that do not yet own a first-class run.
-     * New orchestration should create one {@link ScanRun} for the whole pass and call
-     * {@link #test(HttpRequest, ScanRun, ActiveRequestGateway)} so all targets share one budget.
-     */
-    List<ActiveFinding> test(HttpRequest base, int maxRequests, boolean allowMutating) {
-        if (base == null || maxRequests <= 0) return List.of();
-        if (!allowMutating && !isSafeMethod(base)) return List.of();
-        ScanProfile profile = allowMutating ? ScanProfile.ACTIVE_MUTATION : ScanProfile.ACTIVE_SAFE;
-        ScanRun run = ScanRun.begin(profile, ScopeSnapshot.forTargetUrl(base.url()), maxRequests);
-        EnumSet<RequestPolicy.Permission> permissions = EnumSet.of(
-                RequestPolicy.Permission.OAST,
-                RequestPolicy.Permission.TIME_DELAY,
-                RequestPolicy.Permission.UPLOAD,
-                RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT);
-        if (allowMutating) {
-            permissions.add(RequestPolicy.Permission.UNSAFE_HTTP_METHOD);
-            permissions.add(RequestPolicy.Permission.STATE_CHANGING);
-        }
-        ActiveRequestGateway gateway = new ActiveRequestGateway(
-                new RequestPolicy(api.scope()::isInScope, permissions), api.http()::sendRequest);
-        try {
-            return test(base, run, gateway);
-        } finally {
-            if (run.isRunning()) run.complete();
-        }
-    }
-
     /**
      * Executes probes inside a caller-owned run. Every request in every target handled by the caller
      * consumes the same run-scoped budget through {@code gateway}; no private per-target budget exists.
@@ -218,7 +186,7 @@ final class ActiveTestEngine {
                 if (!budgetExhausted()) runProbe("ssti", () -> testSsti(base, point, findings));
                 if (!budgetExhausted()) runProbe("ssrf", Set.of(RequestPolicy.Permission.OAST),
                         () -> testSsrf(base, point, findings));
-                if (!budgetExhausted()) runProbe("blind-xss", Set.of(RequestPolicy.Permission.OAST),
+                if (!budgetExhausted()) runProbe("blind-xss", Set.of(RequestPolicy.Permission.OAST, RequestPolicy.Permission.PERSISTENT_PAYLOAD),
                         () -> testBlindXss(base, point, findings));
                 if (!budgetExhausted()) runProbe("command-injection", Set.of(RequestPolicy.Permission.OAST),
                         () -> testCommandInjection(base, point, findings));
@@ -382,16 +350,25 @@ final class ActiveTestEngine {
         }
         if (budgetExhausted()) return budgetUsed() - before;
 
-        long baselineMillis = timeRequest(base, point, point.baseValue());
-        if (baselineMillis < 0) return budgetUsed() - before;
+        List<Long> baselineTimings = timingSamples(base, point, point.baseValue(), SQLI_TIMING_SAMPLES);
+        if (baselineTimings.size() < SQLI_TIMING_SAMPLES) return budgetUsed() - before;
         for (String payload : SQLI_TIME_PAYLOADS) {
             if (budgetExhausted()) break;
-            long payloadMillis = timeRequest(base, point, payload);
-            if (payloadMillis < 0) break;
-            if (looksTimeBased(baselineMillis, payloadMillis, SQLI_TIME_DELAY_SECONDS)) {
+            List<Long> payloadTimings = timingSamples(base, point, payload, SQLI_TIMING_SAMPLES);
+            if (payloadTimings.size() < SQLI_TIMING_SAMPLES) break;
+
+            ResponseComparator.TimingAnalysis timing = ResponseComparator.analyzeTiming(
+                    baselineTimings, payloadTimings, SQLI_TIME_DELAY_SECONDS * 1000L);
+            if (timing.delayed()) {
                 out.add(new ActiveFinding("HIGH", "SQLi", point.label(),
-                        "Time-based blind: response time increased by ~" + SQLI_TIME_DELAY_SECONDS
-                                + "s in response to payload " + payload, VerificationState.CANDIDATE, base.url()));
+                        "Repeated time-based blind signal for payload " + payload
+                                + ": baseline median=" + timing.baselineMedianMillis() + "ms"
+                                + " (MAD=" + timing.baselineMadMillis() + "ms), payload median="
+                                + timing.payloadMedianMillis() + "ms (MAD=" + timing.payloadMadMillis()
+                                + "ms), delta=" + timing.medianDeltaMillis() + "ms across "
+                                + timing.consistentDelayedSamples() + "/" + payloadTimings.size()
+                                + " consistently delayed samples",
+                        VerificationState.REPRODUCED, base.url()));
                 break;
             }
         }
@@ -454,6 +431,16 @@ final class ActiveTestEngine {
         sendMutated(base, point, value, Set.of(RequestPolicy.Permission.TIME_DELAY));
         return Boolean.TRUE.equals(lastRequestDispatched.get())
                 ? System.currentTimeMillis() - start : -1;
+    }
+
+    private List<Long> timingSamples(HttpRequest base, InsertionPoint point, String value, int count) {
+        List<Long> samples = new ArrayList<>(count);
+        for (int i = 0; i < count && !budgetExhausted(); i++) {
+            long millis = timeRequest(base, point, value);
+            if (millis < 0) break;
+            samples.add(millis);
+        }
+        return samples;
     }
 
     /**
@@ -856,11 +843,7 @@ final class ActiveTestEngine {
 
     /** Two response bodies are "the same page" if identical, or within ~1% (min 5 chars) in length. */
     static boolean closeEnough(String a, String b) {
-        if (a == null || b == null) return false;
-        if (a.equals(b)) return true;
-        int diff = Math.abs(a.length() - b.length());
-        int tolerance = Math.max(5, Math.max(a.length(), b.length()) / 100);
-        return diff <= tolerance;
+        return ResponseComparator.samePage(a, b);
     }
 
     /** Time-based blind confirmation: the payload response took at least ~{@code delaySeconds} longer. */
