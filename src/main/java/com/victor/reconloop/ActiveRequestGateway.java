@@ -18,6 +18,15 @@ final class ActiveRequestGateway {
         HttpRequestResponse send(HttpRequest request) throws Exception;
     }
 
+    /** Production native transport prepares a numeric destination before any token is reserved. */
+    interface PreparedSender extends Sender {
+        Dispatch prepare(HttpRequest request) throws Exception;
+        @Override default HttpRequestResponse send(HttpRequest request) {
+            throw new IllegalStateException("destination preparation is mandatory");
+        }
+    }
+    @FunctionalInterface interface Dispatch { HttpRequestResponse send() throws Exception; }
+
     record Result(RequestPolicy.Decision decision, HttpRequestResponse response, Exception error, boolean dispatched) {
         static Result denied(RequestPolicy.Decision decision) {
             return new Result(decision, null, null, false);
@@ -34,7 +43,26 @@ final class ActiveRequestGateway {
 
     Result send(ScanRun run, RequestPlan plan, HttpRequest request) {
         if (plan == null || !plan.matches(request)) return invalidPlan();
+        if (Thread.currentThread().isInterrupted()) return Result.denied(RequestPolicy.Decision.deny(
+                RequestPolicy.DecisionCode.CANCELLED, "worker interrupted before destination preparation"));
         RequestPolicy.PlannedRequest planned = plan.policyRequest();
+        Dispatch dispatch = null;
+        if (sender instanceof PreparedSender prepared) {
+            RequestPolicy.Decision initial = policy.evaluate(run, planned);
+            if (!initial.allowed()) return Result.denied(initial);
+            if (run.requestBudget().exhausted()) return Result.denied(admit(run, policy, planned));
+            try {
+                dispatch = prepared.prepare(request);
+                if (dispatch == null) throw new IllegalStateException("missing prepared dispatch");
+            } catch (DestinationGuard.Rejected e) {
+                return Result.denied(RequestPolicy.Decision.deny(e.code, e.getMessage()));
+            } catch (Exception e) {
+                return Result.denied(RequestPolicy.Decision.deny(RequestPolicy.DecisionCode.DESTINATION_BINDING_FAILED,
+                        "destination preparation failed closed"));
+            }
+        }
+        if (Thread.currentThread().isInterrupted()) return Result.denied(RequestPolicy.Decision.deny(
+                RequestPolicy.DecisionCode.CANCELLED, "worker interrupted before admission"));
         RequestPolicy.Decision decision = admit(run, policy, planned);
         if (!decision.allowed()) return Result.denied(decision);
         // Montoya HttpRequest transformations are immutable. Check again after policy callbacks and
@@ -46,7 +74,7 @@ final class ActiveRequestGateway {
             return Result.denied(RequestPolicy.Decision.deny(code, "run stopped before dispatch"));
         }
         try {
-            return new Result(decision, sender.send(request), null, true);
+            return new Result(decision, dispatch == null ? sender.send(request) : dispatch.send(), null, true);
         } catch (Exception e) {
             return new Result(decision, null, e, true);
         }

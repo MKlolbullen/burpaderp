@@ -414,8 +414,11 @@ the checkout and its metadata URL; it performs no target download.
 ## Run governance & the `reconctl` sidecar
 
 Active behaviour is governed by an explicit control plane: a per-run request policy and hard request
-**budget** gate every native Montoya target dispatch. Each active run carries a scope snapshot,
-and findings carry an explicit verification state rather than a loose "confirmed" flag. An optional typed Go **`reconctl`** sidecar
+**budget** gate every native Montoya target dispatch. Each active run carries a scope snapshot.
+Native sends now resolve/validate DNS answers and bind a numeric Montoya service with original SNI
+and message bytes; Burp physical-peer verification remains a release gate. See the
+[DNS/API contract and runtime limits](docs/RUN_GOVERNANCE.md#dns-and-numeric-service-binding).
+Findings carry an explicit verification state rather than a loose "confirmed" flag. An optional typed Go **`reconctl`** sidecar
 blocks unsupported target-HTTP producers even with opt-in flags, while retaining provider/DNS
 profiles, explicit opt-in TCP scans and typed input/output contracts; Burp **re-checks scope** when importing its JSONL, and importing never launches a tool or
 sends a request. See **[run governance and the sidecar handoff](docs/RUN_GOVERNANCE.md)** and the

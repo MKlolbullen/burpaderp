@@ -13,7 +13,7 @@ final class RequestPreview {
                   boolean truncated, boolean branchDependent, int runtimeTemplates, int alreadyUsed) {
         String render() {
             StringBuilder text = new StringBuilder("Dry run — no requests sent\n");
-            text.append("Policy/quota estimate assuming the selected workflow is enabled. Scope, permissions and budgets are checked again at dispatch.\n")
+            text.append("Policy/quota estimate assuming the selected workflow is enabled. Scope, permissions and budgets are checked again at dispatch.\nDNS answers and numeric-service binding are not verified by this preview; they can still deny dispatch.\n")
                     .append("Limits: global ").append(limits.global()).append(", host ").append(limits.perHost())
                     .append(", endpoint ").append(limits.perEndpoint()).append(", probe ").append(limits.perProbe()).append('\n')
                     .append("Already used: ").append(alreadyUsed).append("; global remaining: ").append(Math.max(0, limits.global() - alreadyUsed)).append('\n')

@@ -18,7 +18,7 @@ public class NativeRiskPermissionIntegrationTest {
                                 call.getName().equals("toString") ? "callback.example.test" : null) : null));
         ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), 4096);
         engine.test(request, run, new ActiveRequestGateway(new RequestPolicy(url -> true, grants),
-                new MontoyaTargetTransport(fake.api)));
+                fake.transport()));
         assertTrue(fake.errors.toString(), fake.errors.isEmpty());
         return run;
     }

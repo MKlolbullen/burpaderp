@@ -103,7 +103,7 @@ public class RequestPlanIntegrationTest {
             RequestPlan plan = RequestPlan.safe(changing,"test");
             ActiveRequestGateway gateway = new ActiveRequestGateway(RequestPolicy.safeDefault(url -> {
                 current.set(original.withHeader("Authorization","changed")); return true;
-            }), new MontoyaTargetTransport(fake.api));
+            }), fake.transport());
             ScanRun run = run();
             assertInvalid(gateway.send(run,plan,changing));
             assertTrue(fake.sent.isEmpty()); assertEquals(1,run.requestBudget().used());
@@ -122,7 +122,7 @@ public class RequestPlanIntegrationTest {
             assertEquals(RequestPolicy.DecisionCode.MISSING_PERMISSION,denied.decision().code());
             var outOfScope = new ActiveRequestGateway(new RequestPolicy(url -> false,
                     Set.of(RequestPolicy.Permission.UNSAFE_HTTP_METHOD,RequestPolicy.Permission.STATE_CHANGING)),
-                    new MontoyaTargetTransport(fake.api)).send(run,step.plan(),step.request());
+                    fake.transport()).send(run,step.plan(),step.request());
             assertEquals(RequestPolicy.DecisionCode.OUT_OF_SCOPE,outOfScope.decision().code());
             assertEquals(0,run.requestBudget().used()); assertTrue(fake.sent.isEmpty());
         }
@@ -130,7 +130,7 @@ public class RequestPlanIntegrationTest {
 
     private static ScanRun run() { return ScanRun.begin(ScanProfile.ACTIVE_SAFE,ScopeSnapshot.empty(),10); }
     private static ActiveRequestGateway gateway(FakeMontoya fake) {
-        return new ActiveRequestGateway(RequestPolicy.safeDefault(url -> true),new MontoyaTargetTransport(fake.api));
+        return new ActiveRequestGateway(RequestPolicy.safeDefault(url -> true),fake.transport());
     }
     private static void assertInvalid(ActiveRequestGateway.Result result) {
         assertFalse(result.dispatched()); assertEquals(RequestPolicy.DecisionCode.INVALID_REQUEST,result.decision().code());
@@ -138,6 +138,7 @@ public class RequestPlanIntegrationTest {
     private static HttpRequest override(HttpRequest request,String name,Object value) {
         return FakeMontoya.proxy(HttpRequest.class,(self,method,args) -> {
             if (method.getName().equals(name)) return value;
+            if (method.getName().equals("withService")) return override(request.withService((HttpService) args[0]), name, value);
             try { return method.invoke(request,args); } catch (InvocationTargetException e) { throw e.getCause(); }
         });
     }

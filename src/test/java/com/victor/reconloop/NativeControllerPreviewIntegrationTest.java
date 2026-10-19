@@ -61,7 +61,7 @@ public class NativeControllerPreviewIntegrationTest {
                 assertTrue(fake.sent.isEmpty());
                 controller.setActiveTestsEnabled(true); controller.runJwtAttacks(); executor.runAll();
                 assertEquals(expected.size(),fake.sent.size());
-                for (int i = 0; i < expected.size(); i++) assertTrue(expected.get(i).plan().matches(fake.sent.get(i)));
+                for (int i = 0; i < expected.size(); i++) assertTrue(expected.get(i).plan().matches(fake.sent.get(i).withService(expected.get(i).request().httpService())));
                 assertTrue(fake.errors.toString(),fake.errors.isEmpty());
             } finally { controller.shutdown(); }
         }
@@ -84,7 +84,7 @@ public class NativeControllerPreviewIntegrationTest {
                 NativeRequestStep expected = new AccessControlEngine(headers,false).plan(safe);
                 assertNull(expected.request().headerValue("Cookie")); assertEquals("ALT_SECRET",expected.request().headerValue("Authorization"));
                 controller.setActiveTestsEnabled(true); controller.runAccessControlTest(headers,false); executor.runAll();
-                assertEquals(1,fake.sent.size()); assertTrue(expected.plan().matches(fake.sent.getFirst()));
+                assertEquals(1,fake.sent.size()); assertTrue(expected.plan().matches(fake.sent.getFirst().withService(expected.request().httpService())));
             } finally { controller.shutdown(); }
         }
     }
@@ -101,7 +101,7 @@ public class NativeControllerPreviewIntegrationTest {
                 assertTrue(preview.contains("HTTP fallback")); assertTrue(preview.contains("not a worst-case bound")); assertTrue(fake.sent.isEmpty());
                 fake.responder = request -> FakeMontoya.response(200,"There isn't a GitHub Pages site here.",Map.of());
                 controller.setActiveTestsEnabled(true); controller.runSubdomainTakeoverCheck(); executor.runAll();
-                assertEquals(1,fake.sent.size()); assertTrue(expected.getFirst().plan().matches(fake.sent.getFirst()));
+                assertEquals(1,fake.sent.size()); assertTrue(expected.getFirst().plan().matches(fake.sent.getFirst().withService(expected.getFirst().request().httpService())));
             } finally { controller.shutdown(); }
         }
     }
