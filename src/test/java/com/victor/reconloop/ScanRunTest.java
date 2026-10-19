@@ -101,4 +101,16 @@ public class ScanRunTest {
         assertEquals(7, limits.perEndpoint());
         assertEquals(7, limits.perProbe());
     }
+    @Test
+    public void explicitDefaultPortsAndQueryMutationsUseSameEndpointQuota() {
+        ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(),
+                new ScanRun.RequestLimits(10, 10, 1, 10));
+        assertTrue(run.tryAcquire(RequestPolicy.PlannedRequest.safe(
+                "GET", "https://API.example.test/users?id=1", "test")).allowed());
+        ScanRun.Allocation denied = run.tryAcquire(RequestPolicy.PlannedRequest.safe(
+                "GET", "https://api.example.test:443/users?id=2", "test"));
+        assertEquals(ScanRun.Quota.ENDPOINT, denied.exhaustedQuota());
+        assertEquals(1, run.requestBudget().used());
+    }
+
 }

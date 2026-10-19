@@ -39,6 +39,13 @@ final class ReconPanel extends JPanel {
     private ReconModel.AiFeedTableModel aiFeedModel;
     private JLabel aiFeedUsage;
 
+    private void showRequestPreview(String preview) {
+        JTextArea text = new JTextArea(preview, 24, 100);
+        text.setEditable(false);
+        text.setCaretPosition(0);
+        JOptionPane.showMessageDialog(this, new JScrollPane(text), "Request preview", JOptionPane.INFORMATION_MESSAGE);
+    }
+
     ReconPanel(MontoyaApi api, ReconController controller,
                ReconModel.FindingTableModel findingModel,
                ReconModel.DiscoveryTableModel discoveryModel,
@@ -111,6 +118,14 @@ final class ReconPanel extends JPanel {
         JCheckBox activeEnabled = new JCheckBox("Enable active tests (fires payloads — authorized targets only)", false);
         JCheckBox mutatingActive = new JCheckBox("Allow mutating active replays (POST/PUT/PATCH/DELETE)", false);
         mutatingActive.setToolTipText("Default active tests replay only GET/HEAD/OPTIONS. Enable only when state-changing requests are explicitly authorized.");
+        JCheckBox oastActive = new JCheckBox("Allow OAST / Collaborator callbacks", false);
+        JCheckBox timeDelayActive = new JCheckBox("Allow time-delay probes", false);
+        JCheckBox uploadActive = new JCheckBox("Allow upload mutations", false);
+        JCheckBox authLockoutActive = new JCheckBox("Allow auth / lockout probes", false);
+        oastActive.setToolTipText("Required before SSRF/blind-XSS/CMDi/host-header and other Collaborator-backed payloads can leave Burp.");
+        timeDelayActive.setToolTipText("Required before SLEEP/PG_SLEEP/WAITFOR-style timing payloads are dispatched.");
+        uploadActive.setToolTipText("Required before multipart upload filenames/bodies are actively replayed.");
+        authLockoutActive.setToolTipText("Required before rate-limit, JWT forgery, or alternate-identity access-control replays are dispatched.");
         JSpinner activeBudget = new JSpinner(new SpinnerNumberModel(60, 1, 5000, 10));
         JSpinner activeHostBudget = new JSpinner(new SpinnerNumberModel(60, 1, 5000, 10));
         JSpinner activeEndpointBudget = new JSpinner(new SpinnerNumberModel(20, 1, 5000, 5));
@@ -122,9 +137,12 @@ final class ReconPanel extends JPanel {
         JButton ctButton = new JButton("Enumerate (crt.sh)");
         JTextField paramUrl = new JTextField(22);
         JButton paramButton = new JButton("Discover params (Arjun)");
+        JButton paramPreview = new JButton("Preview params…");
         JTextField graphqlUrl = new JTextField(22);
         JButton graphqlButton = new JButton("Introspect GraphQL");
         JButton graphqlFuzzButton = new JButton("Fuzz GraphQL");
+        JButton graphqlPreview = new JButton("Preview introspection…");
+        JButton graphqlFuzzPreview = new JButton("Preview GraphQL fuzz…");
         JButton runActive = new JButton("Run active tests on in-scope site map");
         JButton runJwt = new JButton("Run JWT alg:none test");
         JButton runTakeover = new JButton("Subdomain takeover check");
@@ -149,15 +167,27 @@ final class ReconPanel extends JPanel {
         quotaRow.add(new JLabel("(effective values are capped by the global run budget)"));
         activePanel.add(quotaRow);
 
+        JPanel riskRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        riskRow.add(new JLabel("Risk permissions:"));
+        riskRow.add(oastActive);
+        riskRow.add(timeDelayActive);
+        riskRow.add(uploadActive);
+        riskRow.add(authLockoutActive);
+        riskRow.add(new JLabel("(persistent/destructive payloads stay disabled)"));
+        activePanel.add(riskRow);
+
         JPanel activeRow2 = new JPanel(new FlowLayout(FlowLayout.LEFT));
         activeRow2.add(new JLabel("crt.sh domain:")); activeRow2.add(ctDomain); activeRow2.add(ctButton);
         activeRow2.add(new JLabel("Param-discovery URL:")); activeRow2.add(paramUrl); activeRow2.add(paramButton);
+        activeRow2.add(paramPreview);
         activeRow2.add(new JLabel("Param wordlist: " + controller.paramWordlistSize()));
         activePanel.add(activeRow2);
 
         JPanel activeRow3 = new JPanel(new FlowLayout(FlowLayout.LEFT));
         activeRow3.add(new JLabel("GraphQL URL:")); activeRow3.add(graphqlUrl); activeRow3.add(graphqlButton);
         activeRow3.add(graphqlFuzzButton);
+        activeRow3.add(graphqlPreview);
+        activeRow3.add(graphqlFuzzPreview);
         activePanel.add(activeRow3);
 
         JPanel activeRow4 = new JPanel(new FlowLayout(FlowLayout.LEFT));
@@ -292,6 +322,10 @@ final class ReconPanel extends JPanel {
         reflections.addActionListener(e -> controller.setDetectReflections(reflections.isSelected()));
         activeEnabled.addActionListener(e -> controller.setActiveTestsEnabled(activeEnabled.isSelected()));
         mutatingActive.addActionListener(e -> controller.setMutatingActiveRequests(mutatingActive.isSelected()));
+        oastActive.addActionListener(e -> controller.setOastActiveRequests(oastActive.isSelected()));
+        timeDelayActive.addActionListener(e -> controller.setTimeDelayActiveRequests(timeDelayActive.isSelected()));
+        uploadActive.addActionListener(e -> controller.setUploadActiveRequests(uploadActive.isSelected()));
+        authLockoutActive.addActionListener(e -> controller.setAuthLockoutActiveRequests(authLockoutActive.isSelected()));
         activeBudget.addChangeListener(e -> controller.setActiveRequestBudget((Integer) activeBudget.getValue()));
         activeHostBudget.addChangeListener(e -> controller.setActivePerHostBudget((Integer) activeHostBudget.getValue()));
         activeEndpointBudget.addChangeListener(e -> controller.setActivePerEndpointBudget((Integer) activeEndpointBudget.getValue()));
@@ -299,6 +333,9 @@ final class ReconPanel extends JPanel {
         osintButton.addActionListener(e -> controller.lookupPassiveOsint(osintDomain.getText()));
         ctButton.addActionListener(e -> controller.enumerateSubdomains(ctDomain.getText()));
         paramButton.addActionListener(e -> controller.discoverParameters(paramUrl.getText()));
+        paramPreview.addActionListener(e -> showRequestPreview(controller.previewRequests(paramUrl.getText(), ReconController.PreviewAction.PARAMETERS)));
+        graphqlPreview.addActionListener(e -> showRequestPreview(controller.previewRequests(graphqlUrl.getText(), ReconController.PreviewAction.GRAPHQL_INTROSPECTION)));
+        graphqlFuzzPreview.addActionListener(e -> showRequestPreview(controller.previewRequests(graphqlUrl.getText(), ReconController.PreviewAction.GRAPHQL_FUZZ)));
         graphqlButton.addActionListener(e -> controller.introspectGraphql(graphqlUrl.getText()));
         graphqlFuzzButton.addActionListener(e -> controller.fuzzGraphql(graphqlUrl.getText()));
         runActive.addActionListener(e -> controller.runActiveTests());
