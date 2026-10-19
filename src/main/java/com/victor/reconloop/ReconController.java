@@ -162,9 +162,18 @@ final class ReconController implements HttpHandler {
                     ReconModel.ActiveTableModel activeModel,
                     ReconModel.AssetTableModel assetModel,
                     ExecutorService activeWorker, boolean startBackgroundWorkers) {
+        this(api, findingModel, discoveryModel, parameterModel, reflectionModel, activeModel, assetModel,
+                activeWorker, startBackgroundWorkers, DestinationGuard.system());
+    }
+
+    ReconController(MontoyaApi api, ReconModel.FindingTableModel findingModel,
+                    ReconModel.DiscoveryTableModel discoveryModel, ReconModel.ParameterTableModel parameterModel,
+                    ReconModel.ReflectionTableModel reflectionModel, ReconModel.ActiveTableModel activeModel,
+                    ReconModel.AssetTableModel assetModel, ExecutorService activeWorker, boolean startBackgroundWorkers,
+                    DestinationGuard destinations) {
         this.activeWorker = Objects.requireNonNull(activeWorker, "activeWorker");
         this.api = api;
-        this.targetTransport = new MontoyaTargetTransport(api);
+        this.targetTransport = new MontoyaTargetTransport(api, destinations);
         this.reporter = new IssueReporter(api);
         this.findingModel = findingModel;
         this.discoveryModel = discoveryModel;

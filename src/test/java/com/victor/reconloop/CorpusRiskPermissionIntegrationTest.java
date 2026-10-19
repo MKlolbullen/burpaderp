@@ -28,7 +28,7 @@ public class CorpusRiskPermissionIntegrationTest {
                 fake.sent.clear();
                 ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), 2);
                 engine.fuzz(request, request.parameters().getFirst(), Set.of(PayloadEncoder.Encoding.BASE64), 2,
-                        run, new ActiveRequestGateway(new RequestPolicy(url -> true, grants), new MontoyaTargetTransport(fake.api)));
+                        run, new ActiveRequestGateway(new RequestPolicy(url -> true, grants), fake.transport()));
                 int expected = grants.equals(both) ? 2 : 0;
                 assertEquals(expected, fake.sent.size()); assertEquals(expected, run.requestBudget().used());
                 if (expected > 0) {
@@ -39,7 +39,7 @@ public class CorpusRiskPermissionIntegrationTest {
             fake.sent.clear();
             ScanRun one = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), 1);
             engine.fuzz(request, request.parameters().getFirst(), Set.of(PayloadEncoder.Encoding.BASE64), 2,
-                    one, new ActiveRequestGateway(new RequestPolicy(url -> true, both), new MontoyaTargetTransport(fake.api)));
+                    one, new ActiveRequestGateway(new RequestPolicy(url -> true, both), fake.transport()));
             assertTrue("A timing pair cannot spend the last single token", fake.sent.isEmpty());
             assertTrue(fake.errors.toString(), fake.errors.isEmpty());
         }

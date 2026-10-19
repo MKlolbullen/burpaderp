@@ -35,6 +35,8 @@ final class RequestPolicy {
         LOCAL_BUDGET_EXHAUSTED,
         OUT_OF_SCOPE,
         PROTECTED_DESTINATION,
+        DESTINATION_UNAVAILABLE,
+        DESTINATION_BINDING_FAILED,
         MISSING_PERMISSION,
         BUDGET_EXHAUSTED,
         HOST_BUDGET_EXHAUSTED,
@@ -85,9 +87,6 @@ final class RequestPolicy {
     }
 
     private static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "OPTIONS");
-    private static final Set<String> METADATA_HOSTS = Set.of(
-            "metadata.google.internal", "metadata.google", "metadata.aws.internal", "instance-data");
-
     private final Predicate<String> inScope;
     private final Set<Permission> grantedPermissions;
 
@@ -130,7 +129,10 @@ final class RequestPolicy {
                 || host == null || host.isBlank()) {
             return Decision.deny(DecisionCode.INVALID_REQUEST, "only absolute HTTP(S) URLs are allowed");
         }
-        if (isProtectedDestination(host)) {
+        DestinationAddress.Host destination = DestinationAddress.inspect(host);
+        if (destination.kind() == DestinationAddress.Kind.INVALID)
+            return Decision.deny(DecisionCode.INVALID_REQUEST, "invalid or ambiguous destination");
+        if (destination.kind() == DestinationAddress.Kind.PROTECTED) {
             return Decision.deny(DecisionCode.PROTECTED_DESTINATION, "destination is loopback, private, link-local, or metadata");
         }
         try {
@@ -147,35 +149,4 @@ final class RequestPolicy {
         return Decision.allow();
     }
 
-    private static boolean isProtectedDestination(String rawHost) {
-        String host = rawHost == null ? "" : rawHost.strip().toLowerCase(Locale.ROOT);
-        if (host.startsWith("[") && host.endsWith("]") && host.length() > 2) {
-            host = host.substring(1, host.length() - 1);
-        }
-        if (host.isEmpty() || host.equals("localhost") || host.endsWith(".localhost") || METADATA_HOSTS.contains(host)) return true;
-        if (host.indexOf(':') >= 0 && (host.equals("::1") || host.equals("::") || host.startsWith("fe8")
-                || host.startsWith("fe9") || host.startsWith("fea") || host.startsWith("feb")
-                || host.startsWith("fc") || host.startsWith("fd") || host.equals("fd00:ec2::254"))) return true;
-        return isProtectedIpv4(host);
-    }
-
-    private static boolean isProtectedIpv4(String host) {
-        String[] parts = host.split("\\.", -1);
-        if (parts.length != 4) return false;
-        int[] octets = new int[4];
-        for (int i = 0; i < parts.length; i++) {
-            try {
-                if (parts[i].isEmpty() || (parts[i].length() > 1 && parts[i].startsWith("+"))) return false;
-                octets[i] = Integer.parseInt(parts[i]);
-                if (octets[i] < 0 || octets[i] > 255) return false;
-            } catch (NumberFormatException e) {
-                return false;
-            }
-        }
-        int first = octets[0], second = octets[1];
-        return first == 0 || first == 10 || first == 127
-                || (first == 172 && second >= 16 && second <= 31)
-                || (first == 192 && second == 168)
-                || (first == 169 && second == 254);
-    }
 }

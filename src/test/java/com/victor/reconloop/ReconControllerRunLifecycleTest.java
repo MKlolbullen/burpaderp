@@ -13,7 +13,7 @@ public class ReconControllerRunLifecycleTest {
         return new ReconController(fake.api, new ReconModel.FindingTableModel(),
                 new ReconModel.DiscoveryTableModel(), new ReconModel.ParameterTableModel(),
                 new ReconModel.ReflectionTableModel(), new ReconModel.ActiveTableModel(),
-                new ReconModel.AssetTableModel(), executor, false);
+                new ReconModel.AssetTableModel(), executor, false, fake.destinations());
     }
 
     @Test public void disablingDuringEngineLoopStopsTheNextSend() throws Exception {

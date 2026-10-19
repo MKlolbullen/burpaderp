@@ -31,6 +31,8 @@ import java.util.function.Predicate;
 final class FakeMontoya implements AutoCloseable {
     private final MontoyaObjectFactory previous = ObjectFactoryLocator.FACTORY;
     final List<HttpRequest> sent = new CopyOnWriteArrayList<>();
+    final List<String> serverNames = new CopyOnWriteArrayList<>();
+    private final Map<RequestOptions, String> sni = Collections.synchronizedMap(new IdentityHashMap<>());
     final List<RedirectionMode> redirectModes = new CopyOnWriteArrayList<>();
     final List<HttpRequestResponse> siteMap = new CopyOnWriteArrayList<>();
     final List<String> scopeChanges = new CopyOnWriteArrayList<>();
@@ -44,6 +46,12 @@ final class FakeMontoya implements AutoCloseable {
 
     FakeMontoya() {
         ObjectFactoryLocator.FACTORY = proxy(MontoyaObjectFactory.class, (self, method, args) -> switch (method.getName()) {
+            case "httpService" -> proxy(HttpService.class, (service, call, values) -> switch (call.getName()) {
+                case "host" -> (String) args[0];
+                case "port" -> (int) args[1];
+                case "secure" -> (boolean) args[2];
+                default -> empty(call.getReturnType());
+            });
             case "httpRequestFromUrl" -> request((String) args[0]);
             case "httpRequest" -> parseRequest((HttpService) args[0], (String) args[1]);
             case "parameter", "urlParameter", "bodyParameter", "cookieParameter" -> parameter(
@@ -53,6 +61,7 @@ final class FakeMontoya implements AutoCloseable {
             case "httpRequestResponse" -> pair((HttpRequest) args[0], (HttpResponse) args[1]);
             case "requestOptions" -> proxy(RequestOptions.class, (value, call, parameters) -> {
                 if (call.getName().equals("withRedirectionMode")) options.put((RequestOptions) value, (RedirectionMode) parameters[0]);
+                if (call.getName().equals("withServerNameIndicator")) sni.put((RequestOptions) value, (String) parameters[0]);
                 return value;
             });
             default -> empty(method.getReturnType());
@@ -70,6 +79,7 @@ final class FakeMontoya implements AutoCloseable {
                 if (mode != RedirectionMode.NEVER) throw new AssertionError("Automatic redirect escaped the gate");
                 sent.add(request);
                 redirectModes.add(mode);
+                serverNames.add(sni.getOrDefault(supplied, ""));
                 onSend.accept(request);
                 return pair(request, responder.apply(request));
             });
@@ -92,6 +102,11 @@ final class FakeMontoya implements AutoCloseable {
             };
         });
     }
+
+    DestinationGuard.Resolver resolver = host -> List.of("93.184.216.34");
+    final List<String> dnsLookups = new CopyOnWriteArrayList<>();
+    DestinationGuard destinations() { return new DestinationGuard(host -> { dnsLookups.add(host); return resolver.resolve(host); }); }
+    MontoyaTargetTransport transport() { return new MontoyaTargetTransport(api, destinations()); }
 
     HttpRequest request(String url) {
         Request state = new Request(url);

@@ -181,7 +181,7 @@ public class NativeProbePreviewIntegrationTest {
             var report = RequestPreview.inspect(run,policy,List.of(step));
             assertEquals(RequestPolicy.DecisionCode.PENDING_BINDING,report.rows().getFirst().decision());
             assertEquals(0,scopeChecks.get()); assertEquals(0,report.admitted());
-            var gateway = new ActiveRequestGateway(policy,new MontoyaTargetTransport(fake.api));
+            var gateway = new ActiveRequestGateway(policy,fake.transport());
             assertEquals(RequestPolicy.DecisionCode.INVALID_REQUEST,gateway.send(run,step.plan(),step.request()).decision().code());
             var rebound = RequestPlan.bind(step.request(),step.metadata());
             assertEquals(RequestPolicy.DecisionCode.OUT_OF_SCOPE,gateway.send(run,rebound,step.request()).decision().code());
@@ -221,7 +221,7 @@ public class NativeProbePreviewIntegrationTest {
     }
     static ScanRun run(int cap) { return ScanRun.begin(ScanProfile.ACTIVE_SAFE,ScopeSnapshot.empty(),cap); }
     static ActiveRequestGateway gateway(FakeMontoya fake,Set<RequestPolicy.Permission> grants) {
-        return new ActiveRequestGateway(new RequestPolicy(url -> true,grants),new MontoyaTargetTransport(fake.api));
+        return new ActiveRequestGateway(new RequestPolicy(url -> true,grants),fake.transport());
     }
     static List<NativeRequestStep> materialize(Iterable<NativeRequestStep> plan) {
         List<NativeRequestStep> result = new ArrayList<>(); plan.forEach(result::add); return result;

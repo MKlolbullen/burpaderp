@@ -315,10 +315,8 @@ final class RegexHound {
     }
 
     private static boolean validIpv6(String value) {
-        try {
-            return java.net.InetAddress.getByName(value).getHostAddress().contains(":");
-        } catch (Exception e) {
-            return false;
-        }
+        DestinationAddress.Host address = DestinationAddress.inspect(value);
+        return (address.kind() == DestinationAddress.Kind.PUBLIC || address.kind() == DestinationAddress.Kind.PROTECTED)
+                && address.canonical().contains(":");
     }
 }
