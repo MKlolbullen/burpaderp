@@ -30,4 +30,24 @@ public class VerificationStateTest {
         assertEquals(VerificationState.REPRODUCED, finding.verificationState());
         assertTrue(finding.confirmed());
     }
+
+    @Test
+    public void evidenceLifecycleOnlyReportsReproducedOrStronger() {
+        assertFalse(VerificationState.SIGNAL.isReportable());
+        assertFalse(VerificationState.CANDIDATE.isReportable());
+        assertTrue(VerificationState.REPRODUCED.isReportable());
+        assertTrue(VerificationState.CONFIRMED.isReportable());
+        assertTrue(VerificationState.EXPLOITABLE.isReportable());
+        assertFalse(VerificationState.REJECTED.isReportable());
+    }
+
+    @Test
+    public void explicitCandidateDoesNotMasqueradeAsConfirmed() {
+        ActiveTestEngine.ActiveFinding finding = new ActiveTestEngine.ActiveFinding(
+                "MEDIUM", "XSS", "q", "metacharacters reflected",
+                VerificationState.CANDIDATE, "https://example.test/");
+
+        assertEquals(VerificationState.CANDIDATE, finding.verificationState());
+        assertFalse(finding.confirmed());
+    }
 }

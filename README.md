@@ -156,7 +156,9 @@ traffic. It is **disabled by default**, scope-checked per request, throttled, an
 hierarchical run quotas. High-impact behaviours are separately fail-closed: Collaborator/OAST,
 time-delay payloads, upload mutations, authentication/lockout replays, and non-safe HTTP methods each
 require their own operator opt-in. Persistent/destructive corpus entries remain blocked. Enable only
-the permissions your rules of engagement actually authorize.
+the permissions your rules of engagement actually authorize. Changing a permission or disabling active
+tests cancels current native runs and invalidates queued jobs. Blind-XSS beacons additionally require
+persistent-payload permission and remain blocked until a separate authorization path exists.
 
 Every parameter-level probe below injects through a shared **insertion-point model** (`InsertionPoint`)
 rather than query/body parameters alone — so SQLi, NoSQLi, SSTI, path traversal, reflected/blind XSS,
@@ -346,18 +348,27 @@ Whatever you run here also shows up in the [AI feed](#ai-feed--watch-the-models-
 
 ![Reporting — where findings surface](docs/img/reporting.svg)
 
+Active results follow an explicit evidence lifecycle: **signal → candidate → reproduced → confirmed →
+exploitable** (or rejected). Signals and candidates stay visible in the Active tests table for analyst
+follow-up but are not promoted to native Burp issues. Reproduced-or-stronger findings are reportable;
+confirmed/exploitable evidence receives stronger issue confidence. Reflected metacharacters and one
+timing anomaly are candidates, absence of a rate-limit signal is only a signal, while evaluated SSTI,
+CRLF response-header injection, file-read canaries, and correlated Collaborator callbacks are
+confirmed evidence.
+
 Findings surface in several places:
 
 - the Recon Hound **suite tab** tables — **Findings**, **Discovered resources**, **Insertion points**,
   **XSS reflections**, **Active tests**, **Hosts / IPs**, **XSS vector library**, plus the AI views
   (**AI analysis**, **Agent team**, **AI feed**, **Nuclei templates (AI)**);
-- Burp's **Dashboard / Target issue list** as native audit issues — **every** finding is filed here
-  through a single deduplicated reporter, so results are in Burp's own reports and never live only in
-  the plugin tabs. This covers secrets, disclosure signals, reflected-parameter/XSS candidates,
+- Burp's **Dashboard / Target issue list** as native audit issues — reportable findings are filed
+  through a single deduplicated reporter; active signals/candidates deliberately remain in the plugin
+  until stronger evidence exists. This covers secrets, disclosure signals, reflected-parameter/XSS candidates,
   web-hygiene (CORS/CSP/JWT/cookie/CSRF), data-exposure/mass-assignment, OAuth/OIDC & SAML flaws,
   debug/BFLA candidates, exposed source maps and OpenAPI/GraphQL surface, gf-pattern hits,
-  broken-access-control/IDOR, confirmed active findings (SQLi, SSRF/SSTI/XSS incl. Collaborator OOB,
-  CORS, rate-limit, file-upload), vulnerable JS dependencies (SCA), JWT defects incl. offline
+  broken-access-control/IDOR, reproduced/confirmed active findings (SQLi, SSTI, CRLF, CORS,
+  path traversal/XXE, verified file upload, and Collaborator OOB), vulnerable JS dependencies (SCA),
+  JWT defects incl. offline
   weak-secret cracks, heuristic DOM-XSS, and LLM-identified JavaScript bugs (with PoC and chain).
   Informational results are filed at `INFORMATION` so nothing is dropped;
 - Burp's **native scan pipeline** — Recon Hound registers a **passive scan check**, so its detectors
@@ -392,8 +403,8 @@ uploads the SARIF artifact.
 ## Run governance & the `reconctl` sidecar
 
 Active behaviour is governed by an explicit control plane: a per-run request policy and hard request
-**budget** gate every target-directed send, and each active run carries a scope snapshot and a
-verification state rather than a loose "confirmed" flag. An optional typed Go **`reconctl`** sidecar
+**budget** gate every native Montoya target dispatch. Each active run carries a scope snapshot,
+and findings carry an explicit verification state rather than a loose "confirmed" flag. An optional typed Go **`reconctl`** sidecar
 keeps external network scans and active fuzzing behind explicit command flags and typed input/output
 contracts; Burp **re-checks scope** when importing its JSONL, and importing never launches a tool or
 sends a request. See **[run governance and the sidecar handoff](docs/RUN_GOVERNANCE.md)** and the
