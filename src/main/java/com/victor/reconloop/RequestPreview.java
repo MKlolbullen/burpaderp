@@ -20,6 +20,8 @@ final class RequestPreview {
                     .append(branchDependent ? "Concrete candidates fitting this ordered scenario: " : "Admissible requests: up to ")
                     .append(admitted).append(" (including ").append(conditionalAdmitted).append(" conditional).\n");
             if (branchDependent) text.append("Response branches and early matches change which candidates run; this scenario count is not a worst-case bound. The configured global limit is the hard dispatch ceiling.\n");
+            if (rows.stream().anyMatch(row -> row.probe().equals("discovery-crawl")))
+                text.append("Future crawl discoveries are not included in this scenario, even when redirect following is disabled.\n");
             if (runtimeTemplates > 0) text.append(runtimeTemplates).append(" runtime templates are not executable plans and are excluded from quota simulation. Their exact scope and budget admission remain pending.\n");
             text.append("Original path, query values, header/body values and uploaded filenames are hidden. No DNS lookup or Collaborator allocation.\n\n");
             if (rows.isEmpty()) text.append("No candidate requests in the current selection.\n");
@@ -52,7 +54,8 @@ final class RequestPreview {
             RequestPlan plan = step.plan();
             RequestPolicy.PlannedRequest request = step.metadata();
             if (step.template()) runtimeTemplates++;
-            branchDependent |= step.template() || (step.conditional() && step.condition() != NativeRequestStep.Condition.PARAMETER_BASELINE);
+            branchDependent |= step.template() || step.mutation() == NativeRequestStep.Mutation.CRAWL_GET
+                    || (step.conditional() && step.condition() != NativeRequestStep.Condition.PARAMETER_BASELINE);
             NativeRequestStep.Constraints constraints = step.constraints();
             RequestBudget local = constraints == null || constraints.localKey() == null ? null
                     : localBudgets.computeIfAbsent(constraints.localKey(), key -> new RequestBudget(constraints.localLimit()));

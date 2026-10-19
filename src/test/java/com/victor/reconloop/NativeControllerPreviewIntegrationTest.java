@@ -156,6 +156,20 @@ public class NativeControllerPreviewIntegrationTest {
         }
     }
 
+    @Test public void crawlerCountRemainsAScenarioWhenRedirectsAreDisabled() {
+        try (FakeMontoya fake = new FakeMontoya()) {
+            ReconController controller = ReconControllerRunLifecycleTest.controller(fake,new ManualExecutor());
+            try {
+                controller.setFollowRedirects(false);
+                String preview = controller.previewCrawl(ROOT + "/seed");
+                assertTrue(preview,preview.contains("not a worst-case bound"));
+                assertTrue(preview.contains("Future crawl discoveries are not included"));
+                assertFalse(preview.contains("Admissible requests: up to"));
+                assertTrue(fake.sent.isEmpty());
+            } finally { controller.shutdown(); }
+        }
+    }
+
     private static String token() {
         String unsigned = b64("{\"alg\":\"HS256\",\"typ\":\"JWT\"}") + "." + b64("{\"sub\":\"CLAIM_SECRET\"}") + ".signature";
         return JwtAttackEngine.forgeWithSecret(unsigned,"password","hs256");
