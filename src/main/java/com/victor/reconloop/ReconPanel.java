@@ -39,11 +39,21 @@ final class ReconPanel extends JPanel {
     private ReconModel.AiFeedTableModel aiFeedModel;
     private JLabel aiFeedUsage;
 
-    private void showRequestPreview(String preview) {
-        JTextArea text = new JTextArea(preview, 24, 100);
-        text.setEditable(false);
-        text.setCaretPosition(0);
-        JOptionPane.showMessageDialog(this, new JScrollPane(text), "Request preview", JOptionPane.INFORMATION_MESSAGE);
+    private void showRequestPreview(JButton button, java.util.function.Supplier<String> preview) {
+        button.setEnabled(false);
+        new SwingWorker<String, Void>() {
+            protected String doInBackground() { return preview.get(); }
+            protected void done() {
+                button.setEnabled(true);
+                String result;
+                try { result = get(); }
+                catch (Exception e) { result = "Could not prepare this request preview. No requests sent."; }
+                JTextArea text = new JTextArea(result, 24, 100);
+                text.setEditable(false);
+                text.setCaretPosition(0);
+                JOptionPane.showMessageDialog(ReconPanel.this, new JScrollPane(text), "Request preview", JOptionPane.INFORMATION_MESSAGE);
+            }
+        }.execute();
     }
 
     ReconPanel(MontoyaApi api, ReconController controller,
@@ -71,6 +81,7 @@ final class ReconPanel extends JPanel {
 
         JButton addSeeds = new JButton("Add seeds + start");
         JButton queueSiteMap = new JButton("Queue current in-scope site map");
+        JButton crawlPreview = new JButton("Preview seeds / crawl queue…");
         JButton pause = new JButton("Pause");
         JButton resume = new JButton("Resume");
         JButton reset = new JButton("Reset state");
@@ -94,7 +105,7 @@ final class ReconPanel extends JPanel {
         controls.add(optionsB);
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        buttons.add(addSeeds); buttons.add(queueSiteMap); buttons.add(pause); buttons.add(resume); buttons.add(reset);
+        buttons.add(addSeeds); buttons.add(queueSiteMap); buttons.add(crawlPreview); buttons.add(pause); buttons.add(resume); buttons.add(reset);
         controls.add(buttons);
 
         JLabel payloads = new JLabel("Payload categories: " + controller.payloadCategories());
@@ -144,8 +155,14 @@ final class ReconPanel extends JPanel {
         JButton graphqlPreview = new JButton("Preview introspection…");
         JButton graphqlFuzzPreview = new JButton("Preview GraphQL fuzz…");
         JButton runActive = new JButton("Run active tests on in-scope site map");
+        JButton activePreview = new JButton("Preview native probes…");
+        JComboBox<String> previewProbe = new JComboBox<>(new String[]{"All probes", "waf", "reflected-xss", "ssti", "ssrf", "blind-xss",
+                "command-injection", "open-redirect", "crlf", "sqli", "nosqli", "path-traversal", "host-header", "cors", "rate-limit", "file-upload", "xxe"});
+        previewProbe.setToolTipText("Filter preview detail to one probe when the 500-step limit truncates the full plan.");
         JButton runJwt = new JButton("Run JWT alg:none test");
         JButton runTakeover = new JButton("Subdomain takeover check");
+        JButton jwtPreview = new JButton("Preview JWT…");
+        JButton takeoverPreview = new JButton("Preview takeover…");
         JButton importSidecar = new JButton("Import reconctl JSONL…");
         importSidecar.setToolTipText("Imports typed Go-sidecar results after re-checking every record against the current Burp scope. Does not launch a tool or send traffic.");
 
@@ -175,6 +192,10 @@ final class ReconPanel extends JPanel {
         riskRow.add(authLockoutActive);
         riskRow.add(new JLabel("(persistent/destructive payloads stay disabled)"));
         activePanel.add(riskRow);
+        JPanel previewRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        previewRow.add(new JLabel("Native probe dry run:")); previewRow.add(previewProbe); previewRow.add(activePreview);
+        previewRow.add(new JLabel("(no traffic; response branches and runtime templates are identified)"));
+        activePanel.add(previewRow);
 
         JPanel activeRow2 = new JPanel(new FlowLayout(FlowLayout.LEFT));
         activeRow2.add(new JLabel("crt.sh domain:")); activeRow2.add(ctDomain); activeRow2.add(ctButton);
@@ -191,8 +212,8 @@ final class ReconPanel extends JPanel {
         activePanel.add(activeRow3);
 
         JPanel activeRow4 = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        activeRow4.add(runJwt);
-        activeRow4.add(runTakeover);
+        activeRow4.add(runJwt); activeRow4.add(jwtPreview);
+        activeRow4.add(runTakeover); activeRow4.add(takeoverPreview);
         activeRow4.add(new JLabel("(opt-in — JWT replays GET/HEAD/OPTIONS; takeover fetches enumerated hosts)"));
         activePanel.add(activeRow4);
 
@@ -211,12 +232,15 @@ final class ReconPanel extends JPanel {
         JCheckBox encUrlB64 = new JCheckBox("URL->Base64", false);
         JSpinner corpusBudget = new JSpinner(new SpinnerNumberModel(5, 1, 200, 1));
         JButton runCorpusFuzz = new JButton("Run corpus fuzz on in-scope site map");
+        JButton corpusPreview = new JButton("Preview corpus…");
+        JComboBox<String> corpusPreviewCategory = new JComboBox<>(new String[]{"All categories", "sqli", "sqli2", "xss", "ssti", "lfi", "rce_payloads"});
+        corpusPreviewCategory.setToolTipText("Preview one category beyond the 500-step prefix; execution still uses all relevant categories.");
         JPanel corpusRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
         corpusRow.add(new JLabel("Corpus fuzz encodings:"));
         corpusRow.add(encRaw); corpusRow.add(encUrl); corpusRow.add(encHtml); corpusRow.add(encBase64);
         corpusRow.add(encDoubleUrl); corpusRow.add(encB64Url); corpusRow.add(encUrlB64);
         corpusRow.add(new JLabel("Max payloads/category:")); corpusRow.add(corpusBudget);
-        corpusRow.add(runCorpusFuzz);
+        corpusRow.add(runCorpusFuzz); corpusRow.add(corpusPreviewCategory); corpusRow.add(corpusPreview);
         activePanel.add(corpusRow);
         activePanel.add(new JLabel("(fires payloads/*.txt: LFI/RCE/SQLi/SSTI/XSS corpus at heuristically-matched "
                 + "parameters; destructive entries are skipped, callback hosts are rewritten to Collaborator)"));
@@ -265,11 +289,12 @@ final class ReconPanel extends JPanel {
         acHeaders.setToolTipText("Alternate identity headers, one per line, e.g. 'Cookie: session=lowpriv' or 'Authorization: Bearer ...'");
         JCheckBox acUnauth = new JCheckBox("Unauthenticated (strip auth)", false);
         JButton acButton = new JButton("Run access-control test (safe methods)");
+        JButton acPreview = new JButton("Preview access-control…");
         JPanel acRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
         acRow.add(new JLabel("Access-control alternate identity:"));
         acRow.add(new JScrollPane(acHeaders));
         acRow.add(acUnauth);
-        acRow.add(acButton);
+        acRow.add(acButton); acRow.add(acPreview);
         activePanel.add(acRow);
         controls.add(activePanel);
 
@@ -333,9 +358,32 @@ final class ReconPanel extends JPanel {
         osintButton.addActionListener(e -> controller.lookupPassiveOsint(osintDomain.getText()));
         ctButton.addActionListener(e -> controller.enumerateSubdomains(ctDomain.getText()));
         paramButton.addActionListener(e -> controller.discoverParameters(paramUrl.getText()));
-        paramPreview.addActionListener(e -> showRequestPreview(controller.previewRequests(paramUrl.getText(), ReconController.PreviewAction.PARAMETERS)));
-        graphqlPreview.addActionListener(e -> showRequestPreview(controller.previewRequests(graphqlUrl.getText(), ReconController.PreviewAction.GRAPHQL_INTROSPECTION)));
-        graphqlFuzzPreview.addActionListener(e -> showRequestPreview(controller.previewRequests(graphqlUrl.getText(), ReconController.PreviewAction.GRAPHQL_FUZZ)));
+        paramPreview.addActionListener(e -> {
+            String target = paramUrl.getText();
+            showRequestPreview(paramPreview, () -> controller.previewRequests(target, ReconController.PreviewAction.PARAMETERS));
+        });
+        graphqlPreview.addActionListener(e -> {
+            String target = graphqlUrl.getText();
+            showRequestPreview(graphqlPreview, () -> controller.previewRequests(target, ReconController.PreviewAction.GRAPHQL_INTROSPECTION));
+        });
+        graphqlFuzzPreview.addActionListener(e -> {
+            String target = graphqlUrl.getText();
+            showRequestPreview(graphqlFuzzPreview, () -> controller.previewRequests(target, ReconController.PreviewAction.GRAPHQL_FUZZ));
+        });
+        activePreview.addActionListener(e -> {
+            String filter = previewProbe.getSelectedIndex() == 0 ? null : (String) previewProbe.getSelectedItem();
+            showRequestPreview(activePreview, () -> controller.previewActiveTests(filter));
+        });
+        jwtPreview.addActionListener(e -> showRequestPreview(jwtPreview, controller::previewJwtAttacks));
+        takeoverPreview.addActionListener(e -> showRequestPreview(takeoverPreview, controller::previewTakeover));
+        crawlPreview.addActionListener(e -> {
+            String text = seeds.getText();
+            showRequestPreview(crawlPreview, () -> controller.previewCrawl(text));
+        });
+        acPreview.addActionListener(e -> {
+            String headers = acHeaders.getText(); boolean unauthenticated = acUnauth.isSelected();
+            showRequestPreview(acPreview, () -> controller.previewAccessControl(headers, unauthenticated));
+        });
         graphqlButton.addActionListener(e -> controller.introspectGraphql(graphqlUrl.getText()));
         graphqlFuzzButton.addActionListener(e -> controller.fuzzGraphql(graphqlUrl.getText()));
         runActive.addActionListener(e -> controller.runActiveTests());
@@ -352,7 +400,7 @@ final class ReconPanel extends JPanel {
                         summary.startsWith("[error]") ? JOptionPane.ERROR_MESSAGE : JOptionPane.INFORMATION_MESSAGE);
             });
         });
-        runCorpusFuzz.addActionListener(e -> {
+        java.util.function.Supplier<Set<PayloadEncoder.Encoding>> selectedEncodings = () -> {
             Set<PayloadEncoder.Encoding> encodings = EnumSet.noneOf(PayloadEncoder.Encoding.class);
             if (encRaw.isSelected()) encodings.add(PayloadEncoder.Encoding.RAW);
             if (encUrl.isSelected()) encodings.add(PayloadEncoder.Encoding.URL);
@@ -361,7 +409,13 @@ final class ReconPanel extends JPanel {
             if (encDoubleUrl.isSelected()) encodings.add(PayloadEncoder.Encoding.DOUBLE_URL);
             if (encB64Url.isSelected()) encodings.add(PayloadEncoder.Encoding.BASE64_THEN_URL);
             if (encUrlB64.isSelected()) encodings.add(PayloadEncoder.Encoding.URL_THEN_BASE64);
-            controller.runCorpusFuzz(encodings, (Integer) corpusBudget.getValue());
+            return encodings;
+        };
+        runCorpusFuzz.addActionListener(e -> controller.runCorpusFuzz(selectedEncodings.get(), (Integer) corpusBudget.getValue()));
+        corpusPreview.addActionListener(e -> {
+            Set<PayloadEncoder.Encoding> encodings = selectedEncodings.get(); int cap = (Integer) corpusBudget.getValue();
+            String category = corpusPreviewCategory.getSelectedIndex() == 0 ? null : (String) corpusPreviewCategory.getSelectedItem();
+            showRequestPreview(corpusPreview, () -> controller.previewCorpusFuzz(encodings, cap, category));
         });
         sqlmapCheck.addActionListener(e -> {
             controller.setSqlmapPath(sqlmapBinary.getText());
