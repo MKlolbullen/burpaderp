@@ -39,6 +39,13 @@ final class ReconPanel extends JPanel {
     private ReconModel.AiFeedTableModel aiFeedModel;
     private JLabel aiFeedUsage;
 
+    private void showRequestPreview(String preview) {
+        JTextArea text = new JTextArea(preview, 24, 100);
+        text.setEditable(false);
+        text.setCaretPosition(0);
+        JOptionPane.showMessageDialog(this, new JScrollPane(text), "Request preview", JOptionPane.INFORMATION_MESSAGE);
+    }
+
     ReconPanel(MontoyaApi api, ReconController controller,
                ReconModel.FindingTableModel findingModel,
                ReconModel.DiscoveryTableModel discoveryModel,
@@ -130,9 +137,12 @@ final class ReconPanel extends JPanel {
         JButton ctButton = new JButton("Enumerate (crt.sh)");
         JTextField paramUrl = new JTextField(22);
         JButton paramButton = new JButton("Discover params (Arjun)");
+        JButton paramPreview = new JButton("Preview params…");
         JTextField graphqlUrl = new JTextField(22);
         JButton graphqlButton = new JButton("Introspect GraphQL");
         JButton graphqlFuzzButton = new JButton("Fuzz GraphQL");
+        JButton graphqlPreview = new JButton("Preview introspection…");
+        JButton graphqlFuzzPreview = new JButton("Preview GraphQL fuzz…");
         JButton runActive = new JButton("Run active tests on in-scope site map");
         JButton runJwt = new JButton("Run JWT alg:none test");
         JButton runTakeover = new JButton("Subdomain takeover check");
@@ -169,12 +179,15 @@ final class ReconPanel extends JPanel {
         JPanel activeRow2 = new JPanel(new FlowLayout(FlowLayout.LEFT));
         activeRow2.add(new JLabel("crt.sh domain:")); activeRow2.add(ctDomain); activeRow2.add(ctButton);
         activeRow2.add(new JLabel("Param-discovery URL:")); activeRow2.add(paramUrl); activeRow2.add(paramButton);
+        activeRow2.add(paramPreview);
         activeRow2.add(new JLabel("Param wordlist: " + controller.paramWordlistSize()));
         activePanel.add(activeRow2);
 
         JPanel activeRow3 = new JPanel(new FlowLayout(FlowLayout.LEFT));
         activeRow3.add(new JLabel("GraphQL URL:")); activeRow3.add(graphqlUrl); activeRow3.add(graphqlButton);
         activeRow3.add(graphqlFuzzButton);
+        activeRow3.add(graphqlPreview);
+        activeRow3.add(graphqlFuzzPreview);
         activePanel.add(activeRow3);
 
         JPanel activeRow4 = new JPanel(new FlowLayout(FlowLayout.LEFT));
@@ -320,6 +333,9 @@ final class ReconPanel extends JPanel {
         osintButton.addActionListener(e -> controller.lookupPassiveOsint(osintDomain.getText()));
         ctButton.addActionListener(e -> controller.enumerateSubdomains(ctDomain.getText()));
         paramButton.addActionListener(e -> controller.discoverParameters(paramUrl.getText()));
+        paramPreview.addActionListener(e -> showRequestPreview(controller.previewRequests(paramUrl.getText(), ReconController.PreviewAction.PARAMETERS)));
+        graphqlPreview.addActionListener(e -> showRequestPreview(controller.previewRequests(graphqlUrl.getText(), ReconController.PreviewAction.GRAPHQL_INTROSPECTION)));
+        graphqlFuzzPreview.addActionListener(e -> showRequestPreview(controller.previewRequests(graphqlUrl.getText(), ReconController.PreviewAction.GRAPHQL_FUZZ)));
         graphqlButton.addActionListener(e -> controller.introspectGraphql(graphqlUrl.getText()));
         graphqlFuzzButton.addActionListener(e -> controller.fuzzGraphql(graphqlUrl.getText()));
         runActive.addActionListener(e -> controller.runActiveTests());

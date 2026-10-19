@@ -47,7 +47,7 @@ public class OutboundRunIntegrationTest {
             ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(),
                     new ScanRun.RequestLimits(73, 73, 73, 73));
             HttpRequest request = fake.request("https://api.example.test/search?q=a");
-            var planned = RequestPolicy.PlannedRequest.safe("GET", request.url(), "shared");
+            var planned = RequestPlan.safe(request, "shared");
             ExecutorService workers = Executors.newFixedThreadPool(12);
             CountDownLatch start = new CountDownLatch(1);
             List<Future<?>> futures = new ArrayList<>();
@@ -82,7 +82,7 @@ public class OutboundRunIntegrationTest {
                         try { start.await(); } catch (InterruptedException e) { throw new AssertionError(e); }
                         for (int j = 0; j < 90; j++) {
                             HttpRequest request = fake.request("https://" + host + "/p" + (j % 3) + "?q=" + j);
-                            gateway.send(run, RequestPolicy.PlannedRequest.safe("GET", request.url(), "p" + (j % 3)), request);
+                            gateway.send(run, RequestPlan.safe(request, "p" + (j % 3)), request);
                         }
                     }));
                 }

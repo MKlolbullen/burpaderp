@@ -160,6 +160,13 @@ the permissions your rules of engagement actually authorize. Changing a permissi
 tests cancels current native runs and invalidates queued jobs. Blind-XSS beacons additionally require
 persistent-payload permission and remain blocked until a separate authorization path exists.
 
+Use **Preview params…**, **Preview introspection…** or **Preview GraphQL fuzz…** to inspect mutations,
+missing permissions and estimated request counts before enabling traffic. Previews send nothing and
+spend no live quota; captured path/query values, authentication headers and body are hidden. Parameter
+chunks are conditional on a baseline response, and previews stop at 500 steps with an explicit prefix
+notice. All native sends require a plan bound to the exact Montoya message bytes and service
+destination. See [run governance](docs/RUN_GOVERNANCE.md) for preview coverage and remaining release gates.
+
 Every parameter-level probe below injects through a shared **insertion-point model** (`InsertionPoint`)
 rather than query/body parameters alone — so SQLi, NoSQLi, SSTI, path traversal, reflected/blind XSS,
 command injection, open-redirect and CRLF are all exercised across the **whole request surface**:

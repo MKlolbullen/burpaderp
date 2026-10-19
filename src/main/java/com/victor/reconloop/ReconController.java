@@ -703,7 +703,7 @@ final class ReconController implements HttpHandler {
                 try {
                     HttpRequest originalRequest = target.request();
                     ActiveRequestGateway.Result validResult = gateway.send(run,
-                            new RequestPolicy.PlannedRequest(originalRequest.method(), originalRequest.url(), "jwt-baseline",
+                            RequestPlan.create(originalRequest, "jwt-baseline",
                                     Set.of(RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT)),
                             originalRequest);
                     if (validResult.error() != null) {
@@ -723,7 +723,7 @@ final class ReconController implements HttpHandler {
                         HttpRequest forgedReq = httpRequestFromString(target.request(),
                                 target.request().toString().replace(target.token(), forgedToken));
                         ActiveRequestGateway.Result forgedResult = gateway.send(run,
-                                new RequestPolicy.PlannedRequest(forgedReq.method(), forgedReq.url(), "jwt-alg-none",
+                                RequestPlan.create(forgedReq, "jwt-alg-none",
                                         Set.of(RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT)), forgedReq);
                         if (forgedResult.error() != null) {
                             api.logging().logToError("JWT alg:none request failed for " + target.request().url(), forgedResult.error());
@@ -772,7 +772,7 @@ final class ReconController implements HttpHandler {
                             HttpRequest forgedReq = httpRequestFromString(target.request(),
                                     target.request().toString().replace(target.token(), forgedToken));
                             ActiveRequestGateway.Result forgedResult = gateway.send(run,
-                                    new RequestPolicy.PlannedRequest(forgedReq.method(), forgedReq.url(), "jwt-weak-secret",
+                                    RequestPlan.create(forgedReq, "jwt-weak-secret",
                                             Set.of(RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT)), forgedReq);
                             if (forgedResult.error() != null) {
                                 api.logging().logToError("JWT weak-secret request failed for " + target.request().url(), forgedResult.error());
@@ -846,7 +846,7 @@ final class ReconController implements HttpHandler {
                         try {
                             HttpRequest request = httpRequestFromUrl(url);
                             ActiveRequestGateway.Result result = gateway.send(run,
-                                    RequestPolicy.PlannedRequest.safe(request.method(), request.url(), "subdomain-takeover"), request);
+                                    RequestPlan.safe(request, "subdomain-takeover"), request);
                             if (result.error() != null) {
                                 api.logging().logToError("Takeover check failed for " + host, result.error());
                                 continue;
@@ -993,7 +993,7 @@ final class ReconController implements HttpHandler {
                 try {
                     HttpRequest replayRequest = engine.applyIdentity(original.request());
                     ActiveRequestGateway.Result replayResult = gateway.send(run,
-                            new RequestPolicy.PlannedRequest(replayRequest.method(), replayRequest.url(),
+                            RequestPlan.create(replayRequest,
                                     "access-control-replay",
                                     Set.of(RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT)),
                             replayRequest);
@@ -1278,7 +1278,7 @@ final class ReconController implements HttpHandler {
 
             HttpRequest request = buildAuthenticatedGet(current);
             ActiveRequestGateway.Result result = gateway.send(run,
-                    RequestPolicy.PlannedRequest.safe(request.method(), request.url(), "discovery-crawl"), request);
+                    RequestPlan.safe(request, "discovery-crawl"), request);
             synchronized (crawlRuns) {
                 if (run == crawlRun) sentRequests.set(previousCrawlUsage + run.requestBudget().used());
             }
@@ -1332,6 +1332,10 @@ final class ReconController implements HttpHandler {
      * the operator enables the explicit non-safe-method checkbox.
      */
     private ActiveRequestGateway newTargetGateway(boolean allowMutating) {
+        return new ActiveRequestGateway(targetPolicy(allowMutating), targetTransport);
+    }
+
+    private RequestPolicy targetPolicy(boolean allowMutating) {
         EnumSet<RequestPolicy.Permission> permissions = EnumSet.noneOf(RequestPolicy.Permission.class);
         if (allowMutating) {
             permissions.add(RequestPolicy.Permission.UNSAFE_HTTP_METHOD);
@@ -1345,8 +1349,7 @@ final class ReconController implements HttpHandler {
         }
         // PERSISTENT_PAYLOAD deliberately has no UI grant: destructive/persistent corpus entries
         // remain hard-disabled and are filtered before planning.
-        return new ActiveRequestGateway(
-                new RequestPolicy(api.scope()::isInScope, permissions), targetTransport);
+        return new RequestPolicy(api.scope()::isInScope, permissions);
     }
 
     private HttpRequest buildAuthenticatedGet(URI uri) {
@@ -2673,11 +2676,8 @@ final class ReconController implements HttpHandler {
                     activeRequestLimits(1));
             ActiveRequestGateway gateway = newTargetGateway(true);
             try {
-                HttpRequest request = httpRequestFromUrl(target)
-                        .withMethod("POST")
-                        .withUpdatedHeader("Content-Type", "application/json")
-                        .withBody(ApiSurfaceEngine.introspectionQuery());
-                HttpRequestResponse rr = gqlPost(request, run, gateway, "graphql-introspection");
+                NativeRequestStep step = GraphQlRequestPlanner.introspection(httpRequestFromUrl(target));
+                HttpRequestResponse rr = gqlPost(step, run, gateway);
                 if (rr == null || rr.response() == null) return;
                 ApiSurfaceEngine.IntrospectionDetail detail = ApiSurfaceEngine.analyzeIntrospection(rr.response().bodyToString());
                 String summary = ApiSurfaceEngine.describe(detail);
@@ -2740,8 +2740,8 @@ final class ReconController implements HttpHandler {
                     activeRequestLimits(3));
             ActiveRequestGateway gateway = newTargetGateway(true);
             try {
-                HttpRequestResponse suggest = gqlPost(target, GraphQlFuzzEngine.suggestionQuery(),
-                        run, gateway, "graphql-field-suggestions");
+                List<NativeRequestStep> steps = GraphQlRequestPlanner.fuzz(httpRequestFromUrl(target));
+                HttpRequestResponse suggest = gqlPost(steps.get(0), run, gateway);
                 if (bodyOf(suggest) != null && GraphQlFuzzEngine.hasFieldSuggestions(bodyOf(suggest))) {
                     addActiveRow("LOW", "GraphQL", "field-suggestions", "enabled", "'Did you mean' leaks schema", target);
                     reporter.report("gql-suggest\0" + target, "GraphQL field suggestions enabled",
@@ -2753,9 +2753,8 @@ final class ReconController implements HttpHandler {
                             "Schema disclosure via suggestions is low severity but aids further attacks.", suggest);
                 }
 
-                int aliases = 100;
-                HttpRequestResponse alias = gqlPost(target, GraphQlFuzzEngine.aliasQuery(aliases),
-                        run, gateway, "graphql-alias-amplification");
+                int aliases = GraphQlRequestPlanner.ALIASES;
+                HttpRequestResponse alias = gqlPost(steps.get(1), run, gateway);
                 if (bodyOf(alias) != null && GraphQlFuzzEngine.aliasingProcessed(bodyOf(alias), aliases)) {
                     addActiveRow("MEDIUM", "GraphQL", "alias-amplification", "enabled", aliases + " aliases in one request", target);
                     reporter.report("gql-alias\0" + target, "GraphQL alias-based amplification",
@@ -2768,8 +2767,7 @@ final class ReconController implements HttpHandler {
                             "Confirm the amplification is usable against a sensitive operation.", alias);
                 }
 
-                HttpRequestResponse batch = gqlPost(target, GraphQlFuzzEngine.batchQuery(),
-                        run, gateway, "graphql-query-batching");
+                HttpRequestResponse batch = gqlPost(steps.get(2), run, gateway);
                 if (bodyOf(batch) != null && GraphQlFuzzEngine.batchingProcessed(bodyOf(batch))) {
                     addActiveRow("MEDIUM", "GraphQL", "query-batching", "enabled", "array of operations processed", target);
                     reporter.report("gql-batch\0" + target, "GraphQL query batching enabled",
@@ -2792,26 +2790,38 @@ final class ReconController implements HttpHandler {
         });
     }
 
-    private HttpRequestResponse gqlPost(String url, String jsonBody, ScanRun run,
-                                           ActiveRequestGateway gateway, String probeId) {
-        HttpRequest request = httpRequestFromUrl(url)
-                .withMethod("POST")
-                .withUpdatedHeader("Content-Type", "application/json")
-                .withBody(jsonBody);
-        return gqlPost(request, run, gateway, probeId);
-    }
-
-    private HttpRequestResponse gqlPost(HttpRequest request, ScanRun run,
-                                        ActiveRequestGateway gateway, String probeId) {
-        Set<RequestPolicy.Permission> permissions = EnumSet.of(
-                RequestPolicy.Permission.UNSAFE_HTTP_METHOD, RequestPolicy.Permission.STATE_CHANGING);
-        ActiveRequestGateway.Result result = gateway.send(run,
-                new RequestPolicy.PlannedRequest(request.method(), request.url(), probeId, permissions), request);
+    private HttpRequestResponse gqlPost(NativeRequestStep step, ScanRun run, ActiveRequestGateway gateway) {
+        ActiveRequestGateway.Result result = gateway.send(run, step.plan(), step.request());
         if (result.error() != null) {
-            api.logging().logToError("GraphQL request failed for " + request.url(), result.error());
+            api.logging().logToError("GraphQL request failed", result.error());
             return null;
         }
         return result.dispatched() ? result.response() : null;
+    }
+
+    enum PreviewAction { PARAMETERS, GRAPHQL_INTROSPECTION, GRAPHQL_FUZZ }
+
+    /** Preview works with active sending disabled. No tickets, transport or Collaborator access. */
+    String previewRequests(String url, PreviewAction action) {
+        try {
+            String target = url == null ? "" : url.strip();
+            URI uri = URI.create(target);
+            if (uri.getHost() == null || !("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme())))
+                return "Choose an absolute HTTP(S) URL. No requests sent.";
+            HttpRequest base = httpRequestFromUrl(target);
+            Iterable<NativeRequestStep> steps = switch (action) {
+                case PARAMETERS -> parameterDiscovery.plan(base);
+                case GRAPHQL_INTROSPECTION -> List.of(GraphQlRequestPlanner.introspection(base));
+                case GRAPHQL_FUZZ -> GraphQlRequestPlanner.fuzz(base);
+            };
+            int cap = switch (action) { case PARAMETERS -> Integer.MAX_VALUE; case GRAPHQL_INTROSPECTION -> 1; case GRAPHQL_FUZZ -> 3; };
+            ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.forTargetUrl(target), activeRequestLimits(cap));
+            RequestPolicy policy = action == PreviewAction.PARAMETERS ? RequestPolicy.safeDefault(api.scope()::isInScope)
+                    : targetPolicy(mutatingActiveRequests.get());
+            return RequestPreview.inspect(run, policy, steps).render();
+        } catch (RuntimeException e) {
+            return "Could not prepare this request preview. No requests sent.";
+        }
     }
 
     private static String bodyOf(HttpRequestResponse rr) {

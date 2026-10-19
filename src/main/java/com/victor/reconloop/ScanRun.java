@@ -145,6 +145,17 @@ final class ScanRun {
         return hostUsage.getOrDefault(normalizeHost(host), 0);
     }
 
+    /** Read-only planning uses an independent ledger; never reserves live tokens. */
+    synchronized ScanRun previewCopy() {
+        ScanRun copy = new ScanRun(id, startedAt, profile, scope, requestLimits);
+        for (int i = 0, used = requestBudget.used(); i < used; i++) copy.requestBudget.tryAcquire();
+        copy.hostUsage.putAll(hostUsage);
+        copy.endpointUsage.putAll(endpointUsage);
+        copy.probeUsage.putAll(probeUsage);
+        copy.status.set(status.get());
+        return copy;
+    }
+
     synchronized int endpointRequests(String method, String url) {
         return endpointUsage.getOrDefault(endpointKey(method, url), 0);
     }

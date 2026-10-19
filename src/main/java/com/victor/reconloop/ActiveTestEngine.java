@@ -692,7 +692,7 @@ final class ActiveTestEngine {
         }
 
         ActiveRequestGateway.Result result = gateway.send(run,
-                new RequestPolicy.PlannedRequest(request.method(), request.url(), currentProbeId.get(), permissions),
+                RequestPlan.create(request, currentProbeId.get(), permissions),
                 request);
         if (result.error() != null) {
             api.logging().logToError("Active request failed for " + request.url(), result.error());
