@@ -6,7 +6,7 @@ import burp.api.montoya.http.message.requests.HttpRequest;
 import java.util.Objects;
 
 /**
- * The one dispatch point for migrated target-directed requests.
+ * The admission gate for every native target-directed Montoya dispatch.
  *
  * <p>The policy is evaluated before a request-budget token is acquired.  A second cancellation
  * check after acquisition prevents a request that raced with cancellation from being sent; consuming

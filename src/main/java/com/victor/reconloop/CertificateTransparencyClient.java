@@ -1,6 +1,8 @@
 package com.victor.reconloop;
 
 import burp.api.montoya.MontoyaApi;
+import burp.api.montoya.http.RequestOptions;
+import burp.api.montoya.http.RedirectionMode;
 import burp.api.montoya.http.message.HttpRequestResponse;
 import burp.api.montoya.http.message.requests.HttpRequest;
 
@@ -40,7 +42,8 @@ final class CertificateTransparencyClient {
                     .withMethod("GET")
                     .withUpdatedHeader("User-Agent", "Recon-Hound/0.2 (+burp)")
                     .withUpdatedHeader("Accept", "application/json");
-            HttpRequestResponse rr = api.http().sendRequest(request);
+            HttpRequestResponse rr = api.http().sendRequest(request,
+                    RequestOptions.requestOptions().withRedirectionMode(RedirectionMode.NEVER));
             if (rr == null || rr.response() == null) return Set.of();
             return parseHosts(rr.response().bodyToString(), normalized);
         } catch (Exception e) {

@@ -30,9 +30,8 @@ This avoids reimplementing Burp in Go while avoiding shell-pipe orchestration in
 | Go → Burp import | The importer bounds line/record count, parses only canonical record kinds, re-checks current Burp scope, and rejects payload/CIDR records that have no safe Burp-side materialisation. Importing never launches a process, adds scope, queues a crawl, or sends traffic. |
 | Evidence lifecycle | `SIGNAL`, `CANDIDATE`, `REPRODUCED`, `CONFIRMED`, `EXPLOITABLE`, and `REJECTED` replace a lossy boolean. Legacy `true` maps conservatively to `REPRODUCED`. |
 
-The gateway is intentionally being migrated path by path rather than claiming that legacy direct-send
-paths are already covered.  Existing active engines retain their prior scope checks and budgets while
-they are moved to the gateway.  New target-directed paths must start at the gateway.
+Native target paths now share the gateway. The invariant and its explicit remaining release gates
+are described below; external producers are not covered by the native Montoya guarantee.
 
 ## Importing sidecar output
 
@@ -56,3 +55,53 @@ are filed with `TENTATIVE` confidence until reproduced in the current Burp sessi
 
 Rejected import lines are counted and a representative reason is written to the extension output log.
 The Go-side quarantine stream remains the authoritative artifact for malformed tool output.
+
+## Native outbound invariant
+
+Every native target-directed Montoya dispatch passes `ActiveRequestGateway`. The controller alone
+constructs `MontoyaTargetTransport`; engines receive a caller-owned run and gateway and cannot
+create their own authorization or reset the run budget. The transport uses `RedirectionMode.NEVER`.
+A crawler redirect is checked against current scope before the discovery auto-add setting is allowed
+to observe it, and every followed hop is admitted and charged separately.
+
+The caller owns one run for an active/corpus pass, including its targets, parameters, baselines and
+payload categories. The crawler reuses one run across queued URLs and redirects. Pausing cancels that
+run; resuming uses only the unspent crawl cap. Reset explicitly starts new accounting. Host/endpoint/
+probe reservations are atomic with the global cap, and an explicit default port does not create a
+second endpoint quota.
+
+Disabling active tests, changing a risk grant, resetting, or unloading cancels the affected runs.
+Enqueue-time generation tickets prevent old jobs from starting again after disable/re-enable,
+including jobs already preparing targets but not yet registered. Cancellation does not wait for a
+blocking response: a request already admitted may finish, but the next admission fails. A dispatch
+that throws is still charged; a cancellation race may conservatively spend a token without a send.
+These are Montoya dispatch counts, not a claim to meter internal Burp TCP retries/retransmissions.
+
+Persistent payload permission has no UI grant. Blind-XSS beacons require it as well as OAST and stay
+blocked. An OAST grant alone must not silently authorize a potentially stored browser payload.
+
+### Verification
+
+`OutboundGatewayInvariantTest` resolves Java API owners and catches method references, aliases,
+whitespace changes, batch sends and alternate Montoya request engines. It also prevents engines
+from calling the raw gateway sender. The fixed-origin crt.sh client is the sole native HTTP exception;
+it uses one-hop options too, and its origin/redirect behavior has an integration regression test.
+
+`OutboundRunIntegrationTest`, `ReconControllerRunLifecycleTest`, `RedirectPolicyIntegrationTest` and
+`NativeControllerDispatchIntegrationTest`, `CorpusRiskPermissionIntegrationTest` and
+`NativeRiskPermissionIntegrationTest` exercise production paths with an in-memory Montoya transport.
+They meter actual transport calls, including shared engine budgets and concurrent dispatches, rather
+than asserting only on a local integer. Run them with the existing JDK 21 `./gradlew test` task.
+
+### Remaining release gates
+
+This invariant is scoped to native Montoya target traffic. The standalone JDK CLI, external sqlmap,
+HTTP-producing Go profiles and PDCP scan creation are separate producers; native request quotas do
+not meter their downstream traffic. Their process flags or validated output records are not proof of
+a per-request gateway. They need controlled egress or a fail-closed execution boundary before the
+product can claim a unified outbound guarantee.
+
+Issue #44 also still requires minimal dry-run/mutation preview, plan binding to concrete request
+bytes and service destination, destination validation tied to the actual DNS/connection path, and
+versioned structured evidence persistence. Do not interpret passing native tests as closing #44 or
+approving v1.0.
