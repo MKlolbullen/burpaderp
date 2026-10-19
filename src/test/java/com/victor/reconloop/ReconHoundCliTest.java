@@ -6,6 +6,11 @@ import org.junit.Rule;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.net.InetSocketAddress;
+import java.util.concurrent.atomic.AtomicInteger;
+import com.sun.net.httpserver.HttpServer;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
@@ -64,4 +69,46 @@ public class ReconHoundCliTest {
         assertTrue(options.help());
         assertTrue(options.urls().isEmpty());
     }
+    @Test public void liveModeFailsClosedWithoutContactsOrOverwritingReportsEvenWhenFailOnNone() throws Exception {
+        AtomicInteger contacts = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            contacts.incrementAndGet(); exchange.sendResponseHeaders(200, -1); exchange.close();
+        });
+        server.start();
+        try {
+            Path report = temporaryFolder.newFile("existing.sarif").toPath();
+            Files.writeString(report, "existing report");
+            ByteArrayOutputStream errors = new ByteArrayOutputStream();
+            String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/?secret=hidden";
+            assertEquals(3, ReconHoundCli.run(new String[]{url, "--fail-on", "none", "-o", report.toString()}, new PrintStream(errors)));
+            assertEquals("existing report", Files.readString(report));
+            assertEquals(0, contacts.get());
+            assertTrue(errors.toString().contains("#44"));
+            assertTrue(!errors.toString().contains("hidden"));
+        } finally { server.stop(0); }
+    }
+
+    @Test public void offlineBodiesProduceSarifAndSeverityExitsWithoutFetchingMetadataUrl() throws Exception {
+        Path body = temporaryFolder.newFile("response.js").toPath();
+        Path report = temporaryFolder.getRoot().toPath().resolve("reports/result.sarif");
+        Files.writeString(body, "el.innerHTML = location.hash;");
+        String[] args = {"--body-file", body.toString(), "--content-type", "application/javascript", "--fail-on", "medium",
+                "-o", report.toString(), "https://does-not-resolve.invalid/app.js"};
+        assertEquals(1, ReconHoundCli.run(args, new PrintStream(new ByteArrayOutputStream())));
+        String sarif = Files.readString(report);
+        assertTrue(sarif.contains("domxss-"));
+        assertTrue(sarif.contains("does-not-resolve.invalid/app.js"));
+        assertTrue(sarif.contains("\"version\":\"2.1.0\""));
+        args[5] = "none";
+        assertEquals(0, ReconHoundCli.run(args, new PrintStream(new ByteArrayOutputStream())));
+    }
+
+    @Test public void offlineInputRequiresOneMetadataUrlAndARegularFile() throws Exception {
+        assertThrows(IllegalArgumentException.class, () -> ReconHoundCli.parseOptions(new String[]{"--body-file", "body.txt"}));
+        assertThrows(IllegalArgumentException.class, () -> ReconHoundCli.parseOptions(new String[]{"--body-file", "body.txt", "https://one.test", "https://two.test"}));
+        assertEquals(2, ReconHoundCli.run(new String[]{"--body-file", temporaryFolder.getRoot().toString(), "https://one.test"},
+                new PrintStream(new ByteArrayOutputStream())));
+    }
+
 }

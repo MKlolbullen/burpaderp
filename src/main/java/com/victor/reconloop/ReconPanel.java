@@ -245,44 +245,7 @@ final class ReconPanel extends JPanel {
         activePanel.add(new JLabel("(fires payloads/*.txt: LFI/RCE/SQLi/SSTI/XSS corpus at heuristically-matched "
                 + "parameters; destructive entries are skipped, callback hosts are rewritten to Collaborator)"));
 
-        // sqlmap follow-up: deeper confirmation of a parameter already flagged by the native SQLi test.
-        JTextField sqlmapUrl = new JTextField(20);
-        JComboBox<String> sqlmapMethod = new JComboBox<>(new String[]{"GET", "POST"});
-        JTextField sqlmapParam = new JTextField(10);
-        JTextField sqlmapBinary = new JTextField("sqlmap", 10);
-        JButton sqlmapCheck = new JButton("Check sqlmap");
-        JButton sqlmapRun = new JButton("Run sqlmap");
-        JPanel sqlmapRow1 = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        sqlmapRow1.add(new JLabel("sqlmap follow-up — URL:")); sqlmapRow1.add(sqlmapUrl);
-        sqlmapRow1.add(sqlmapMethod);
-        sqlmapRow1.add(new JLabel("Parameter:")); sqlmapRow1.add(sqlmapParam);
-        sqlmapRow1.add(new JLabel("Binary:")); sqlmapRow1.add(sqlmapBinary);
-        sqlmapRow1.add(sqlmapCheck);
-        activePanel.add(sqlmapRow1);
-
-        JTextArea sqlmapBody = new JTextArea(1, 20);
-        JTextField sqlmapCookie = new JTextField(16);
-        JSpinner sqlmapLevel = new JSpinner(new SpinnerNumberModel(1, 1, 5, 1));
-        JSpinner sqlmapRisk = new JSpinner(new SpinnerNumberModel(1, 1, 3, 1));
-        JTextField sqlmapTechniques = new JTextField("BEUST", 6);
-        JTextField sqlmapExtraArgs = new JTextField(16);
-        JSpinner sqlmapTimeout = new JSpinner(new SpinnerNumberModel(120, 10, 3600, 10));
-        JPanel sqlmapRow2 = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        sqlmapRow2.add(new JLabel("POST body:")); sqlmapRow2.add(new JScrollPane(sqlmapBody));
-        sqlmapRow2.add(new JLabel("Cookie:")); sqlmapRow2.add(sqlmapCookie);
-        sqlmapRow2.add(new JLabel("Level:")); sqlmapRow2.add(sqlmapLevel);
-        sqlmapRow2.add(new JLabel("Risk:")); sqlmapRow2.add(sqlmapRisk);
-        sqlmapRow2.add(new JLabel("Techniques:")); sqlmapRow2.add(sqlmapTechniques);
-        sqlmapRow2.add(new JLabel("Timeout(s):")); sqlmapRow2.add(sqlmapTimeout);
-        activePanel.add(sqlmapRow2);
-
-        JPanel sqlmapRow3 = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        sqlmapRow3.add(new JLabel("Extra sqlmap args (advanced — runs with full sqlmap capability, e.g. --dump):"));
-        sqlmapRow3.add(sqlmapExtraArgs);
-        sqlmapRow3.add(sqlmapRun);
-        activePanel.add(sqlmapRow3);
-        activePanel.add(new JLabel("(opt-in — shells out to a locally-installed sqlmap for deeper confirmation than "
-                + "the native SQLi test; default flags are confirmation-only, authorized targets only)"));
+        activePanel.add(new JLabel("sqlmap execution is paused; use the native SQLi probes."));
 
         // Access-control / IDOR (Autorize-style)
         JTextArea acHeaders = new JTextArea(2, 60);
@@ -416,21 +379,6 @@ final class ReconPanel extends JPanel {
             Set<PayloadEncoder.Encoding> encodings = selectedEncodings.get(); int cap = (Integer) corpusBudget.getValue();
             String category = corpusPreviewCategory.getSelectedIndex() == 0 ? null : (String) corpusPreviewCategory.getSelectedItem();
             showRequestPreview(corpusPreview, () -> controller.previewCorpusFuzz(encodings, cap, category));
-        });
-        sqlmapCheck.addActionListener(e -> {
-            controller.setSqlmapPath(sqlmapBinary.getText());
-            boolean available = controller.sqlmapAvailable();
-            JOptionPane.showMessageDialog(this,
-                    available ? "sqlmap found and runnable." : "sqlmap not found (or failed to run --version) at \""
-                            + sqlmapBinary.getText() + "\".",
-                    "sqlmap availability", available ? JOptionPane.INFORMATION_MESSAGE : JOptionPane.WARNING_MESSAGE);
-        });
-        sqlmapRun.addActionListener(e -> {
-            controller.setSqlmapPath(sqlmapBinary.getText());
-            controller.runSqlmap(sqlmapUrl.getText(), (String) sqlmapMethod.getSelectedItem(), sqlmapParam.getText(),
-                    sqlmapBody.getText(), sqlmapCookie.getText(), (Integer) sqlmapLevel.getValue(),
-                    (Integer) sqlmapRisk.getValue(), sqlmapTechniques.getText(), sqlmapExtraArgs.getText(),
-                    (Integer) sqlmapTimeout.getValue());
         });
         acButton.addActionListener(e -> controller.runAccessControlTest(acHeaders.getText(), acUnauth.isSelected()));
         maxRequests.addChangeListener(e -> controller.setMaxRequests((Integer) maxRequests.getValue()));
@@ -819,69 +767,11 @@ final class ReconPanel extends JPanel {
         return panel;
     }
 
-    /** ProjectDiscovery cloud (PDCP) Nuclei scan controls; results are filed as native Burp issues. */
+    /** Template generation remains available; starting cloud target scans is disabled. */
     private JComponent buildPdcpScanPanel(ReconController controller) {
-        JPanel p = new JPanel();
-        p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
-        p.setBorder(BorderFactory.createTitledBorder(
-                "ProjectDiscovery cloud scan (Nuclei) — runs in the cloud, matches import as native Burp issues"));
-
-        JPasswordField pdKey = new JPasswordField(24);
-        pdKey.setToolTipText("ProjectDiscovery Cloud API key. Blank = $PDCP_API_KEY. Kept in memory only, never saved.");
-        JTextField teamId = new JTextField(8);
-        teamId.setToolTipText("Optional X-Team-Id for team-scoped scans.");
-        JTextField templates = new JTextField(22);
-        templates.setToolTipText("Comma-separated template groups, e.g. cves,exposures,misconfiguration. Blank = recommended.");
-        JCheckBox recommended = new JCheckBox("Recommended templates", true);
-        JTextArea targets = new JTextArea(3, 44);
-        targets.setToolTipText("One target host/URL per line.");
-        JButton fill = new JButton("Fill from in-scope");
-        JButton run = new JButton("Run cloud scan");
-        JLabel pdStatus = new JLabel("Needs a ProjectDiscovery Cloud API key (data is sent to ProjectDiscovery — authorized targets only).");
-
-        JPanel row1 = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        row1.add(new JLabel("PDCP key (blank = $PDCP_API_KEY):")); row1.add(pdKey);
-        row1.add(new JLabel("Team id:")); row1.add(teamId);
-        p.add(row1);
-
-        JPanel row2 = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        row2.add(new JLabel("Templates:")); row2.add(templates); row2.add(recommended);
-        row2.add(fill); row2.add(run);
-        p.add(row2);
-
-        JPanel row3 = new JPanel(new BorderLayout(4, 4));
-        row3.add(new JLabel("Targets (one per line):"), BorderLayout.NORTH);
-        row3.add(new JScrollPane(targets), BorderLayout.CENTER);
-        p.add(row3);
-        p.add(pdStatus);
-
-        fill.addActionListener(e -> {
-            List<String> t = controller.collectInScopeTargets();
-            targets.setText(String.join("\n", t));
-            pdStatus.setText("Filled " + t.size() + " in-scope target(s).");
-        });
-        run.addActionListener(e -> {
-            List<String> targetList = new ArrayList<>();
-            for (String line : targets.getText().split("\\R")) {
-                String v = line.trim();
-                if (!v.isEmpty()) targetList.add(v);
-            }
-            List<String> templateList = new ArrayList<>();
-            for (String s : templates.getText().split(",")) {
-                String v = s.trim();
-                if (!v.isEmpty()) templateList.add(v);
-            }
-            if (targetList.isEmpty()) { pdStatus.setText("Add at least one target (or click 'Fill from in-scope')."); return; }
-            run.setEnabled(false);
-            pdStatus.setText("Starting cloud scan…");
-            controller.runPdcpScan(new String(pdKey.getPassword()), teamId.getText(), targetList, templateList,
-                    recommended.isSelected(), msg -> {
-                        pdStatus.setText(msg);
-                        if (msg.startsWith("PDCP scan") || msg.startsWith("[error]") || msg.contains("failed")) {
-                            run.setEnabled(true);
-                        }
-                    });
-        });
+        JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        p.setBorder(BorderFactory.createTitledBorder("ProjectDiscovery cloud scans"));
+        p.add(new JLabel("Cloud scan creation is paused until target requests can be governed."));
         return p;
     }
 

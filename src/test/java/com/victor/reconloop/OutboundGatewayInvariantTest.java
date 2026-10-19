@@ -30,8 +30,7 @@ import static org.junit.Assert.*;
 public class OutboundGatewayInvariantTest {
     private static final String PACKAGE = "com.victor.reconloop.";
     private static final Set<String> SERVICE_CLIENTS = Set.of(
-            PACKAGE + "LlmClient", PACKAGE + "PassiveOsintClient", PACKAGE + "PdcpClient",
-            PACKAGE + "ReconHoundCli"); // Deliberately outside this native Montoya invariant.
+            PACKAGE + "LlmClient", PACKAGE + "PassiveOsintClient", PACKAGE + "PdcpClient"); // Provider APIs only; no standalone target producer.
 
     @Test
     public void nativeTargetSourcesHaveOneTransportBinding() throws Exception {
@@ -87,6 +86,23 @@ public class OutboundGatewayInvariantTest {
         }
     }
 
+    @Test
+    public void standaloneAndProcessBypassesAreRejectedIncludingMethodReferences() throws Exception {
+        for (String body : List.of(
+                "new ProcessBuilder(\"sqlmap\").start();",
+                "ProcessBuilder.startPipeline(java.util.List.of(new ProcessBuilder(\"sqlmap\")));",
+                "Runtime.getRuntime().exec(new String[]{\"sqlmap\"});",
+                "java.util.concurrent.Callable<Process> start = new ProcessBuilder(\"sqlmap\")::start;",
+                "java.net.http.HttpClient.newHttpClient().send(java.net.http.HttpRequest.newBuilder(java.net.URI.create(\"https://example.test\")).build(), java.net.http.HttpResponse.BodyHandlers.ofString());")) {
+            JavaFileObject source = new SimpleJavaFileObject(URI.create("string:///Bypass.java"), JavaFileObject.Kind.SOURCE) {
+                @Override public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                    return "class Bypass { void run() throws Exception { " + body + " } }";
+                }
+            };
+            assertFalse(body, violations(List.of(source)).isEmpty());
+        }
+    }
+
     private static JavaFileObject fixture(String operation) {
         return new SimpleJavaFileObject(URI.create("string:///Bypass.java"), JavaFileObject.Kind.SOURCE) {
             @Override public CharSequence getCharContent(boolean ignoreEncodingErrors) {
@@ -122,7 +138,10 @@ public class OutboundGatewayInvariantTest {
                     String name = method.getSimpleName().toString();
                     String caller = enclosingClass();
                     boolean forbidden = false;
-                    if (type.equals("burp.api.montoya.http.Http")) {
+                    if ((type.equals("java.lang.ProcessBuilder") && Set.of("start", "startPipeline").contains(name))
+                            || (type.equals("java.lang.Runtime") && name.equals("exec"))) {
+                        forbidden = true; // No Java external target processes, including version checks.
+                    } else if (type.equals("burp.api.montoya.http.Http")) {
                         if (name.equals("sendRequest")) {
                             forbidden = !Set.of(PACKAGE + "MontoyaTargetTransport",
                                     PACKAGE + "CertificateTransparencyClient").contains(caller);

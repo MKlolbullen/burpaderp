@@ -23,7 +23,7 @@ This avoids reimplementing Burp in Go while avoiding shell-pipe orchestration in
 
 | Boundary | Enforced behavior |
 | --- | --- |
-| Go process start | `network_probe` and `active_fuzz` are off by default; `--allow-network` / `--allow-active` are explicit. |
+| Go process start | The sole runner resolves the canonical binary/profile and blocks target HTTP egress before command construction, regardless of risk opt-ins. Provider/DNS profiles and opt-in TCP connect scans remain separate capabilities. |
 | Go tool input/output | `ToolSpec` plus `ContractSocket` validates kinds, schema, scope, size limits, and quarantines rejected JSONL. |
 | Go execution identity | `reconctl run` emits a UUID `run_id` on every accepted output record and in its run summary. |
 | Burp safe HTTP paths | Discovery crawl/redirects, parameter discovery, JWT read-only replay, and subdomain-takeover checks run through `ScanRun` + `RequestPolicy` + `ActiveRequestGateway`; only in-scope `GET`/`HEAD`/`OPTIONS` requests can dispatch, and each logical run has one atomic request budget. |
@@ -31,7 +31,7 @@ This avoids reimplementing Burp in Go while avoiding shell-pipe orchestration in
 | Evidence lifecycle | `SIGNAL`, `CANDIDATE`, `REPRODUCED`, `CONFIRMED`, `EXPLOITABLE`, and `REJECTED` replace a lossy boolean. Legacy `true` maps conservatively to `REPRODUCED`. |
 
 Native target paths now share the gateway. The invariant and its explicit remaining release gates
-are described below; external producers are not covered by the native Montoya guarantee.
+are described below. Unsupported external target-HTTP producers are now fail-closed.
 
 ## Importing sidecar output
 
@@ -157,15 +157,39 @@ construction, and a branch counterexample where a greedy count is smaller than a
 `NativeControllerPreviewIntegrationTest` covers read-only preview entry points, JWT/identity/takeover
 parity, crawler continuation/queue ordering, existing accounting and secret-free display.
 
+## External target-HTTP execution boundary
+
+Native run grants authorize only native gateway dispatches. An external process or remote scan cannot
+turn an initial scoped URL, a process timeout/rate flag, a run ID or validated output into per-request
+permission. Until these producers have controlled egress, their active execution is disabled at the
+lowest production entry point, with no opt-in bypass.
+
+| Producer / prior direct sink | Enforced boundary and retained behavior | Regression evidence |
+| --- | --- | --- |
+| `ReconHoundCli.main` → JDK `HttpClient.send`, automatic `NORMAL` redirects | No HTTP client or target sender remains. `run(args, err)` returns 3 for live inputs before writing a report, including `--fail-on none`. `--body-file` analyzes one saved response with an HTTP(S) metadata URL, without DNS or HTTP. | `ReconHoundCliTest`: local listener stays untouched, existing report preserved, offline SARIF/severity exits and invalid input. CLI JAR smoke runs without Montoya on the classpath. |
+| `SqlmapClient.run` / `isAvailable` → `ProcessBuilder.start` | Neither scan execution nor `--version` can start a process. `run` returns `started=false` with a block reason. Pure argument/output helpers remain. `ReconController.runSqlmap` blocks before queuing; UI execution controls are removed. | `ExternalTargetEgressIntegrationTest`: executable marker remains absent with unsafe arguments; controller calls stay blocked with native grants enabled or disabled. Java architecture test forbids process starts/references. |
+| `PdcpClient.createScan` → `POST /v1/scans` → remote Nuclei target requests | Returns a block reason without HTTP. Controller blocks before resolving credentials or scheduling work. Read-only existing status/results stay fixed to `https://api.projectdiscovery.io` with GET and `Redirect.NEVER`. There is no create/poll loop or launch button. | `PdcpClientEgressTest`: no creation transport calls, GET-only fixed-origin reads and redirecting client rejection. Controller integration checks completion/error callback and no native sends. |
+| `recon.RunProfile` → `RunExternal` → `exec.CommandContext` for `httpx`, `katana`, `nuclei` | `CheckProfileEgress` rejects their canonical `target_http_unsupported` profiles regardless of every risk flag. The private `runExternal` repeats the check at process start and resolves the binary internally; it accepts no binary override. Unknown/unprofiled tools cannot execute. Existing output adapters, `socket`, `render`, `adapt`, `plan` and import stay offline. | `egress_test.go`: all flags granted, zero executions and no executable marker via either entry point. `process_invariant_test.go` resolves import aliases and function references; only the runner may construct processes. |
+
+Go profiles retained for execution are explicitly `subfinder`/`gau` (provider queries), `puredns`/`dnsx`
+(DNS), and `naabu` (TCP connect, still requires `--allow-network` and network scope). These do not share
+native HTTP quotas. The contract trusts installed binaries and their pinned invocation semantics; it
+is not an operating-system network sandbox against replaced binaries, configuration or tool changes.
+`doctor` exposes execution-block reasons and `plan` exposes each profile's egress class. New tools
+need an explicit profile/egress review; the regression allowlist prevents silent new capabilities.
+
+This slice deliberately reduces functionality instead of asserting that a process-level permission
+can govern downstream sends. Restoring CLI fetching needs a policy-bound one-hop JDK transport,
+shared run accounting/cancellation, destination validation and preview. Restoring external active
+processes needs an enforceable proxy/sandbox/adapter that cannot bypass the gate, including redirects,
+auxiliary protocols and child processes. Remote cloud scans need a verifiable downstream enforcement
+contract; cancelling or budgeting the API POST alone is insufficient. These disabled features can wait
+beyond v1.0; re-enabling them without equivalent enforcement cannot.
+
 ### Remaining release gates
 
-This invariant is scoped to native Montoya target traffic. The standalone JDK CLI, external sqlmap,
-HTTP-producing Go profiles and PDCP scan creation are separate producers; native request quotas do
-not meter their downstream traffic. Their process flags or validated output records are not proof of
-a per-request gateway. They need controlled egress or a fail-closed execution boundary before the
-product can claim a unified outbound guarantee.
-
 Issue #44 still requires destination validation tied to the actual DNS/connection path and versioned
-structured evidence persistence, alongside the external-producer boundary above. Plans here
-are in-memory dispatch bindings, not persisted approval artifacts or run audit trails. Do not
-interpret passing native tests as closing #44 or approving v1.0.
+structured evidence persistence. Native plans here are in-memory dispatch bindings, not persisted
+approval artifacts or run audit trails. TCP/DNS/provider process traffic is explicitly outside the
+native HTTP dispatch ledger. Full-product wire-level isolation is not established by these gates.
+Do not interpret passing native/external-boundary tests as closing #44 or approving v1.0.

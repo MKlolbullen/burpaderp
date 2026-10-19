@@ -1,6 +1,6 @@
 # Recon Hound typed recon sidecar
 
-This directory is the Go data-plane foundation for the external-tool pipeline. The Burp extension stays Java/Montoya: Burp is the control plane, authenticated traffic source, evidence viewer, issue sink, and operator UI. Go is used where it is strongest here: concurrent CLI orchestration, typed streaming contracts, process isolation, normalization, and high-volume de-duplication.
+This directory is the Go data-plane foundation for the external-tool pipeline. The Burp extension stays Java/Montoya: Burp is the control plane, authenticated traffic source, evidence viewer, issue sink, and operator UI. Go is used where it is strongest here: concurrent CLI orchestration, typed streaming contracts, process lifetime management, normalization, and high-volume de-duplication.
 
 The important design rule is **tools do not pipe arbitrary strings directly into other tools**. Every boundary is:
 
@@ -82,8 +82,9 @@ piping raw strings between processes.
 | `trufflehog` | source (not modeled) | `finding` | `passive_osint` | **adapter implemented** (`--json` JSONL) |
 
 Like `dalfox`, the XSS specialist `xsstrike` only accepts an explicit
-`parameterized_url` injection point, never a bare `url`, and the three active web
-scanners stay behind the `--allow-active` policy gate. Registering a tool with a
+`parameterized_url` injection point, never a bare `url`, and active web
+scanners remain blocked until both a pinned adapter and governed target egress exist.
+`--allow-active` alone never enables them. Registering a tool with a
 fail-closed adapter is deliberate: it pins the typed contract (what may cross the
 boundary) now, while the version-specific output parser is added later. No
 executable `CommandProfile` is declared for these tools, so `reconctl run` will
@@ -152,4 +153,18 @@ cat dnsx.records.jsonl | ./reconctl socket \
 
 ## Next integration boundary
 
-The next step is a small Java/Montoya bridge that starts the Go sidecar for an explicit scan run and imports `finding`/asset events into the existing `IssueReporter` and models. Do **not** move Burp message mutation/evidence markers into Go: the extension already has the right authority boundary for those operations.
+The Java/Montoya JSONL importer already feeds validated asset/finding events into the existing models and `IssueReporter` without starting tools. A future execution bridge must preserve the egress restrictions below and attach the explicit scan run. Burp message mutation and evidence markers remain in the extension.
+
+## Target HTTP execution is paused (#44)
+
+`httpx`, `katana` and `nuclei` retain pinned command descriptions and output adapters, but cannot
+execute through `run`, even with `--allow-active` or all `RunPolicy` fields enabled. Both `RunProfile`
+and the private process-start boundary reject canonical unsupported egress before any binary starts.
+Unknown/unprofiled tools are blocked too. `doctor` reports the execution block; `plan` includes egress
+classes. Existing `adapt`, `socket`, `render` and Burp JSONL import stay available without execution.
+
+Provider-only `subfinder`/`gau`, DNS `puredns`/`dnsx`, and explicitly opted-in TCP `naabu` profiles remain
+available. Their installed binaries and pinned invocation semantics are trusted; this is not a network
+sandbox and their traffic is not charged to a native HTTP run. Restoring target-HTTP profiles requires
+an enforceable per-request egress adapter covering scope, redirects, quotas, permissions and
+cancellation, rather than additional process flags. See [run governance](../docs/RUN_GOVERNANCE.md).

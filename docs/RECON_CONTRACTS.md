@@ -1,5 +1,10 @@
 # Typed recon contracts: merged architecture
 
+Current execution status: target-HTTP Go profiles, external sqlmap, PDCP scan creation and live CLI
+fetching are disabled pending governed egress (#44). Graphs and planned compositions below describe
+contracts, not permission to execute. See [run governance](RUN_GOVERNANCE.md) for the enforced boundary.
+
+
 The newer contract-first diagram is the stronger architecture. The older diagram described a useful *sequence of tools*; this one defines what each stage is allowed to consume and produce, which is what makes the sequence reliable enough to become a real orchestration engine.
 
 ## Where it overlaps with Recon Hound today
@@ -17,7 +22,7 @@ The newer contract-first diagram is the stronger architecture. The older diagram
 | Payloads | `PayloadLibrary` + `CorpusFuzzEngine` implicit routing | explicit payload family/role/consumer policy |
 | Findings | strong: all roads already lead to `IssueReporter` | external finding records become one more source for that sink |
 | Bad/incompatible output | mostly logs/ignored parser failures | reject/quarantine stream is a first-class artifact |
-| Request/process limits | atomic Java request budgets; sqlmap timeout | bounded shell-free external process runner + socket limits |
+| Request/process limits | atomic Java request budgets; external sqlmap execution disabled | bounded shell-free external process runner + socket limits |
 
 ## Recommended combined graph
 

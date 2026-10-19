@@ -68,7 +68,7 @@ Usage:
   # execute a pinned command profile between both contract sockets
   reconctl run --tool subfinder --scope-domain example.com < domains.jsonl
   reconctl run --tool naabu --scope-cidr 203.0.113.0/24 --allow-network < ips.jsonl
-  reconctl run --tool nuclei --scope-domain example.com --allow-active < urls.jsonl
+  # httpx, katana and nuclei execution is blocked pending governed target HTTP egress
 
 Shared stream flags:
   --scope-domain example.com        repeatable
@@ -78,19 +78,22 @@ Shared stream flags:
   --rejects run/rejects.jsonl      append rejected records with reason/provenance
 
 run additionally requires explicit --allow-network for network_probe tools and
---allow-active for active-fuzz/vulnerability tools. No shell command string is
+--allow-active for active-fuzz/vulnerability risk. These flags cannot enable unsupported
+target HTTP producers. Passive provider, DNS and opt-in TCP profiles remain available.
+No shell command string is
 constructed; pinned argument vectors are executed directly.`)
 }
 
 type doctorRow struct {
-	Name     string          `json:"name"`
-	Binary   string          `json:"binary"`
-	Found    bool            `json:"found"`
-	Path     string          `json:"path,omitempty"`
-	Profiled bool            `json:"profiled"`
-	Consumes []recon.Kind    `json:"consumes"`
-	Produces []recon.Kind    `json:"produces"`
-	Risk     recon.RiskClass `json:"risk"`
+	Name             string          `json:"name"`
+	Binary           string          `json:"binary"`
+	Found            bool            `json:"found"`
+	Path             string          `json:"path,omitempty"`
+	Profiled         bool            `json:"profiled"`
+	ExecutionBlocked string          `json:"execution_blocked,omitempty"`
+	Consumes         []recon.Kind    `json:"consumes"`
+	Produces         []recon.Kind    `json:"produces"`
+	Risk             recon.RiskClass `json:"risk"`
 }
 
 func runDoctor(w io.Writer) error {
@@ -99,8 +102,13 @@ func runDoctor(w io.Writer) error {
 	for _, spec := range registry.List() {
 		path, err := exec.LookPath(spec.Binary)
 		_, profiled := recon.CommandProfileFor(spec.Name)
+		blocked := ""
+		if err := recon.CheckProfileEgress(spec.Name); err != nil {
+			blocked = err.Error()
+		}
 		rows = append(rows, doctorRow{
-			Name: spec.Name, Binary: spec.Binary, Found: err == nil, Path: path, Profiled: profiled,
+			ExecutionBlocked: blocked,
+			Name:             spec.Name, Binary: spec.Binary, Found: err == nil, Path: path, Profiled: profiled,
 			Consumes: spec.Consumes, Produces: spec.Produces, Risk: spec.Risk,
 		})
 	}
