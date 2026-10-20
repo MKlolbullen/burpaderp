@@ -1,109 +1,102 @@
 package com.victor.reconloop;
 
+import java.io.PrintStream;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-/**
- * Standalone, Burp-free command-line scanner for CI. Fetches target URLs over HTTP and runs Recon
- * Hound's pure passive engines — secret detection (RegexHound), software-composition analysis
- * (DependencyVulnEngine), heuristic DOM-XSS (DomXssEngine) and exposed-source-map detection — then
- * writes a SARIF 2.1.0 report and exits non-zero when findings meet a severity threshold, so it can
- * gate a pipeline. Uses only dependency-free, Montoya-free classes, so it runs with plain
- * {@code java -jar burp-recon-hound.jar <urls>}.
- */
+/** Burp-free offline response analysis. Live fetching stays disabled until it shares the outbound gate. */
 public final class ReconHoundCli {
 
     private record Finding(String ruleId, String name, String severity, String url, String detail) {}
-    record Options(List<String> urls, Path output, String failOn, boolean help) {}
+    record Options(List<String> urls, Path output, String failOn, boolean help, Path bodyFile, String contentType) {}
 
     public static void main(String[] args) throws Exception {
+        int status = run(args, System.err);
+        if (status != 0) System.exit(status);
+    }
+
+    static int run(String[] args, PrintStream err) throws Exception {
         Options options;
         try {
             options = parseOptions(args);
-        } catch (IllegalArgumentException e) {
-            System.err.println("Error: " + e.getMessage());
-            printHelp();
-            System.exit(2);
-            return;
+        } catch (IllegalArgumentException | java.io.IOException e) {
+            err.println("Error: " + e.getMessage());
+            printHelp(err);
+            return 2;
         }
         if (options.help()) {
-            printHelp();
-            return;
+            printHelp(err);
+            return 0;
         }
         if (options.urls().isEmpty()) {
-            System.err.println("No target URLs supplied.");
-            printHelp();
-            System.exit(2);
-            return;
+            err.println("No target URL supplied as artifact metadata.");
+            printHelp(err);
+            return 2;
         }
-
-        HttpClient http = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(15))
-                .followRedirects(HttpClient.Redirect.NORMAL)
-                .build();
+        if (options.bodyFile() == null) {
+            err.println(ExternalTargetEgress.blocked("CLI live fetching")
+                    + " Use --body-file to analyze a saved response; no report was written.");
+            return 3;
+        }
+        if (!Files.isRegularFile(options.bodyFile())) {
+            err.println("--body-file must name a regular local file.");
+            return 2;
+        }
+        String body;
+        try {
+            body = Files.readString(options.bodyFile());
+        } catch (java.io.IOException e) {
+            err.println("Could not read --body-file: " + e.getMessage());
+            return 2;
+        }
+        String url = options.urls().getFirst(); // Metadata only: never resolved or fetched.
+        String contentType = options.contentType();
         RegexHound regex = new RegexHound();
         DependencyVulnEngine sca = new DependencyVulnEngine();
         List<Finding> findings = new ArrayList<>();
 
-        for (String url : options.urls()) {
-            try {
-                HttpResponse<String> response = http.send(
-                        HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(30)).GET().build(),
-                        HttpResponse.BodyHandlers.ofString());
-                String body = response.body();
-                String contentType = response.headers().firstValue("content-type").orElse("");
-                System.err.println("[recon-hound] " + response.statusCode() + " " + url + " (" + body.length() + " bytes)");
-
-                for (RegexHound.Finding f : regex.scan(body, "response", url, false)) {
-                    if (f.rule().severity() == RegexHound.Severity.INFO) continue;
-                    findings.add(new Finding("secret-" + slug(f.rule().name()), "Secret: " + f.rule().name(),
-                            severity(f.rule().severity()), url,
-                            "Provider " + f.rule().provider() + "; value " + RegexHound.redact(f.value())));
-                }
-                for (DependencyVulnEngine.LibIssue lib : sca.scan(url, body)) {
-                    findings.add(new Finding("sca-" + slug(lib.library()),
-                            "Vulnerable dependency: " + lib.library() + " " + lib.version(),
-                            lib.severity(), url, lib.detail() + " (" + lib.reference() + ")"));
-                }
-                boolean scriptish = contentType.contains("javascript") || contentType.contains("html")
-                        || stripQuery(url).endsWith(".js");
-                if (scriptish) {
-                    for (DomXssEngine.DomFinding d : DomXssEngine.analyze(body)) {
-                        findings.add(new Finding("domxss-" + slug(d.sink()),
-                                "Potential DOM XSS (" + d.source() + " -> " + d.sink() + ")", "MEDIUM", url, d.snippet()));
-                    }
-                }
-                if (SourceMapMiner.looksLikeSourceMap(url, contentType, body)) {
-                    findings.add(new Finding("sourcemap", "Source map exposed", "LOW", url,
-                            "A JavaScript source map is publicly accessible."));
-                }
-            } catch (Exception e) {
-                System.err.println("[recon-hound] error fetching " + url + ": " + e.getMessage());
+        for (RegexHound.Finding f : regex.scan(body, "response", url, false)) {
+            if (f.rule().severity() == RegexHound.Severity.INFO) continue;
+            findings.add(new Finding("secret-" + slug(f.rule().name()), "Secret: " + f.rule().name(),
+                    severity(f.rule().severity()), url,
+                    "Provider " + f.rule().provider() + "; value " + RegexHound.redact(f.value())));
+        }
+        for (DependencyVulnEngine.LibIssue lib : sca.scan(url, body)) {
+            findings.add(new Finding("sca-" + slug(lib.library()),
+                    "Vulnerable dependency: " + lib.library() + " " + lib.version(),
+                    lib.severity(), url, lib.detail() + " (" + lib.reference() + ")"));
+        }
+        boolean scriptish = contentType.contains("javascript") || contentType.contains("html")
+                || stripQuery(url).endsWith(".js");
+        if (scriptish) {
+            for (DomXssEngine.DomFinding d : DomXssEngine.analyze(body)) {
+                findings.add(new Finding("domxss-" + slug(d.sink()),
+                        "Potential DOM XSS (" + d.source() + " -> " + d.sink() + ")", "MEDIUM", url, d.snippet()));
             }
         }
-
+        if (SourceMapMiner.looksLikeSourceMap(url, contentType, body)) {
+            findings.add(new Finding("sourcemap", "Source map detected in saved response", "LOW", url,
+                    "The saved response contains a JavaScript source map; public accessibility was not checked."));
+        }
         Path parent = options.output().toAbsolutePath().getParent();
         if (parent != null) Files.createDirectories(parent);
         Files.writeString(options.output(), toSarif(findings));
-        System.err.println("[recon-hound] " + findings.size() + " finding(s) written to " + options.output());
+        err.println("[recon-hound] " + findings.size() + " finding(s) written to " + options.output());
 
         int threshold = rank(options.failOn());
         long breaching = threshold < 0 ? 0
                 : findings.stream().filter(f -> rank(f.severity().toLowerCase(Locale.ROOT)) <= threshold).count();
         if (breaching > 0) {
-            System.err.println("[recon-hound] " + breaching + " finding(s) at or above '" + options.failOn() + "' — failing the build.");
-            System.exit(1);
+            err.println("[recon-hound] " + breaching + " finding(s) at or above '" + options.failOn() + "' — failing the build.");
+            return 1;
         }
+        return 0;
     }
 
     static Options parseOptions(String[] args) throws Exception {
@@ -111,6 +104,8 @@ public final class ReconHoundCli {
         Path output = Path.of("recon-hound.sarif");
         String failOn = "high";
         boolean help = false;
+        Path bodyFile = null;
+        String contentType = "text/html";
 
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
@@ -124,6 +119,8 @@ public final class ReconHoundCli {
                         if (!value.isEmpty() && !value.startsWith("#")) urls.add(validateUrl(value));
                     }
                 }
+                case "--body-file" -> bodyFile = Path.of(requireValue(args, ++i, arg));
+                case "--content-type" -> contentType = requireValue(args, ++i, arg).toLowerCase(Locale.ROOT);
                 case "-h", "--help" -> help = true;
                 default -> {
                     if (arg.startsWith("-")) throw new IllegalArgumentException("unknown option: " + arg);
@@ -134,7 +131,10 @@ public final class ReconHoundCli {
         if (rank(failOn) < 0 && !"none".equals(failOn)) {
             throw new IllegalArgumentException("invalid --fail-on level: " + failOn);
         }
-        return new Options(List.copyOf(urls), output, failOn, help);
+        if (bodyFile != null && urls.size() != 1) {
+            throw new IllegalArgumentException("--body-file requires exactly one HTTP(S) URL as artifact metadata");
+        }
+        return new Options(List.copyOf(urls), output, failOn, help, bodyFile, contentType);
     }
 
     private static String requireValue(String[] args, int index, String option) {
@@ -230,20 +230,23 @@ public final class ReconHoundCli {
         return LlmProvider.jsonEscape(value == null ? "" : value);
     }
 
-    private static void printHelp() {
-        System.err.println("""
-                Recon Hound CLI — Burp-free CI scanner (secrets, SCA, DOM-XSS, exposed source maps)
+    private static void printHelp(PrintStream err) {
+        err.println("""
+                Recon Hound CLI — Burp-free offline CI scanner (secrets, SCA, DOM-XSS, exposed source maps)
 
                 Usage:
-                  java -jar burp-recon-hound.jar [options] <url> [<url> ...]
+                  java -jar burp-recon-hound.jar [options] --body-file <path> <artifact-url>
 
                 Options:
+                      --body-file <p>  Analyze a saved response body; URL is metadata only
+                      --content-type <t> Content type for offline analysis (default: text/html)
                   -f, --file <path>     Read target URLs (one per line) from a file
                   -o, --output <path>   SARIF output path (default: recon-hound.sarif)
                       --fail-on <lvl>   Exit non-zero if any finding is >= lvl:
                                         high (default) | medium | low | info | none
                   -h, --help            Show this help
 
-                Exit codes: 0 clean, 1 findings at/above --fail-on, 2 bad usage.""");
+                Live HTTP fetching is disabled pending the outbound gateway (#44).
+                Exit codes: 0 clean, 1 findings at/above --fail-on, 2 bad input, 3 live fetching blocked.""");
     }
 }

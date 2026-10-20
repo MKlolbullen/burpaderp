@@ -30,8 +30,7 @@ import static org.junit.Assert.*;
 public class OutboundGatewayInvariantTest {
     private static final String PACKAGE = "com.victor.reconloop.";
     private static final Set<String> SERVICE_CLIENTS = Set.of(
-            PACKAGE + "LlmClient", PACKAGE + "PassiveOsintClient", PACKAGE + "PdcpClient",
-            PACKAGE + "ReconHoundCli"); // Deliberately outside this native Montoya invariant.
+            PACKAGE + "LlmClient", PACKAGE + "PassiveOsintClient", PACKAGE + "PdcpClient"); // Provider APIs only; no standalone target producer.
 
     @Test
     public void nativeTargetSourcesHaveOneTransportBinding() throws Exception {
@@ -87,6 +86,35 @@ public class OutboundGatewayInvariantTest {
         }
     }
 
+    @Test
+    public void standaloneAndProcessBypassesAreRejectedIncludingMethodReferences() throws Exception {
+        for (String body : List.of(
+                "new ProcessBuilder(\"sqlmap\").start();",
+                "ProcessBuilder.startPipeline(java.util.List.of(new ProcessBuilder(\"sqlmap\")));",
+                "Runtime.getRuntime().exec(new String[]{\"sqlmap\"});",
+                "java.util.concurrent.Callable<Process> start = new ProcessBuilder(\"sqlmap\")::start;",
+                "java.net.http.HttpClient.newHttpClient().send(java.net.http.HttpRequest.newBuilder(java.net.URI.create(\"https://example.test\")).build(), java.net.http.HttpResponse.BodyHandlers.ofString());")) {
+            JavaFileObject source = new SimpleJavaFileObject(URI.create("string:///Bypass.java"), JavaFileObject.Kind.SOURCE) {
+                @Override public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                    return "class Bypass { void run() throws Exception { " + body + " } }";
+                }
+            };
+            assertFalse(body, violations(List.of(source)).isEmpty());
+        }
+    }
+
+    @Test public void preparationDispatchAndDynamicIpLookupCannotBypassTheGateway() throws Exception {
+        for (String body : List.of("prepared.prepare(request);", "dispatch.send();", "request.httpService().ipAddress();",
+                "java.net.InetAddress.getAllByName(\"example.test\");")) {
+            JavaFileObject source = new SimpleJavaFileObject(URI.create("string:///Bypass.java"), JavaFileObject.Kind.SOURCE) {
+                @Override public CharSequence getCharContent(boolean ignored) {
+                    return "package com.victor.reconloop; class Bypass { void run(ActiveRequestGateway.PreparedSender prepared, ActiveRequestGateway.Dispatch dispatch, burp.api.montoya.http.message.requests.HttpRequest request) throws Exception { " + body + " } }";
+                }
+            };
+            assertFalse(body, violations(List.of(source)).isEmpty());
+        }
+    }
+
     private static JavaFileObject fixture(String operation) {
         return new SimpleJavaFileObject(URI.create("string:///Bypass.java"), JavaFileObject.Kind.SOURCE) {
             @Override public CharSequence getCharContent(boolean ignoreEncodingErrors) {
@@ -122,17 +150,28 @@ public class OutboundGatewayInvariantTest {
                     String name = method.getSimpleName().toString();
                     String caller = enclosingClass();
                     boolean forbidden = false;
-                    if (type.equals("burp.api.montoya.http.Http")) {
+                    if ((type.equals("java.lang.ProcessBuilder") && Set.of("start", "startPipeline").contains(name))
+                            || (type.equals("java.lang.Runtime") && name.equals("exec"))) {
+                        forbidden = true; // No Java external target processes, including version checks.
+                    } else if (type.equals("burp.api.montoya.http.Http")) {
                         if (name.equals("sendRequest")) {
                             forbidden = !Set.of(PACKAGE + "MontoyaTargetTransport",
                                     PACKAGE + "CertificateTransparencyClient").contains(caller);
                         } else if (Set.of("sendRequests", "createRequestEngine").contains(name)) forbidden = true;
                     } else if (type.equals(PACKAGE + "ActiveRequestGateway.Sender") && name.equals("send")) {
                         forbidden = !caller.equals(PACKAGE + "ActiveRequestGateway");
+                    } else if (type.equals(PACKAGE + "ActiveRequestGateway.Dispatch") && name.equals("send")) {
+                        forbidden = !caller.equals(PACKAGE + "ActiveRequestGateway");
+                    } else if (type.equals(PACKAGE + "ActiveRequestGateway.PreparedSender") && name.equals("prepare")) {
+                        forbidden = !caller.equals(PACKAGE + "ActiveRequestGateway");
                     } else if (type.equals(PACKAGE + "RequestPolicy") && name.equals("assessTemplate")) {
                         forbidden = !caller.equals(PACKAGE + "RequestPreview");
                     } else if (type.equals(PACKAGE + "MontoyaTargetTransport")) {
-                        forbidden = !name.equals("<init>") || !caller.equals(PACKAGE + "ReconController");
+                        forbidden = !caller.equals(type) && !(name.equals("<init>") && caller.equals(PACKAGE + "ReconController"));
+                    } else if (type.equals("burp.api.montoya.http.HttpService") && name.equals("ipAddress")) {
+                        forbidden = true; // Dynamic name resolution is not a connection attestation.
+                    } else if (type.equals("java.net.InetAddress") && Set.of("getByName", "getAllByName").contains(name)) {
+                        forbidden = !caller.equals(PACKAGE + "DestinationGuard");
                     } else if (type.equals("java.net.http.HttpClient") && Set.of("send", "sendAsync").contains(name)) {
                         forbidden = !SERVICE_CLIENTS.contains(caller);
                     }

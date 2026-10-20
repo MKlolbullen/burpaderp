@@ -2,9 +2,8 @@ package recon
 
 import "fmt"
 
-// RunPolicy is the process-start gate for external tools. Scope validation still
-// happens per record; this answers the separate question "may this class of tool
-// run at all in the current scan mode?".
+// RunPolicy records operator risk grants. The independent canonical-profile egress gate
+// still applies at process start, and scope validation happens per input/output record.
 type RunPolicy struct {
 	AllowPassiveOSINT   bool `json:"allow_passive_osint"`
 	AllowLocalTransform bool `json:"allow_local_transform"`
@@ -18,12 +17,12 @@ type RunPolicy struct {
 // raw network scans and vulnerability/fuzzing stages behind explicit opt-in.
 func DefaultRunPolicy() RunPolicy {
 	return RunPolicy{
-		AllowPassiveOSINT: true,
+		AllowPassiveOSINT:   true,
 		AllowLocalTransform: true,
-		AllowDNSProbe: true,
-		AllowHTTPProbe: true,
-		AllowNetworkProbe: false,
-		AllowActiveFuzz: false,
+		AllowDNSProbe:       true,
+		AllowHTTPProbe:      true,
+		AllowNetworkProbe:   false,
+		AllowActiveFuzz:     false,
 	}
 }
 
@@ -42,6 +41,8 @@ func (p RunPolicy) Check(spec ToolSpec) error {
 		allowed = p.AllowNetworkProbe
 	case RiskActiveFuzz:
 		allowed = p.AllowActiveFuzz
+	default:
+		return fmt.Errorf("tool %s has unknown risk=%s", spec.Name, spec.Risk)
 	}
 	if !allowed {
 		return fmt.Errorf("tool %s risk=%s is disabled by run policy", spec.Name, spec.Risk)

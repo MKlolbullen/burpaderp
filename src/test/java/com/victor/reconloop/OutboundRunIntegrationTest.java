@@ -22,7 +22,7 @@ public class OutboundRunIntegrationTest {
         }
         try (FakeMontoya fake = new FakeMontoya()) {
             ActiveRequestGateway gateway = new ActiveRequestGateway(RequestPolicy.safeDefault(url -> true),
-                    new MontoyaTargetTransport(fake.api));
+                    fake.transport());
             ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), 7);
             CorpusFuzzEngine corpus = new CorpusFuzzEngine(fake.api, new PayloadLibrary(folder.getRoot().toPath()), 0);
             HttpRequest a = fake.request("https://a.example.test/search?q=a");
@@ -43,7 +43,7 @@ public class OutboundRunIntegrationTest {
     @Test public void concurrentGatewayDispatchNeverEmitsRequestSeventyFour() throws Exception {
         try (FakeMontoya fake = new FakeMontoya()) {
             ActiveRequestGateway gateway = new ActiveRequestGateway(RequestPolicy.safeDefault(url -> true),
-                    new MontoyaTargetTransport(fake.api));
+                    fake.transport());
             ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(),
                     new ScanRun.RequestLimits(73, 73, 73, 73));
             HttpRequest request = fake.request("https://api.example.test/search?q=a");
@@ -69,7 +69,7 @@ public class OutboundRunIntegrationTest {
     @Test public void concurrentDenialsLeaveEveryQuotaDimensionConsistent() throws Exception {
         try (FakeMontoya fake = new FakeMontoya()) {
             ActiveRequestGateway gateway = new ActiveRequestGateway(RequestPolicy.safeDefault(url -> true),
-                    new MontoyaTargetTransport(fake.api));
+                    fake.transport());
             ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(),
                     new ScanRun.RequestLimits(100, 7, 3, 4));
             ExecutorService pool = Executors.newFixedThreadPool(8);

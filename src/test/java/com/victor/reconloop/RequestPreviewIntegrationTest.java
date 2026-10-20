@@ -19,11 +19,11 @@ public class RequestPreviewIntegrationTest {
             var report = RequestPreview.inspect(run, safe(),steps);
             assertEquals(4, report.admitted()); assertEquals(3,report.conditionalAdmitted());
             assertEquals(0,run.requestBudget().used()); assertTrue(fake.sent.isEmpty());
-            engine.discover(base,run,new ActiveRequestGateway(safe(),new MontoyaTargetTransport(fake.api)),0);
+            engine.discover(base,run,new ActiveRequestGateway(safe(),fake.transport()),0);
             assertEquals(report.admitted(),fake.sent.size());
             for (int i=0;i<steps.size();i++) {
                 assertArrayEquals(steps.get(i).request().toByteArray().getBytes(),fake.sent.get(i).toByteArray().getBytes());
-                assertTrue(steps.get(i).plan().matches(fake.sent.get(i)));
+                assertTrue(steps.get(i).plan().matches(fake.sent.get(i).withService(steps.get(i).request().httpService())));
                 assertEquals("session=original",fake.sent.get(i).headerValue("Cookie"));
             }
             assertEquals(List.of(0,20,20,5),steps.stream().map(NativeRequestStep::addedParameters).toList());
@@ -36,7 +36,7 @@ public class RequestPreviewIntegrationTest {
             var report = RequestPreview.inspect(run(10),safe(),engine.plan(fake.request(URL)));
             assertEquals(2,report.admitted()); assertEquals(1,report.conditionalAdmitted());
             fake.responder = request -> null;
-            engine.discover(fake.request(URL),run(10),new ActiveRequestGateway(safe(),new MontoyaTargetTransport(fake.api)),0);
+            engine.discover(fake.request(URL),run(10),new ActiveRequestGateway(safe(),fake.transport()),0);
             assertEquals(1,fake.sent.size());
         }
     }
@@ -61,7 +61,7 @@ public class RequestPreviewIntegrationTest {
                     new ScanRun.RequestLimits(10,10,2,10),new ScanRun.RequestLimits(10,10,10,2))) {
                 ScanRun run = ScanRun.begin(ScanProfile.ACTIVE_SAFE,ScopeSnapshot.empty(),limits);
                 HttpRequest request = fake.request(URL);
-                ActiveRequestGateway gateway = new ActiveRequestGateway(safe(),new MontoyaTargetTransport(fake.api));
+                ActiveRequestGateway gateway = new ActiveRequestGateway(safe(),fake.transport());
                 var step = step(request,"probe");
                 assertTrue(gateway.send(run,step.plan(),request).dispatched());
                 int before = fake.sent.size();
@@ -150,7 +150,7 @@ public class RequestPreviewIntegrationTest {
                 controller.setActiveTestsEnabled(true);
                 controller.introspectGraphql(URL); controller.fuzzGraphql(URL); executor.runAll();
                 assertEquals(4,fake.sent.size());
-                for (int i=0;i<expected.size();i++) assertTrue(expected.get(i).plan().matches(fake.sent.get(i)));
+                for (int i=0;i<expected.size();i++) assertTrue(expected.get(i).plan().matches(fake.sent.get(i).withService(expected.get(i).request().httpService())));
             } finally { controller.shutdown(); }
         }
     }

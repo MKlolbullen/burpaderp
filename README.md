@@ -29,9 +29,9 @@ and nothing that touches the target happens without a human first.
 | --- | --- |
 | 🔎 **Discover** | Crawl + redirect chains, **webpack-chunk reconstruction**, source-map mining, OpenAPI/GraphQL ingest, crt.sh subdomains, Arjun param discovery, host/IP inventory |
 | 🩻 **Detect** | Secrets (RegexHound + `gf`), **SCA** for vulnerable JS libs, reflected-XSS surface, **DOM-XSS** source→sink, CORS/CSP/JWT hygiene, **clickjacking & security-header** checks, **session-cookie & CSRF** hygiene, **excessive data exposure / mass assignment**, **OAuth/OIDC** & **SAML** flaws, debug-endpoint & **BFLA** candidates, disclosure signals, exposed source maps |
-| 💥 **Exploit** | Collaborator-backed **SSRF/SSTI/blind-XSS/CMDi**, native **SQLi** (error/boolean/time-based) + optional **sqlmap** hand-off, error-based **NoSQL injection**, canary-confirmed **path traversal / LFI**, in-band & OOB **XXE**, active **CORS** origin-bypass confirmation, **rate-limit** & **file-upload** probes, access-control/**IDOR**, **JWT** `alg:none` + weak-secret **forgery**, **GraphQL fuzzing**, **subdomain takeover**, open-redirect/CRLF, opt-in **encoded corpus fuzzing** |
+| 💥 **Exploit** | Collaborator-backed **SSRF/SSTI/blind-XSS/CMDi**, native **SQLi** (error/boolean/time-based; external sqlmap execution paused), error-based **NoSQL injection**, canary-confirmed **path traversal / LFI**, in-band & OOB **XXE**, active **CORS** origin-bypass confirmation, **rate-limit** & **file-upload** probes, access-control/**IDOR**, **JWT** `alg:none` + weak-secret **forgery**, **GraphQL fuzzing**, **subdomain takeover**, open-redirect/CRLF, opt-in **encoded corpus fuzzing** |
 | 🤖 **Agents** | A configurable multi-provider **AI agent team** over the finding inventory — recon → PoC drafter → adversarial verifier → leader — behind a **fail-closed human-approval gate**: it reasons, it never touches the target on its own |
-| 🧠 **AI** | Five providers run together — **LLM JS bug-hunt** (PoC), cross-finding **exploit-chaining**, cross-provider **false-positive triage** (majority vote), **Nuclei** AI templates + **ProjectDiscovery cloud** scans |
+| 🧠 **AI** | Five providers run together — **LLM JS bug-hunt** (PoC), cross-finding **exploit-chaining**, cross-provider **false-positive triage** (majority vote), **Nuclei** AI templates (cloud scan creation paused) |
 | 👁️ **Observe** | A single **AI feed** streams every LLM touchpoint — triage, JS review, chaining, Nuclei authoring, agent rounds, and every gate decision — newest-first, with an estimated-usage meter, in-memory and never persisted |
 | 📤 **Operate** | Native Burp issues + a passive **ScanCheck**, **SARIF + Markdown** export, per-project **persistence**, a typed Go **`reconctl` sidecar import**, and a **headless CI scanner** (`java -jar`) |
 
@@ -199,9 +199,8 @@ malform the request or drop the session.
 - **SQL injection** (`ActiveTestEngine`) — native **error-based** (DB error signature diffed against a
   baseline), **boolean-based blind** (true-vs-false response divergence), and **time-based blind**
   (MySQL `SLEEP`, PostgreSQL `pg_sleep`, MSSQL `WAITFOR DELAY`) detection, using a small clean payload
-  set. A confirmed parameter can be handed to a locally-installed **sqlmap** (`SqlmapClient`) for
-  deeper confirmation — default flags are confirmation-only; dumping/shell options only appear if you
-  type them yourself.
+  set. External **sqlmap** execution, including binary checks, is paused until its target
+  requests can share the outbound policy; native SQLi probes remain available.
 - **SSTI** — template-arithmetic polyglots (`{{7*777}}`, `${7*777}`, `#{7*777}`, `<%=7*777%>`, …)
   confirmed only when the distinctive product `5439` is evaluated into the response.
 - **NoSQL injection** — error-based, Mongo-style: injects values that break a query or its `$where`
@@ -341,9 +340,9 @@ finding) to the enabled providers for review.
 - **AI Nuclei templates.** A **Nuclei templates (AI)** tab turns a natural-language description into a
   ready-to-run **Nuclei v3 YAML** template using whichever provider is selected — mirroring
   ProjectDiscovery's cloud `POST /v1/template/ai` with no PDCP account.
-- **ProjectDiscovery cloud scan.** The same tab can launch a **cloud Nuclei scan** with a PDCP API
-  key, poll it to completion, and import every match as a native Burp issue (raw request/response
-  attached when it parses). The key stays in memory / `$PDCP_API_KEY`.
+- **ProjectDiscovery cloud scan.** Starting **cloud Nuclei scans** is paused until downstream target
+  requests can be governed. AI template generation and typed JSONL result import remain available.
+  `PdcpClient` retains read-only status/result API support; scan creation cannot send an API request.
 - **Right-click integration.** Any request/response in Proxy history, the site map, or Repeater has a
   **Recon Hound: AI analysis** submenu — *explain & attack surface*, *find vulnerabilities*, and
   *suggest exploitation & chaining* — plus selection-only variants when text is highlighted.
@@ -393,29 +392,35 @@ deliberately *not* persisted — see above.)
 
 ## CI-native scanning (no Burp required)
 
-The same jar is a standalone command-line scanner — its passive engines (secret detection, SCA,
-heuristic DOM-XSS, exposed source maps) are Burp-free, so they run anywhere with `java -jar`:
+The same jar analyzes saved response bodies with its Burp-free passive engines (secret detection,
+SCA, heuristic DOM-XSS and source-map recognition):
 
-```
-java -jar burp-recon-hound.jar --fail-on high -o recon-hound.sarif https://target.example/app.js
-java -jar burp-recon-hound.jar --file targets.txt --fail-on medium
+```bash
+java -jar burp-recon-hound.jar --body-file artifacts/app.js --content-type application/javascript \
+  --fail-on high -o recon-hound.sarif https://target.example/app.js
 ```
 
-It validates and de-duplicates HTTP(S) targets, fetches each URL, creates missing report directories,
-writes a **SARIF 2.1.0** report, and exits non-zero when a finding meets `--fail-on` (`high` default /
-`medium` / `low` / `info` / `none`) so it can gate a pipeline. Target files accept blank lines and
-`#` comments. Invalid URLs, unknown options, missing option values, and invalid severity thresholds
-fail fast with exit code 2. A ready **`Recon Scan`** GitHub Actions workflow
-(`.github/workflows/recon-scan.yml`, `workflow_dispatch`) builds the jar, scans the URLs you pass, and
-uploads the SARIF artifact.
+The single HTTP(S) URL is artifact metadata and is never resolved or fetched. Live URL fetching is
+paused until it can use the shared outbound policy. A live invocation, including `--file targets.txt`,
+exits **3** before creating or replacing a report, even with `--fail-on none`. `--body-file` accepts one
+regular local file and exactly one metadata URL; `--content-type` defaults to `text/html`. Offline
+analysis does not establish public accessibility of a detected source map.
+
+Offline mode creates report directories and writes **SARIF 2.1.0**. Exit codes are 0 clean, 1 findings
+meeting `--fail-on` (`high` / `medium` / `low` / `info` / `none`), 2 bad input, and 3 blocked live fetching.
+The **Recon Scan** workflow (`.github/workflows/recon-scan.yml`) accepts a saved body path already in
+the checkout and its metadata URL; it performs no target download.
 
 ## Run governance & the `reconctl` sidecar
 
 Active behaviour is governed by an explicit control plane: a per-run request policy and hard request
-**budget** gate every native Montoya target dispatch. Each active run carries a scope snapshot,
-and findings carry an explicit verification state rather than a loose "confirmed" flag. An optional typed Go **`reconctl`** sidecar
-keeps external network scans and active fuzzing behind explicit command flags and typed input/output
-contracts; Burp **re-checks scope** when importing its JSONL, and importing never launches a tool or
+**budget** gate every native Montoya target dispatch. Each active run carries a scope snapshot.
+Native sends now resolve/validate DNS answers and bind a numeric Montoya service with original SNI
+and message bytes; Burp physical-peer verification remains a release gate. See the
+[DNS/API contract and runtime limits](docs/RUN_GOVERNANCE.md#dns-and-numeric-service-binding).
+Findings carry an explicit verification state rather than a loose "confirmed" flag. An optional typed Go **`reconctl`** sidecar
+blocks unsupported target-HTTP producers even with opt-in flags, while retaining provider/DNS
+profiles, explicit opt-in TCP scans and typed input/output contracts; Burp **re-checks scope** when importing its JSONL, and importing never launches a tool or
 sends a request. See **[run governance and the sidecar handoff](docs/RUN_GOVERNANCE.md)** and the
 [recon contracts](docs/RECON_CONTRACTS.md).
 

@@ -23,7 +23,7 @@ This avoids reimplementing Burp in Go while avoiding shell-pipe orchestration in
 
 | Boundary | Enforced behavior |
 | --- | --- |
-| Go process start | `network_probe` and `active_fuzz` are off by default; `--allow-network` / `--allow-active` are explicit. |
+| Go process start | The sole runner resolves the canonical binary/profile and blocks target HTTP egress before command construction, regardless of risk opt-ins. Provider/DNS profiles and opt-in TCP connect scans remain separate capabilities. |
 | Go tool input/output | `ToolSpec` plus `ContractSocket` validates kinds, schema, scope, size limits, and quarantines rejected JSONL. |
 | Go execution identity | `reconctl run` emits a UUID `run_id` on every accepted output record and in its run summary. |
 | Burp safe HTTP paths | Discovery crawl/redirects, parameter discovery, JWT read-only replay, and subdomain-takeover checks run through `ScanRun` + `RequestPolicy` + `ActiveRequestGateway`; only in-scope `GET`/`HEAD`/`OPTIONS` requests can dispatch, and each logical run has one atomic request budget. |
@@ -31,7 +31,7 @@ This avoids reimplementing Burp in Go while avoiding shell-pipe orchestration in
 | Evidence lifecycle | `SIGNAL`, `CANDIDATE`, `REPRODUCED`, `CONFIRMED`, `EXPLOITABLE`, and `REJECTED` replace a lossy boolean. Legacy `true` maps conservatively to `REPRODUCED`. |
 
 Native target paths now share the gateway. The invariant and its explicit remaining release gates
-are described below; external producers are not covered by the native Montoya guarantee.
+are described below. Unsupported external target-HTTP producers are now fail-closed.
 
 ## Importing sidecar output
 
@@ -70,7 +70,8 @@ destination must agree. Missing inspection data, substituted requests, changed a
 headers/body, or a changed transport destination fail closed before quota acquisition. Binding is
 checked again after policy callbacks/quota acquisition; a change in that interval may conservatively
 spend a token but cannot dispatch. This binds the immutable Montoya message at the dispatch boundary,
-not bytes after Burp session handling, other extensions, DNS resolution or connection establishment.
+not bytes after Burp session handling, other extensions or connection establishment. The numeric
+service binding below handles the separate DNS-to-Montoya-destination step.
 
 The caller owns one run for an active/corpus pass, including its targets, parameters, baselines and
 payload categories. The crawler reuses one run across queued URLs and redirects. Pausing cancels that
@@ -87,6 +88,60 @@ These are Montoya dispatch counts, not a claim to meter internal Burp TCP retrie
 
 Persistent payload permission has no UI grant. Blind-XSS beacons require it as well as OAST and stay
 blocked. An OAST grant alone must not silently authorize a potentially stored browser payload.
+
+### DNS and numeric-service binding
+
+`DestinationAddress.inspect` is a pure parser/classifier used by policy and transport. It rejects
+ambiguous integer/abbreviated/octal/hex IPv4 forms, scoped or malformed IPv6, protected hostname
+aliases (including trailing-dot localhost/metadata names), private/link-local/loopback, multicast,
+selected special-use/documentation ranges and the Azure platform virtual IP. IPv4-mapped IPv6 is
+classified by its embedded IPv4 and canonicalized to dotted decimal; compatible/translation/6to4
+and other non-public IPv6 space is conservatively blocked. No protected-network override is added.
+This is a conservative public-target subset, not a dynamically maintained IANA registry.
+
+For a native target send, `ActiveRequestGateway` first checks the bound logical request and policy.
+The production `MontoyaTargetTransport` implements `PreparedSender.prepare`: `DestinationGuard`
+resolves a hostname once using the system/JDK resolver's complete returned A/AAAA address list.
+Every returned address must be numeric and permitted; mixed public/protected sets are denied in
+full. An empty/malformed/failed answer, timeout or capacity exhaustion denies before quota acquisition.
+Public literals bypass DNS. Scope, method/risk grants, run cancellation and request binding are
+checked again after preparation; the four quotas are still reserved atomically immediately before
+dispatch. Concurrent DNS preparation cannot create extra HTTP budget tokens.
+
+The default resolver has a five-second caller deadline and at most four daemon workers with no
+queue. A timed-out system lookup may finish later if the OS ignores interruption; its result cannot
+send target HTTP. DNS queries themselves are not HTTP dispatches and are outside the HTTP ledger.
+JDK/OS resolver caching and search rules apply; Burp's custom DNS or hostname-resolution settings are
+not used for this lookup. Resolver failure never falls back to hostname-based sending.
+
+The prepared dispatch uses `request.withService(HttpService.httpService(validatedNumericIp, port,
+secure))`, `RedirectionMode.NEVER` and the logical DNS name as TLS SNI. No Host/authority/header/body
+rewrite is allowed: bytes must equal the source message before quota admission and again immediately
+before `api.http().sendRequest`. A failed transformation cannot inherit the original approval.
+`PreparedSender.send` cannot send directly; the source guard restricts preparation/dispatch consumers
+and forbids using `HttpService.ipAddress()` as a connection check. That API dynamically resolves a
+name; it is not a record of an already established connection.
+
+`LogicalRequestResponse` restores the logical service association for findings/caches while retaining
+Burp's actual returned request bytes, response, timing, annotations and marker transformations. This
+association does not attest a physical peer or replace a future persisted dispatch audit record.
+Every redirect re-enters the same preparation/admission sequence. Dry-run stays entirely offline;
+its policy/quota counts do not approve DNS results or guarantee numeric-service binding will succeed.
+
+The API-level guarantee is **the service destination supplied to Montoya is the checked numeric IP**,
+with no second hostname lookup performed by this extension. Montoya exposes no pre-send physical-peer
+validation hook in the pinned API. Burp's proxies, SOCKS, hostname overrides, connection reuse, session
+handling, other extensions and the runtime's TLS behavior remain trusted/unverified at that boundary.
+The implementation must not be described as a wire-level destination guarantee. The outstanding
+[Burp runtime test matrix](DESTINATION_BINDING_VERIFICATION.md) is part of the release gate, not a
+passing in-memory fixture. A strict physical-peer guarantee may require controlled egress outside
+Montoya; preflight DNS alone cannot establish it.
+
+Primary contracts: [Montoya HttpService](https://portswigger.github.io/burp-extensions-montoya-api/javadoc/burp/api/montoya/http/HttpService.html),
+[RequestOptions](https://portswigger.github.io/burp-extensions-montoya-api/javadoc/burp/api/montoya/http/RequestOptions.html),
+[IANA IPv4 special-purpose registry](https://www.iana.org/assignments/iana-ipv4-special-registry/),
+[IANA IPv6 special-purpose registry](https://www.iana.org/assignments/iana-ipv6-special-registry/), and
+[Azure platform IP](https://learn.microsoft.com/en-us/azure/virtual-network/what-is-ip-address-168-63-129-16).
 
 ### Dry-run preview
 
@@ -137,7 +192,7 @@ surfaces.
 
 `OutboundGatewayInvariantTest` resolves Java API owners and catches method references, aliases,
 whitespace changes, batch sends and alternate Montoya request engines. It also prevents engines
-from calling the raw gateway sender. The fixed-origin crt.sh client is the sole native HTTP exception;
+from calling the raw gateway sender, prepared dispatch, or DNS lookup APIs outside their owners. The fixed-origin crt.sh client is the sole native HTTP exception;
 it uses one-hop options too, and its origin/redirect behavior has an integration regression test.
 
 `OutboundRunIntegrationTest`, `ReconControllerRunLifecycleTest`, `RedirectPolicyIntegrationTest` and
@@ -157,15 +212,49 @@ construction, and a branch counterexample where a greedy count is smaller than a
 `NativeControllerPreviewIntegrationTest` covers read-only preview entry points, JWT/identity/takeover
 parity, crawler continuation/queue ordering, existing accounting and secret-free display.
 
+`DestinationAddressTest` checks protected/ambiguous forms and randomized byte-based IPv6 round trips.
+`DestinationBindingIntegrationTest` meters actual in-memory Montoya calls for numeric service/SNI and
+byte preservation, rebinds between sends, mixed/invalid/failed DNS, deadline/capacity/interruption,
+post-DNS cancellation/scope revocation, redirect hops, empty global quota and preparation failures.
+It also checks logical evidence association and an offline preview. Existing concurrent run-budget,
+lifecycle, native surface and preview suites now inject explicit public DNS fixtures; no live resolver
+is used by those tests. The previews compare logical message bindings separately from physical API
+service pinning. `RegexHound` IPv6 validation also uses the pure parser, so offline CLI analysis cannot
+trigger a name lookup through passive literal validation.
+
+## External target-HTTP execution boundary
+
+Native run grants authorize only native gateway dispatches. An external process or remote scan cannot
+turn an initial scoped URL, a process timeout/rate flag, a run ID or validated output into per-request
+permission. Until these producers have controlled egress, their active execution is disabled at the
+lowest production entry point, with no opt-in bypass.
+
+| Producer / prior direct sink | Enforced boundary and retained behavior | Regression evidence |
+| --- | --- | --- |
+| `ReconHoundCli.main` → JDK `HttpClient.send`, automatic `NORMAL` redirects | No HTTP client or target sender remains. `run(args, err)` returns 3 for live inputs before writing a report, including `--fail-on none`. `--body-file` analyzes one saved response with an HTTP(S) metadata URL, without DNS or HTTP. | `ReconHoundCliTest`: local listener stays untouched, existing report preserved, offline SARIF/severity exits and invalid input. CLI JAR smoke runs without Montoya on the classpath. |
+| `SqlmapClient.run` / `isAvailable` → `ProcessBuilder.start` | Neither scan execution nor `--version` can start a process. `run` returns `started=false` with a block reason. Pure argument/output helpers remain. `ReconController.runSqlmap` blocks before queuing; UI execution controls are removed. | `ExternalTargetEgressIntegrationTest`: executable marker remains absent with unsafe arguments; controller calls stay blocked with native grants enabled or disabled. Java architecture test forbids process starts/references. |
+| `PdcpClient.createScan` → `POST /v1/scans` → remote Nuclei target requests | Returns a block reason without HTTP. Controller blocks before resolving credentials or scheduling work. Read-only existing status/results stay fixed to `https://api.projectdiscovery.io` with GET and `Redirect.NEVER`. There is no create/poll loop or launch button. | `PdcpClientEgressTest`: no creation transport calls, GET-only fixed-origin reads and redirecting client rejection. Controller integration checks completion/error callback and no native sends. |
+| `recon.RunProfile` → `RunExternal` → `exec.CommandContext` for `httpx`, `katana`, `nuclei` | `CheckProfileEgress` rejects their canonical `target_http_unsupported` profiles regardless of every risk flag. The private `runExternal` repeats the check at process start and resolves the binary internally; it accepts no binary override. Unknown/unprofiled tools cannot execute. Existing output adapters, `socket`, `render`, `adapt`, `plan` and import stay offline. | `egress_test.go`: all flags granted, zero executions and no executable marker via either entry point. `process_invariant_test.go` resolves import aliases and function references; only the runner may construct processes. |
+
+Go profiles retained for execution are explicitly `subfinder`/`gau` (provider queries), `puredns`/`dnsx`
+(DNS), and `naabu` (TCP connect, still requires `--allow-network` and network scope). These do not share
+native HTTP quotas. The contract trusts installed binaries and their pinned invocation semantics; it
+is not an operating-system network sandbox against replaced binaries, configuration or tool changes.
+`doctor` exposes execution-block reasons and `plan` exposes each profile's egress class. New tools
+need an explicit profile/egress review; the regression allowlist prevents silent new capabilities.
+
+This slice deliberately reduces functionality instead of asserting that a process-level permission
+can govern downstream sends. Restoring CLI fetching needs a policy-bound one-hop JDK transport,
+shared run accounting/cancellation, destination validation and preview. Restoring external active
+processes needs an enforceable proxy/sandbox/adapter that cannot bypass the gate, including redirects,
+auxiliary protocols and child processes. Remote cloud scans need a verifiable downstream enforcement
+contract; cancelling or budgeting the API POST alone is insufficient. These disabled features can wait
+beyond v1.0; re-enabling them without equivalent enforcement cannot.
+
 ### Remaining release gates
 
-This invariant is scoped to native Montoya target traffic. The standalone JDK CLI, external sqlmap,
-HTTP-producing Go profiles and PDCP scan creation are separate producers; native request quotas do
-not meter their downstream traffic. Their process flags or validated output records are not proof of
-a per-request gateway. They need controlled egress or a fail-closed execution boundary before the
-product can claim a unified outbound guarantee.
-
-Issue #44 still requires destination validation tied to the actual DNS/connection path and versioned
-structured evidence persistence, alongside the external-producer boundary above. Plans here
-are in-memory dispatch bindings, not persisted approval artifacts or run audit trails. Do not
-interpret passing native tests as closing #44 or approving v1.0.
+Issue #44 still requires verification/control of the actual Burp connection path beyond the checked
+numeric API destination, and versioned structured evidence persistence. Native plans here are in-memory dispatch bindings, not persisted
+approval artifacts or run audit trails. TCP/DNS/provider process traffic is explicitly outside the
+native HTTP dispatch ledger. Full-product wire-level isolation is not established by these gates.
+Do not interpret passing native/external-boundary tests as closing #44 or approving v1.0.

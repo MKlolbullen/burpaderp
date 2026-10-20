@@ -18,14 +18,14 @@ type ExecLimits struct {
 
 func DefaultExecLimits() ExecLimits {
 	return ExecLimits{
-		Timeout: 15 * time.Minute,
+		Timeout:        15 * time.Minute,
 		MaxStdoutBytes: 128 << 20,
 		MaxStderrBytes: 8 << 20,
 	}
 }
 
 type ExecRequest struct {
-	Binary string
+	Tool   string
 	Args   []string
 	Stdin  []byte
 	Env    []string
@@ -42,12 +42,17 @@ type ExecResult struct {
 	StderrTruncated bool          `json:"stderr_truncated"`
 }
 
-// RunExternal starts a binary directly; it never passes command text through a
+// runExternal is the sole process-start boundary. It resolves the registered binary and
+// rejects unsupported egress before constructing a command; it never passes command text through a
 // shell. This keeps tool arguments structurally separate from user/target data
 // and makes command injection a much smaller problem than string-built pipelines.
-func RunExternal(parent context.Context, request ExecRequest) (ExecResult, error) {
-	if request.Binary == "" {
-		return ExecResult{}, errors.New("binary is required")
+func runExternal(parent context.Context, request ExecRequest) (ExecResult, error) {
+	if err := CheckProfileEgress(request.Tool); err != nil {
+		return ExecResult{}, err
+	}
+	spec, err := DefaultToolRegistry().MustGet(request.Tool)
+	if err != nil {
+		return ExecResult{}, err
 	}
 	limits := request.Limits
 	defaults := DefaultExecLimits()
@@ -64,7 +69,7 @@ func RunExternal(parent context.Context, request ExecRequest) (ExecResult, error
 	ctx, cancel := context.WithTimeout(parent, limits.Timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, request.Binary, request.Args...)
+	cmd := exec.CommandContext(ctx, spec.Binary, request.Args...)
 	cmd.Stdin = bytes.NewReader(request.Stdin)
 	if request.Dir != "" {
 		cmd.Dir = request.Dir
@@ -78,21 +83,21 @@ func RunExternal(parent context.Context, request ExecRequest) (ExecResult, error
 	cmd.Stderr = stderr
 
 	start := time.Now()
-	err := cmd.Run()
+	err = cmd.Run()
 	result := ExecResult{
-		ExitCode: exitCode(err),
-		Duration: time.Since(start),
-		Stdout: append([]byte(nil), stdout.Bytes()...),
-		Stderr: append([]byte(nil), stderr.Bytes()...),
+		ExitCode:        exitCode(err),
+		Duration:        time.Since(start),
+		Stdout:          append([]byte(nil), stdout.Bytes()...),
+		Stderr:          append([]byte(nil), stderr.Bytes()...),
 		StdoutTruncated: stdout.Truncated(),
 		StderrTruncated: stderr.Truncated(),
 	}
 
 	if ctx.Err() == context.DeadlineExceeded {
-		return result, fmt.Errorf("%s timed out after %s", request.Binary, limits.Timeout)
+		return result, fmt.Errorf("%s timed out after %s", spec.Binary, limits.Timeout)
 	}
 	if err != nil {
-		return result, fmt.Errorf("%s exited with code %d: %w", request.Binary, result.ExitCode, err)
+		return result, fmt.Errorf("%s exited with code %d: %w", spec.Binary, result.ExitCode, err)
 	}
 	return result, nil
 }
@@ -136,5 +141,5 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 	return original, nil
 }
 
-func (b *cappedBuffer) Bytes() []byte { return b.buf.Bytes() }
+func (b *cappedBuffer) Bytes() []byte   { return b.buf.Bytes() }
 func (b *cappedBuffer) Truncated() bool { return b.truncated }

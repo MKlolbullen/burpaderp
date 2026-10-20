@@ -14,11 +14,22 @@ const (
 	InputPerTarget InputMode = "per_target_argument"
 )
 
+// EgressClass describes the pinned invocation, independently of the operator's risk opt-ins.
+type EgressClass string
+
+const (
+	EgressProvider   EgressClass = "provider_only"
+	EgressDNS        EgressClass = "dns_only"
+	EgressTCP        EgressClass = "tcp_connect"
+	EgressTargetHTTP EgressClass = "target_http_unsupported"
+)
+
 // CommandProfile pins the invocation shape that the adapter was written and
 // tested for. ToolSpec says *what types* may cross a boundary; CommandProfile
 // says *how this version-independent CLI surface is invoked*.
 type CommandProfile struct {
 	Tool        string        `json:"tool"`
+	Egress      EgressClass   `json:"egress"`
 	InputMode   InputMode     `json:"input_mode"`
 	Args        []string      `json:"args"`
 	TargetFlag  string        `json:"target_flag,omitempty"`
@@ -29,44 +40,44 @@ type CommandProfile struct {
 func DefaultCommandProfiles() map[string]CommandProfile {
 	profiles := []CommandProfile{
 		{
-			Tool: "subfinder", InputMode: InputPerTarget, TargetFlag: "-d",
+			Tool: "subfinder", Egress: EgressProvider, InputMode: InputPerTarget, TargetFlag: "-d",
 			Args: []string{"-silent", "-json", "-disable-update-check"}, Timeout: 12 * time.Minute,
 			Description: "passive enum, one scoped domain per process target argument",
 		},
 		{
-			Tool: "puredns", InputMode: InputStdin,
+			Tool: "puredns", Egress: EgressDNS, InputMode: InputStdin,
 			Args: []string{"resolve", "-q"}, Timeout: 15 * time.Minute,
 			Description: "stdin resolve + wildcard/poisoning filter; quiet hostname output",
 		},
 		{
-			Tool: "dnsx", InputMode: InputStdin,
+			Tool: "dnsx", Egress: EgressDNS, InputMode: InputStdin,
 			Args: []string{"-json", "-silent", "-a", "-aaaa", "-cname", "-omit-raw", "-disable-update-check"}, Timeout: 10 * time.Minute,
 			Description: "stdin A/AAAA/CNAME enrichment to JSONL",
 		},
 		{
-			Tool: "naabu", InputMode: InputStdin,
+			Tool: "naabu", Egress: EgressTCP, InputMode: InputStdin,
 			Args: []string{"-json", "-silent", "-scan-type", "c", "-verify", "-rate", "100", "-disable-update-check"}, Timeout: 20 * time.Minute,
 			Description: "explicit-network-scope TCP connect scan with conservative packet rate",
 		},
 		{
-			Tool: "httpx", InputMode: InputStdin,
+			Tool: "httpx", Egress: EgressTargetHTTP, InputMode: InputStdin,
 			Args: []string{"-json", "-silent", "-status-code", "-rate-limit", "50", "-threads", "20", "-follow-host-redirects", "-max-redirects", "5", "-disable-update-check"}, Timeout: 15 * time.Minute,
-			Description: "HTTP probe with bounded concurrency and same-host redirects",
+			Description: "HTTP probe; execution disabled pending governed egress (#44)",
 		},
 		{
-			Tool: "katana", InputMode: InputStdin,
+			Tool: "katana", Egress: EgressTargetHTTP, InputMode: InputStdin,
 			Args: []string{"-jsonl", "-silent", "-depth", "3", "-rate-limit", "20", "-concurrency", "5", "-parallelism", "5"}, Timeout: 20 * time.Minute,
-			Description: "bounded active crawl using JSONL output",
+			Description: "active crawl using JSONL output; execution disabled pending governed egress (#44)",
 		},
 		{
-			Tool: "gau", InputMode: InputStdin,
+			Tool: "gau", Egress: EgressProvider, InputMode: InputStdin,
 			Args: []string{"--threads", "5", "--timeout", "30"}, Timeout: 15 * time.Minute,
 			Description: "historical/known URL providers; plain URL output",
 		},
 		{
-			Tool: "nuclei", InputMode: InputStdin,
+			Tool: "nuclei", Egress: EgressTargetHTTP, InputMode: InputStdin,
 			Args: []string{"-jsonl", "-silent", "-no-color", "-rate-limit", "20", "-concurrency", "10", "-bulk-size", "10", "-disable-update-check"}, Timeout: 30 * time.Minute,
-			Description: "template scan with conservative rate/concurrency; active permission required",
+			Description: "template scan; execution disabled pending governed egress (#44)",
 		},
 	}
 	out := make(map[string]CommandProfile, len(profiles))
@@ -95,6 +106,11 @@ func ValidateCommandProfile(profile CommandProfile, registry ToolRegistry) error
 	spec, ok := registry.Get(profile.Tool)
 	if !ok {
 		return fmt.Errorf("command profile references unknown tool %q", profile.Tool)
+	}
+	switch profile.Egress {
+	case EgressProvider, EgressDNS, EgressTCP, EgressTargetHTTP:
+	default:
+		return fmt.Errorf("%s profile must declare a known egress class", profile.Tool)
 	}
 	if profile.InputMode != InputStdin && profile.InputMode != InputPerTarget {
 		return fmt.Errorf("%s has unsupported input mode %q", profile.Tool, profile.InputMode)

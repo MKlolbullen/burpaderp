@@ -37,6 +37,9 @@ func RunProfile(ctx context.Context, scope Scope, toolName string, inputs []Reco
 	if err != nil {
 		return nil, summary, err
 	}
+	if err := CheckProfileEgress(spec.Name); err != nil {
+		return nil, summary, err
+	}
 	if err := policy.Check(spec); err != nil {
 		return nil, summary, err
 	}
@@ -134,10 +137,10 @@ func RunProfile(ctx context.Context, scope Scope, toolName string, inputs []Reco
 }
 
 func executeOnce(ctx context.Context, socket ContractSocket, profile CommandProfile, args []string, stdin []byte, quarantine io.Writer) ([]Record, SocketStats, ExecResult, error) {
-	result, runErr := RunExternal(ctx, ExecRequest{
-		Binary: socket.Tool.Binary,
-		Args:   args,
-		Stdin:  stdin,
+	result, runErr := runExternal(ctx, ExecRequest{
+		Tool:  socket.Tool.Name,
+		Args:  args,
+		Stdin: stdin,
 		Limits: ExecLimits{
 			Timeout:        profile.Timeout,
 			MaxStdoutBytes: DefaultExecLimits().MaxStdoutBytes,
