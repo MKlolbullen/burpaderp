@@ -199,6 +199,32 @@ final class ReconController implements HttpHandler {
         }
     }
 
+    private final Object stateWriteLock = new Object();
+    private final java.util.concurrent.atomic.AtomicLong stateGeneration = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong snapshotSequence = new java.util.concurrent.atomic.AtomicLong();
+    private long lastSavedSnapshot;
+    private record StateSnapshot(long generation, long sequence, List<ReconModel.FindingRow> findings,
+                                 List<ReconModel.AssetRow> assets, List<ReconModel.ActiveRow> active) {}
+
+    private StateSnapshot snapshot(long generation) {
+        return new StateSnapshot(generation, snapshotSequence.incrementAndGet(), findingModel.snapshot(), assetModel.snapshot(), activeModel.snapshot());
+    }
+
+    private void writeSnapshot(StateSnapshot snapshot) {
+        if (store == null) return;
+        synchronized (stateWriteLock) {
+            if (snapshot.generation() != stateGeneration.get() || snapshot.sequence() <= lastSavedSnapshot) return;
+            PersistedState.saveStrings(store, PersistedState.K_FILED, reporter.filedSnapshot());
+            PersistedState.saveStrings(store, PersistedState.K_HOSTS, new ArrayList<>(assetHosts));
+            PersistedState.saveStrings(store, PersistedState.K_IPS, new ArrayList<>(assetIps));
+            PersistedState.saveFindings(store, snapshot.findings());
+            PersistedState.saveAssets(store, snapshot.assets());
+            if (!PersistedState.saveActiveEvidence(store, snapshot.active()))
+                api.logging().logToOutput("[Recon Hound] Active evidence snapshot preserved: unsupported or corrupt format.");
+            lastSavedSnapshot = snapshot.sequence();
+        }
+    }
+
     /** Restores dedupe keys, asset inventory, and Findings/Hosts rows from the Burp project. */
     private void restoreState() {
         if (store == null) return;
@@ -207,28 +233,33 @@ final class ReconController implements HttpHandler {
         assetIps.addAll(PersistedState.loadStrings(store, PersistedState.K_IPS));
         List<ReconModel.FindingRow> findings = PersistedState.loadFindings(store);
         List<ReconModel.AssetRow> assets = PersistedState.loadAssets(store);
-        if (findings.isEmpty() && assets.isEmpty()) return;
+        ActiveEvidenceCodec.Loaded active = PersistedState.loadActiveEvidence(store);
+        if (!active.writable()) api.logging().logToOutput("[Recon Hound] Active evidence is unsupported/corrupt; preserved without automatic overwrite.");
+        for (var row : active.rows()) if (row.evidenceRecord().observation() != null && row.verificationState() == VerificationState.CONFIRMED)
+            oobDedupe.add(row.evidenceRecord().observation().fingerprint());
+        if (findings.isEmpty() && assets.isEmpty() && active.rows().isEmpty()) return;
         SwingUtilities.invokeLater(() -> {
             for (int i = findings.size() - 1; i >= 0; i--) findingModel.add(findings.get(i));
             for (int i = assets.size() - 1; i >= 0; i--) assetModel.add(assets.get(i));
+            for (int i = active.rows().size() - 1; i >= 0; i--) activeModel.add(active.rows().get(i));
         });
         api.logging().logToOutput("[Recon Hound] Restored " + findings.size() + " finding(s) and "
                 + (assetHosts.size() + assetIps.size()) + " asset(s) from the Burp project.");
     }
 
-    /** Persists current state to the Burp project (runs the model snapshot on the EDT). */
+    /** Only copy model references on the EDT; encoding/writes use the existing background saver. */
     private void saveState() {
-        if (store == null) return;
+        if (store == null || !running.get()) return;
+        long generation = stateGeneration.get();
         SwingUtilities.invokeLater(() -> {
+            if (!running.get() || generation != stateGeneration.get()) return;
+            StateSnapshot snapshot = snapshot(generation);
             try {
-                PersistedState.saveStrings(store, PersistedState.K_FILED, reporter.filedSnapshot());
-                PersistedState.saveStrings(store, PersistedState.K_HOSTS, new ArrayList<>(assetHosts));
-                PersistedState.saveStrings(store, PersistedState.K_IPS, new ArrayList<>(assetIps));
-                PersistedState.saveFindings(store, findingModel.snapshot());
-                PersistedState.saveAssets(store, assetModel.snapshot());
-            } catch (Exception e) {
-                api.logging().logToError("Persisted-state save failed", e);
-            }
+                oobPoller.execute(() -> {
+                    try { writeSnapshot(snapshot); }
+                    catch (Exception e) { api.logging().logToError("Persisted-state save failed", e); }
+                });
+            } catch (java.util.concurrent.RejectedExecutionException unloading) { /* final synchronous save owns unload */ }
         });
     }
 
@@ -418,7 +449,7 @@ final class ReconController implements HttpHandler {
             try {
                 for (ParameterDiscoveryEngine.Discovered found :
                         parameterDiscovery.discover(base, run, gateway, activeThrottleMillis.get())) {
-                    addActiveRow("INFO", "PARAM", found.name(), "discovered", found.evidence(), found.url());
+                    addActiveRow("INFO", "PARAM", found.name(), "discovered", found.evidence(), found.url(), found.evidenceRecord());
                 }
             } finally {
                 run.complete();
@@ -611,7 +642,7 @@ final class ReconController implements HttpHandler {
                     }
                     if (run.requestBudget().exhausted()) break;
                     for (ActiveTestEngine.ActiveFinding finding : activeTestEngine.test(base, run, gateway)) {
-                        reportActiveFinding(finding, base);
+                        if (activeRuns.isCurrent(ticket)) reportActiveFinding(finding, base);
                     }
                     publishStatus();
                 }
@@ -668,7 +699,7 @@ final class ReconController implements HttpHandler {
                             if ("COOKIE".equalsIgnoreCase(String.valueOf(parameter.type()))) continue;
                             for (ActiveTestEngine.ActiveFinding finding :
                                     corpusFuzzEngine.fuzz(base, parameter, encodings, maxPerCategory, run, gateway)) {
-                                reportActiveFinding(finding, base);
+                                if (activeRuns.isCurrent(ticket)) reportActiveFinding(finding, base);
                             }
                         }
                     } catch (Exception e) {
@@ -714,6 +745,7 @@ final class ReconController implements HttpHandler {
                     HttpRequest originalRequest = target.request();
                     NativeRequestStep baseline = JwtRequestPlanner.baseline(originalRequest);
                     ActiveRequestGateway.Result validResult = gateway.send(run, baseline.plan(), baseline.request());
+                    if (!activeRuns.isCurrent(ticket)) return;
                     if (validResult.error() != null) {
                         api.logging().logToError("JWT baseline request failed for " + originalRequest.url(), validResult.error());
                         continue;
@@ -730,6 +762,7 @@ final class ReconController implements HttpHandler {
                         if (run.requestBudget().exhausted()) break;
                         HttpRequest forgedReq = variant.request();
                         ActiveRequestGateway.Result forgedResult = gateway.send(run, variant.plan(), forgedReq);
+                        if (!activeRuns.isCurrent(ticket)) return;
                         if (forgedResult.error() != null) {
                             api.logging().logToError("JWT alg:none request failed for " + target.request().url(), forgedResult.error());
                             continue;
@@ -743,26 +776,28 @@ final class ReconController implements HttpHandler {
                         boolean accepted = forgedStatus < 400 && forgedStatus == validStatus
                                 && Math.abs(forgedLen - validLen) <= Math.max(64, validLen / 10);
 
+                        FindingEvidence jwtEvidence = EvidenceCapture.helper("jwt-none", accepted ? VerificationState.REPRODUCED : VerificationState.REJECTED,
+                                "Valid-token and unsigned-token status/length comparison. An accepted response alone does not prove a privileged authorization bypass.", originalRequest, validResult, forgedResult);
                         addActiveRow(accepted ? "HIGH" : "INFO", "JWT-none", "alg=none",
                                 accepted ? "accepted" : "rejected",
                                 "valid=" + validStatus + "/" + validLen + " forged=" + forgedStatus + "/" + forgedLen,
-                                target.request().url());
+                                target.request().url(), jwtEvidence);
 
                         if (accepted && !reported) {
                             reported = true;
                             reporter.report("jwt-none\0" + target.request().url(),
-                                    "JWT alg:none accepted (authentication bypass)",
+                                    "JWT alg:none replay accepted",
                                     "<b>Server accepts an unsigned alg:none JWT</b><br>"
                                             + "URL: <code>" + escape(target.request().url()) + "</code><br><br>"
                                             + "A token re-encoded with <code>alg:none</code> and an empty signature was accepted "
                                             + "(status " + forgedStatus + ", matching the valid token's " + validStatus + "). "
-                                            + "Signatures are not verified, so an attacker can forge arbitrary claims "
-                                            + "(any user/role) — full authentication bypass.",
+                                            + "Confirm the response reflects authenticated privileges; status/length similarity alone is not proof of a signature-validation bypass."
+                                            + evidenceDetail(jwtEvidence),
                                     "Reject <code>alg:none</code> server-side; pin the expected algorithm and always verify the signature.",
                                     target.request().url(), AuditIssueSeverity.HIGH, AuditIssueConfidence.FIRM,
                                     "Recon Hound replays JWT-bearing requests with an alg:none forgery to test signature validation.",
                                     "Confirm the forged token grants privileged access before reporting.",
-                                    forged);
+                                    valid, forged);
                         }
                     }
 
@@ -774,6 +809,7 @@ final class ReconController implements HttpHandler {
                             String secret = weak.secret();
                             HttpRequest forgedReq = weak.step().request();
                             ActiveRequestGateway.Result forgedResult = gateway.send(run, weak.step().plan(), forgedReq);
+                            if (!activeRuns.isCurrent(ticket)) return;
                             if (forgedResult.error() != null) {
                                 api.logging().logToError("JWT weak-secret request failed for " + target.request().url(), forgedResult.error());
                                 continue;
@@ -784,23 +820,26 @@ final class ReconController implements HttpHandler {
                             if (forged != null && forged.response() != null) {
                                 int forgedStatus = forged.response().statusCode();
                                 boolean accepted = forgedStatus < 400 && forgedStatus == validStatus;
+                                FindingEvidence jwtEvidence = EvidenceCapture.helper("jwt-weak-secret", accepted ? VerificationState.REPRODUCED : VerificationState.REJECTED,
+                                        "Offline weak-key match followed by a forged-token status comparison. Confirm actual privileges separately.", originalRequest, validResult, forgedResult);
                                 addActiveRow(accepted ? "HIGH" : "INFO", "JWT-forge", "weak-secret",
                                         accepted ? "accepted" : "rejected",
-                                        "secret=\"" + secret + "\" status=" + forgedStatus, target.request().url());
+                                        "weak key matched offline; status=" + forgedStatus, target.request().url(), jwtEvidence);
                                 if (accepted) {
                                     reporter.report("jwt-forge\0" + target.request().url(),
-                                            "JWT weak-secret forgery confirmed (authentication bypass)",
+                                            "JWT weak-secret replay accepted",
                                             "<b>Server accepts a token forged with a cracked secret</b><br>"
                                                     + "URL: <code>" + escape(target.request().url()) + "</code><br><br>"
                                                     + "The token's HMAC secret is the well-known value \"" + escape(secret) + "\". "
                                                     + "A token re-signed with it (and a tampered claim) was accepted (status "
                                                     + forgedStatus + "). An attacker can mint tokens with arbitrary claims "
-                                                    + "(any user/role) — full authentication bypass / privilege escalation.",
+                                                    + "(any user/role) if privileged authorization is established separately."
+                                                    + evidenceDetail(jwtEvidence),
                                             "Rotate to a long, random signing key; never use guessable or boilerplate secrets.",
-                                            target.request().url(), AuditIssueSeverity.HIGH, AuditIssueConfidence.CERTAIN,
+                                            target.request().url(), AuditIssueSeverity.HIGH, AuditIssueConfidence.FIRM,
                                             "Recon Hound cracks the HMAC secret offline, then replays a token re-signed with it to confirm forgery.",
-                                            "This is a confirmed authentication bypass; validate scope before exploiting.",
-                                            forged);
+                                            "Confirm the forged token grants privileges; matching status alone is insufficient.",
+                                            valid, forged);
                                 }
                             }
                         }
@@ -846,6 +885,7 @@ final class ReconController implements HttpHandler {
                         try {
                             NativeRequestStep step = TakeoverRequestPlanner.step(host, scheme);
                             ActiveRequestGateway.Result result = gateway.send(run, step.plan(), step.request());
+                            if (!activeRuns.isCurrent(ticket)) return;
                             if (result.error() != null) {
                                 api.logging().logToError("Takeover check failed for " + host, result.error());
                                 continue;
@@ -857,14 +897,16 @@ final class ReconController implements HttpHandler {
                             String service = SubdomainTakeoverEngine.match(rr.response().bodyToString());
                             if (service == null) continue;
 
-                            addActiveRow("HIGH", "Takeover", host, "fingerprint", service, url);
+                            FindingEvidence takeoverEvidence = EvidenceCapture.helper("subdomain-takeover", VerificationState.CANDIDATE,
+                                    "Unclaimed-resource fingerprint matched; DNS ownership and resource claimability are not established.", step.request(), result);
+                            addActiveRow("HIGH", "Takeover", host, "fingerprint", service, url, takeoverEvidence);
                             reporter.report("takeover\0" + host + "\0" + service,
                                     "Potential subdomain takeover (" + service + ")",
                                     "<b>Dangling " + escape(service) + " resource</b><br>"
                                             + "Host: <code>" + escape(host) + "</code><br><br>"
                                             + "The host serves " + escape(service) + "'s 'unclaimed resource' page, which suggests a "
                                             + "dangling DNS record whose backend no longer exists. An attacker who claims that backend "
-                                            + "can serve arbitrary content on this subdomain (phishing, cookie/session theft, CSP bypass).",
+                                            + "can serve arbitrary content on this subdomain (phishing, cookie/session theft, CSP bypass)." + evidenceDetail(takeoverEvidence),
                                     "Remove the dangling DNS record, or (re)claim the " + escape(service) + " resource it points to.",
                                     url, AuditIssueSeverity.HIGH, AuditIssueConfidence.TENTATIVE,
                                     "Recon Hound fetches enumerated hosts and matches known subdomain-takeover fingerprints.",
@@ -934,6 +976,7 @@ final class ReconController implements HttpHandler {
                     NativeRequestStep step = engine.plan(original.request());
                     HttpRequest replayRequest = step.request();
                     ActiveRequestGateway.Result replayResult = gateway.send(run, step.plan(), replayRequest);
+                    if (!activeRuns.isCurrent(ticket)) return;
                     if (replayResult.error() != null) {
                         api.logging().logToError("Access-control replay failed for " + replayRequest.url(),
                                 replayResult.error());
@@ -951,8 +994,14 @@ final class ReconController implements HttpHandler {
                     String dedupe = "ac\0" + url + "\0" + result.verdict();
                     if (!activeDedupe.add(dedupe)) continue;
 
+                    VerificationState accessState = result.verdict() == AccessControlEngine.Verdict.BYPASSED
+                            ? VerificationState.REPRODUCED : result.verdict() == AccessControlEngine.Verdict.PARTIAL
+                            ? VerificationState.CANDIDATE : VerificationState.REJECTED;
+                    FindingEvidence accessEvidence = EvidenceCapture.helper("access-control", accessState,
+                            result.detail() + " Response comparison alone does not establish sensitive privilege exposure.", original.request(), replayResult)
+                            .withOriginalResponse(EvidenceCapture.bytes(() -> original.response().toByteArray().getBytes()));
                     addActiveRow(result.severity(), "AccessControl", original.request().method(),
-                            result.verdict().name().toLowerCase(Locale.ROOT), result.detail(), url);
+                            result.verdict().name().toLowerCase(Locale.ROOT), result.detail(), url, accessEvidence);
 
                     if (result.verdict() == AccessControlEngine.Verdict.BYPASSED
                             || result.verdict() == AccessControlEngine.Verdict.PARTIAL) {
@@ -962,14 +1011,14 @@ final class ReconController implements HttpHandler {
                                 "ac-issue\0" + url + "\0" + result.verdict(),
                                 "broken access control (" + result.verdict().name().toLowerCase(Locale.ROOT) + ")",
                                 "<b>Access-control replay</b><br>" + escape(result.detail())
-                                        + "<br>Identity: " + (unauthenticated ? "unauthenticated" : "alternate session"),
+                                        + "<br>Identity: " + (unauthenticated ? "unauthenticated" : "alternate session") + evidenceDetail(accessEvidence),
                                 "Enforce authorization server-side on every request; do not rely on the UI hiding functionality.",
                                 url, severity,
                                 result.verdict() == AccessControlEngine.Verdict.BYPASSED
                                         ? AuditIssueConfidence.FIRM : AuditIssueConfidence.TENTATIVE,
                                 "Recon Hound replays privileged requests under a lower-privileged identity and compares responses.",
                                 "Confirm the exposed data/action is genuinely sensitive; response size alone can mislead.",
-                                replay);
+                                original, replay);
                     }
                     publishStatus();
                 } catch (Exception e) {
@@ -1018,6 +1067,7 @@ final class ReconController implements HttpHandler {
     void resume() { setCrawlEnabled(true); publishStatus(); }
 
     void reset() {
+        stateGeneration.incrementAndGet();
         activeRuns.invalidate();
         synchronized (crawlRuns) {
             crawlRuns.invalidate();
@@ -1046,6 +1096,7 @@ final class ReconController implements HttpHandler {
             parameterModel.clear();
             reflectionModel.clear();
             activeModel.clear();
+            if (store != null) synchronized (stateWriteLock) { PersistedState.resetActiveEvidence(store); }
             assetModel.clear();
         });
         saveState();
@@ -1068,19 +1119,11 @@ final class ReconController implements HttpHandler {
     private void saveStateBlocking() {
         if (store == null) return;
         try {
-            java.util.concurrent.atomic.AtomicReference<List<ReconModel.FindingRow>> findings = new java.util.concurrent.atomic.AtomicReference<>(List.of());
-            java.util.concurrent.atomic.AtomicReference<List<ReconModel.AssetRow>> assets = new java.util.concurrent.atomic.AtomicReference<>(List.of());
-            Runnable snapshot = () -> { findings.set(findingModel.snapshot()); assets.set(assetModel.snapshot()); };
-            if (SwingUtilities.isEventDispatchThread()) snapshot.run();
-            else SwingUtilities.invokeAndWait(snapshot);
-            PersistedState.saveStrings(store, PersistedState.K_FILED, reporter.filedSnapshot());
-            PersistedState.saveStrings(store, PersistedState.K_HOSTS, new ArrayList<>(assetHosts));
-            PersistedState.saveStrings(store, PersistedState.K_IPS, new ArrayList<>(assetIps));
-            PersistedState.saveFindings(store, findings.get());
-            PersistedState.saveAssets(store, assets.get());
-        } catch (Exception e) {
-            api.logging().logToError("Persisted-state save on shutdown failed", e);
-        }
+            java.util.concurrent.atomic.AtomicReference<StateSnapshot> captured = new java.util.concurrent.atomic.AtomicReference<>();
+            Runnable task = () -> captured.set(snapshot(stateGeneration.get()));
+            if (SwingUtilities.isEventDispatchThread()) task.run(); else SwingUtilities.invokeAndWait(task);
+            writeSnapshot(captured.get());
+        } catch (Exception e) { api.logging().logToError("Persisted-state save on shutdown failed", e); }
     }
 
     String status() {
@@ -2552,18 +2595,23 @@ final class ReconController implements HttpHandler {
             ActiveRequestGateway gateway = newTargetGateway(true);
             try {
                 NativeRequestStep step = GraphQlRequestPlanner.introspection(httpRequestFromUrl(target));
-                HttpRequestResponse rr = gqlPost(step, run, gateway);
+                ActiveRequestGateway.Result introspectionResult = gqlPost(step, run, gateway);
+                if (!activeRuns.isCurrent(ticket)) return;
+                HttpRequestResponse rr = introspectionResult.response();
                 if (rr == null || rr.response() == null) return;
                 ApiSurfaceEngine.IntrospectionDetail detail = ApiSurfaceEngine.analyzeIntrospection(rr.response().bodyToString());
                 String summary = ApiSurfaceEngine.describe(detail);
                 boolean enabled = detail.enabled();
+                FindingEvidence introspectionEvidence = EvidenceCapture.helper("graphql-introspection",
+                        enabled ? VerificationState.REPRODUCED : VerificationState.REJECTED,
+                        summary + " Schema visibility alone is not proof of authorization impact.", step.request(), introspectionResult);
                 addActiveRow(enabled ? "MEDIUM" : "INFO", "GraphQL", "introspection",
-                        enabled ? "confirmed" : "checked", summary, target);
+                        enabled ? "enabled" : "checked", summary, target, introspectionEvidence);
                 if (enabled && rr.hasResponse()) {
                     reporter.report(
                             "graphql-introspection-issue\0" + target,
                             "GraphQL introspection enabled",
-                            "<b>GraphQL introspection is enabled</b><br>" + escape(summary),
+                            "<b>GraphQL introspection is enabled</b><br>" + escape(summary) + evidenceDetail(introspectionEvidence),
                             "Disable introspection in production to reduce schema disclosure.",
                             target, AuditIssueSeverity.LOW, AuditIssueConfidence.FIRM,
                             "Recon Hound queried the GraphQL introspection endpoint on request.",
@@ -2577,7 +2625,8 @@ final class ReconController implements HttpHandler {
                                         + escape(String.join(", ", detail.sensitiveNames())) + "<br><br>"
                                         + "Introspection lets an attacker enumerate exactly which dangerous mutations/fields "
                                         + "exist before ever calling them, focusing follow-up testing (BOLA, privilege "
-                                        + "escalation, mass assignment).",
+                                        + "escalation, mass assignment).<br>Field-name heuristic: candidate only; no resolver authorization test was performed."
+                                        + "<br>Source evidence ID: <code>" + escape(introspectionEvidence.id()) + "</code>",
                                 "Disable introspection in production; regardless, enforce authorization on every "
                                         + "resolver independent of schema visibility.",
                                 target, AuditIssueSeverity.MEDIUM, AuditIssueConfidence.FIRM,
@@ -2616,12 +2665,17 @@ final class ReconController implements HttpHandler {
             ActiveRequestGateway gateway = newTargetGateway(true);
             try {
                 List<NativeRequestStep> steps = GraphQlRequestPlanner.fuzz(httpRequestFromUrl(target));
-                HttpRequestResponse suggest = gqlPost(steps.get(0), run, gateway);
+                ActiveRequestGateway.Result suggestResult = gqlPost(steps.get(0), run, gateway);
+                if (!activeRuns.isCurrent(ticket)) return;
+                HttpRequestResponse suggest = suggestResult.response();
                 if (bodyOf(suggest) != null && GraphQlFuzzEngine.hasFieldSuggestions(bodyOf(suggest))) {
-                    addActiveRow("LOW", "GraphQL", "field-suggestions", "enabled", "'Did you mean' leaks schema", target);
+                    FindingEvidence suggestEvidence = EvidenceCapture.helper("graphql-field-suggestions", VerificationState.REPRODUCED,
+                            "The recorded response exhibited the tested GraphQL feature; exploit impact remains unverified.", steps.get(0).request(), suggestResult);
+                    addActiveRow("LOW", "GraphQL", "field-suggestions", "enabled", "'Did you mean' leaks schema", target,
+                            suggestEvidence);
                     reporter.report("gql-suggest\0" + target, "GraphQL field suggestions enabled",
                             "<b>GraphQL field suggestions are enabled</b><br>Even with introspection disabled, the server "
-                                    + "returns 'Did you mean' hints for invalid fields, leaking schema details that help an attacker map the API.",
+                                    + "returns 'Did you mean' hints for invalid fields, leaking schema details that help an attacker map the API." + evidenceDetail(suggestEvidence),
                             "Disable did-you-mean/field suggestions in production.",
                             target, AuditIssueSeverity.LOW, AuditIssueConfidence.FIRM,
                             "Recon Hound probes GraphQL with an invalid field to detect suggestion leakage.",
@@ -2629,25 +2683,35 @@ final class ReconController implements HttpHandler {
                 }
 
                 int aliases = GraphQlRequestPlanner.ALIASES;
-                HttpRequestResponse alias = gqlPost(steps.get(1), run, gateway);
+                ActiveRequestGateway.Result aliasResult = gqlPost(steps.get(1), run, gateway);
+                if (!activeRuns.isCurrent(ticket)) return;
+                HttpRequestResponse alias = aliasResult.response();
                 if (bodyOf(alias) != null && GraphQlFuzzEngine.aliasingProcessed(bodyOf(alias), aliases)) {
-                    addActiveRow("MEDIUM", "GraphQL", "alias-amplification", "enabled", aliases + " aliases in one request", target);
+                    FindingEvidence aliasEvidence = EvidenceCapture.helper("graphql-alias-amplification", VerificationState.REPRODUCED,
+                            "The recorded response exhibited the tested GraphQL feature; exploit impact remains unverified.", steps.get(1).request(), aliasResult);
+                    addActiveRow("MEDIUM", "GraphQL", "alias-amplification", "enabled", aliases + " aliases in one request", target,
+                            aliasEvidence);
                     reporter.report("gql-alias\0" + target, "GraphQL alias-based amplification",
                             "<b>GraphQL processes many field aliases per request</b><br>" + aliases + " aliases of a field were "
                                     + "processed in a single request. Aliasing amplifies work/attempts (brute-forcing a login mutation, "
-                                    + "resource exhaustion) while sending one request, bypassing per-request rate limits.",
+                                    + "resource exhaustion) while sending one request. Impact on sensitive operations is unverified." + evidenceDetail(aliasEvidence),
                             "Enforce query cost/complexity limits and cap aliases per request.",
                             target, AuditIssueSeverity.MEDIUM, AuditIssueConfidence.FIRM,
                             "Recon Hound sends an alias-amplified query to test cost controls.",
                             "Confirm the amplification is usable against a sensitive operation.", alias);
                 }
 
-                HttpRequestResponse batch = gqlPost(steps.get(2), run, gateway);
+                ActiveRequestGateway.Result batchResult = gqlPost(steps.get(2), run, gateway);
+                if (!activeRuns.isCurrent(ticket)) return;
+                HttpRequestResponse batch = batchResult.response();
                 if (bodyOf(batch) != null && GraphQlFuzzEngine.batchingProcessed(bodyOf(batch))) {
-                    addActiveRow("MEDIUM", "GraphQL", "query-batching", "enabled", "array of operations processed", target);
+                    FindingEvidence batchEvidence = EvidenceCapture.helper("graphql-query-batching", VerificationState.REPRODUCED,
+                            "The recorded response exhibited the tested GraphQL feature; exploit impact remains unverified.", steps.get(2).request(), batchResult);
+                    addActiveRow("MEDIUM", "GraphQL", "query-batching", "enabled", "array of operations processed", target,
+                            batchEvidence);
                     reporter.report("gql-batch\0" + target, "GraphQL query batching enabled",
                             "<b>GraphQL query batching is enabled</b><br>The endpoint processed a JSON array of operations in a "
-                                    + "single request. Batching enables rate-limit bypass and brute force by packing many operations per request.",
+                                    + "single request. Impact on rate limits and sensitive operations is unverified." + evidenceDetail(batchEvidence),
                             "Disable array-based query batching, or apply per-operation rate limiting and cost analysis.",
                             target, AuditIssueSeverity.MEDIUM, AuditIssueConfidence.FIRM,
                             "Recon Hound sends a batched operation array to test whether batching is enabled.",
@@ -2665,13 +2729,12 @@ final class ReconController implements HttpHandler {
         });
     }
 
-    private HttpRequestResponse gqlPost(NativeRequestStep step, ScanRun run, ActiveRequestGateway gateway) {
+    private ActiveRequestGateway.Result gqlPost(NativeRequestStep step, ScanRun run, ActiveRequestGateway gateway) {
         ActiveRequestGateway.Result result = gateway.send(run, step.plan(), step.request());
         if (result.error() != null) {
             api.logging().logToError("GraphQL request failed", result.error());
-            return null;
         }
-        return result.dispatched() ? result.response() : null;
+        return result;
     }
 
     enum PreviewAction { PARAMETERS, GRAPHQL_INTROSPECTION, GRAPHQL_FUZZ }
@@ -2917,7 +2980,10 @@ final class ReconController implements HttpHandler {
                 + "\0" + finding.url() + "\0" + finding.evidence();
         if (!activeDedupe.add(dedupe)) return;
 
-        addActiveRow(finding.severity(), finding.testClass(), finding.parameter(), status, finding.evidence(), finding.url());
+        FindingEvidence evidence = finding.evidenceRecord() == null
+                ? FindingEvidence.metadata(finding.testClass(), state, "Detector emitted no structured capture: " + finding.evidence())
+                : finding.evidenceRecord();
+        addActiveRow(finding.severity(), finding.testClass(), finding.parameter(), status, finding.evidence(), finding.url(), evidence);
 
         if (state.isReportable() && !"INFO".equals(finding.severity())) {
             AuditIssueSeverity severity = switch (finding.severity()) {
@@ -2939,18 +3005,38 @@ final class ReconController implements HttpHandler {
             reporter.report(
                     "active-issue\0" + finding.testClass() + "\0" + finding.parameter() + "\0" + finding.url(),
                     finding.testClass() + " (" + finding.parameter() + ")",
-                    detail + "<br>Verification state: <b>" + escape(state.displayLabel()) + "</b>",
+                    detail + evidenceDetail(evidence),
                     activeRemediation(finding.testClass()),
                     finding.url(), severity, confidence,
                     "Recon Hound actively probes parameters for SSRF, SSTI and XSS when active testing is enabled. "
                             + "Verification state: " + state.displayLabel() + ".",
-                    "Confirm the impact manually and only test targets you are authorised to assess.");
+                    "Confirm the impact manually and only test targets you are authorised to assess.",
+                    finding.httpEvidence().toArray(HttpRequestResponse[]::new));
         }
     }
 
     private void addActiveRow(String severity, String testClass, String parameter, String status, String evidence, String url) {
-        SwingUtilities.invokeLater(() -> activeModel.add(new ReconModel.ActiveRow(
-                severity, testClass, parameter, status, evidence, url)));
+        addActiveRow(severity, testClass, parameter, status, evidence, url,
+                FindingEvidence.metadata(testClass, VerificationState.SIGNAL, "Unstructured observation; status text is not verification evidence."));
+    }
+
+    private void addActiveRow(String severity, String testClass, String parameter, String status, String summary,
+                              String url, FindingEvidence evidence) {
+        if (!running.get()) return;
+        if (Set.of("NATIVE_ACTIVE", "CORPUS", "NATIVE_HELPER").contains(evidence.source())
+                && !activeRuns.ownsCurrentRun(evidence.runId())) return;
+        long generation = stateGeneration.get();
+        SwingUtilities.invokeLater(() -> {
+            if (generation == stateGeneration.get())
+                activeModel.add(new ReconModel.ActiveRow(severity, testClass, parameter, status, summary, url, evidence));
+        });
+    }
+
+    private static String evidenceDetail(FindingEvidence evidence) {
+        return "<br>Verification state: <b>" + evidence.state().displayLabel() + "</b><br>Evidence ID: <code>" + escape(evidence.id()) + "</code>"
+                + "<br>Detector: <code>" + escape(evidence.detectorId()) + " @ " + escape(evidence.detectorVersion()) + "</code>"
+                + "<br>Rationale: " + escape(evidence.rationale()) + "<br>Reproduction: " + escape(evidence.reproduction())
+                + "<br>Retained capture: " + (evidence.complete() ? "complete" : "partial / metadata; inspect capture flags");
     }
 
     private static String activeRemediation(String testClass) {
@@ -2967,40 +3053,27 @@ final class ReconController implements HttpHandler {
         if (client == null) return;
         try {
             for (Interaction interaction : client.getAllInteractions()) {
-                String key = interaction.id().toString() + "\0" + interaction.type();
-                if (!oobDedupe.add(key)) continue;
-
-                String[] context = interaction.customData()
-                        .map(ActiveTestEngine::decodeCorrelation)
-                        .orElse(null);
-                String testClass = context != null ? context[0] : "OOB";
-                String parameter = context != null ? context[1] : "(unknown)";
-                String url = context != null ? context[2] : "(unknown)";
-                String evidence = interaction.type() + " interaction from "
-                        + interaction.clientIp().getHostAddress();
-
-                addActiveRow("HIGH", testClass + "-OOB", parameter,
-                        VerificationState.CONFIRMED.displayLabel(), evidence, url);
-
-                reporter.report(
-                        "oob-issue\0" + key,
-                        "out-of-band " + testClass + " interaction",
-                        "<b>Confirmed OOB interaction</b><br>Class: " + escape(testClass) + "<br>"
-                                + "Parameter: <code>" + escape(parameter) + "</code><br>"
-                                + "Interaction: " + escape(evidence) + "<br>"
-                                + "The Collaborator payload injected into this parameter triggered a "
-                                + interaction.type() + " callback, confirming server-side request forgery "
-                                + "or blind script execution.",
-                        activeRemediation(testClass),
-                        "(unknown)".equals(url) ? "https://" + interaction.clientIp().getHostAddress() : url,
-                        AuditIssueSeverity.HIGH, AuditIssueConfidence.FIRM,
-                        "Recon Hound correlates Burp Collaborator interactions back to the injected parameter.",
-                        "OOB interactions are strong evidence; verify the affected functionality manually.");
+                FindingEvidence.Oob event = OobEvidence.capture(interaction);
+                if (oobDedupe.contains(event.fingerprint())) continue;
+                long generation = stateGeneration.get();
+                SwingUtilities.invokeLater(() -> {
+                    if (!running.get() || generation != stateGeneration.get() || oobDedupe.contains(event.fingerprint())) return;
+                    ReconModel.ActiveRow row = OobEvidence.link(event, activeModel.snapshot());
+                    activeModel.add(row); // Stable event ID upgrades a previously unlinked observation in place.
+                    if (row.verificationState() != VerificationState.CONFIRMED) return;
+                    oobDedupe.add(event.fingerprint());
+                    reporter.report("oob-issue\0" + event.fingerprint(), "Correlated out-of-band interaction: " + row.testClass(),
+                            "<b>Correlated Collaborator interaction</b><br>" + escape(row.evidence())
+                                    + "<br>Payload ID: <code>" + escape(event.payloadId()) + "</code><br>Observed: " + escape(event.timestamp())
+                                    + "<br>Interaction: " + escape(event.type()) + " from " + escape(event.clientIp()) + ":" + event.clientPort()
+                                    + evidenceDetail(row.evidenceRecord()), activeRemediation(row.testClass()), row.url(),
+                            AuditIssueSeverity.HIGH, AuditIssueConfidence.FIRM,
+                            "Observed callback matched an issued payload with a retained API dispatch attempt.",
+                            "A callback alone does not establish the exact exploit mechanism or impact.");
+                    publishStatus();
+                });
             }
-            publishStatus();
-        } catch (Exception e) {
-            api.logging().logToError("Collaborator polling failed", e);
-        }
+        } catch (Exception e) { api.logging().logToError("Collaborator poll failed", e); }
     }
 
     private void addSignalIssue(ResponseSignalEngine.Signal signal, String location, String url, HttpRequestResponse pair) {

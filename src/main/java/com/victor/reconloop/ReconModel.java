@@ -16,7 +16,15 @@ final class ReconModel {
     record ReflectionRow(String severity, String parameter, String type, String context,
                          String surviving, String suggestion, String value, String url) {}
     record ActiveRow(String severity, String testClass, String parameter, String status,
-                     String evidence, String url) {}
+                     String evidence, String url, FindingEvidence evidenceRecord) {
+        ActiveRow(String severity, String testClass, String parameter, String status, String evidence, String url) {
+            this(severity, testClass, parameter, status, evidence, url,
+                    FindingEvidence.metadata(testClass, VerificationState.SIGNAL,
+                            "Unstructured observation; legacy status text is not verification evidence."));
+        }
+        VerificationState verificationState() { return evidenceRecord.state(); }
+        ActiveRow withEvidence(FindingEvidence record) { return new ActiveRow(severity, testClass, parameter, status, evidence, url, record); }
+    }
     record AssetRow(String type, String value, String source) {}
     record AgentActivityRow(String round, String provider, String model, String status,
                             String estInput, String estOutput, String summary) {}
@@ -123,7 +131,9 @@ final class ReconModel {
     }
 
     static final class ActiveTableModel extends AbstractTableModel {
-        private final String[] columns = {"Severity", "Class", "Parameter", "Status", "Evidence", "URL"};
+        static final int MAX_ROWS = 500;
+        static final int MAX_RETAINED_BYTES = 16 * 1024 * 1024;
+        private final String[] columns = {"Severity", "Class", "Parameter", "Observation", "Evidence", "URL", "Verification", "Capture"};
         private final List<ActiveRow> rows = new ArrayList<>();
         @Override public int getRowCount() { return rows.size(); }
         @Override public int getColumnCount() { return columns.length; }
@@ -132,11 +142,27 @@ final class ReconModel {
             ActiveRow r = rows.get(row);
             return switch (col) {
                 case 0 -> r.severity(); case 1 -> r.testClass(); case 2 -> r.parameter();
-                case 3 -> r.status(); case 4 -> r.evidence(); default -> r.url();
+                case 3 -> r.status(); case 4 -> r.evidence(); case 5 -> r.url();
+                case 6 -> r.verificationState().displayLabel();
+                default -> r.evidenceRecord().complete() ? "complete" : "partial / metadata";
             };
         }
-        void add(ActiveRow row) { rows.add(0, row); fireTableRowsInserted(0, 0); }
-        void clear() { int n = rows.size(); rows.clear(); if (n > 0) fireTableDataChanged(); }
+        void add(ActiveRow row) {
+            rows.removeIf(old -> old.evidenceRecord().id().equals(row.evidenceRecord().id()));
+            rows.add(0, row);
+            while (rows.size() > MAX_ROWS) rows.removeLast();
+            int retained = 0;
+            for (int i = 0; i < rows.size(); i++) {
+                ActiveRow current = rows.get(i);
+                if (retained + current.evidenceRecord().retainedBytes() > MAX_RETAINED_BYTES)
+                    rows.set(i, current.withEvidence(current.evidenceRecord().withoutBytes()));
+                else retained += current.evidenceRecord().retainedBytes();
+            }
+            fireTableDataChanged();
+        }
+        ActiveRow row(int index) { return rows.get(index); }
+        List<ActiveRow> snapshot() { return List.copyOf(rows); }
+        void clear() { rows.clear(); fireTableDataChanged(); }
     }
 
     static final class AssetTableModel extends AbstractTableModel {

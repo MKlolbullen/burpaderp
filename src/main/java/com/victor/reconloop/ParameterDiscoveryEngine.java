@@ -21,7 +21,9 @@ import java.util.*;
  */
 final class ParameterDiscoveryEngine {
 
-    record Discovered(String name, String evidence, String url) {}
+    record Discovered(String name, String evidence, String url, FindingEvidence evidenceRecord) {
+        Discovered(String name, String evidence, String url) { this(name, evidence, url, null); }
+    }
 
     private static final int CHUNK = 20;
     private static final int LENGTH_DELTA = 24;
@@ -49,7 +51,8 @@ final class ParameterDiscoveryEngine {
         Iterator<Probe> probes = probes(base).iterator();
         Probe baselineProbe = probes.next();
         String url = baselineProbe.step().request().url();
-        HttpRequestResponse baseline = send(baselineProbe.step(), run, gateway);
+        ActiveRequestGateway.Result baselineResult = send(baselineProbe.step(), run, gateway);
+        HttpRequestResponse baseline = baselineResult.response();
         if (baseline == null || baseline.response() == null) return List.of();
         int baselineLength = baseline.response().bodyToString().length();
         short baselineStatus = baseline.response().statusCode();
@@ -57,19 +60,22 @@ final class ParameterDiscoveryEngine {
         Set<String> reported = new HashSet<>();
         while (!run.requestBudget().exhausted() && run.isRunning() && probes.hasNext()) {
             Probe probe = probes.next();
-            HttpRequestResponse rr = send(probe.step(), run, gateway);
+            ActiveRequestGateway.Result result = send(probe.step(), run, gateway);
+            HttpRequestResponse rr = result.response();
             throttle(throttleMillis);
             if (rr == null || rr.response() == null) continue;
             HttpResponse response = rr.response();
             String body = response.bodyToString();
             for (String name : reflectedNames(body, probe.canaries())) {
-                if (reported.add(name)) discovered.add(new Discovered(name, "value reflected in response", url));
+                if (reported.add(name)) discovered.add(new Discovered(name, "value reflected in response", url,
+                        EvidenceCapture.helper("parameter-discovery", VerificationState.REPRODUCED, "The generated parameter canary was reflected; this is discovery evidence, not a vulnerability confirmation.", base, baselineResult, result)));
             }
             int delta = Math.abs(body.length() - baselineLength);
             if ((response.statusCode() != baselineStatus || delta > LENGTH_DELTA) && probe.candidateCount() == 1) {
                 String name = probe.canaries().keySet().iterator().next();
                 if (reported.add(name)) discovered.add(new Discovered(name,
-                        "response changed (status " + response.statusCode() + ", Δlen " + delta + ")", url));
+                        "response changed (status " + response.statusCode() + ", Δlen " + delta + ")", url,
+                        EvidenceCapture.helper("parameter-discovery", VerificationState.CANDIDATE, "A single added parameter changed the response status/length; causal behavior needs further verification.", base, baselineResult, result)));
             }
         }
         return discovered;
@@ -143,10 +149,10 @@ final class ParameterDiscoveryEngine {
         };
     }
 
-    private HttpRequestResponse send(NativeRequestStep step, ScanRun run, ActiveRequestGateway gateway) {
+    private ActiveRequestGateway.Result send(NativeRequestStep step, ScanRun run, ActiveRequestGateway gateway) {
         ActiveRequestGateway.Result result = gateway.send(run, step.plan(), step.request());
         if (result.error() != null) api.logging().logToError("Parameter discovery request failed", result.error());
-        return result.response();
+        return result;
     }
 
     private static void throttle(long millis) {

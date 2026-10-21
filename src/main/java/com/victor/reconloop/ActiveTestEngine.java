@@ -32,7 +32,15 @@ final class ActiveTestEngine {
      * existing probes while they are migrated to name their evidence state directly.
      */
     record ActiveFinding(String severity, String testClass, String parameter,
-                         String evidence, VerificationState verificationState, String url) {
+                         String evidence, VerificationState verificationState, String url,
+                         FindingEvidence evidenceRecord, List<HttpRequestResponse> httpEvidence) {
+        ActiveFinding { httpEvidence = List.copyOf(httpEvidence); }
+        ActiveFinding(String severity, String testClass, String parameter, String evidence, VerificationState state, String url) {
+            this(severity, testClass, parameter, evidence, state, url, null, List.of());
+        }
+        ActiveFinding withEvidence(FindingEvidence record, List<HttpRequestResponse> messages) {
+            return new ActiveFinding(severity, testClass, parameter, evidence, verificationState, url, record, messages);
+        }
         ActiveFinding(String severity, String testClass, String parameter,
                       String evidence, boolean legacyConfirmed, String url) {
             this(severity, testClass, parameter, evidence,
@@ -150,6 +158,9 @@ final class ActiveTestEngine {
     private final ThreadLocal<Set<RequestPolicy.Permission>> currentProbePermissions =
             ThreadLocal.withInitial(Set::of);
     private final ThreadLocal<Boolean> lastRequestDispatched = ThreadLocal.withInitial(() -> false);
+    private final ThreadLocal<EvidenceCapture> evidenceCapture = new ThreadLocal<>();
+    private final ThreadLocal<List<ActiveFinding>> findingOutput = new ThreadLocal<>();
+    private final ThreadLocal<HttpRequest> originalRequest = new ThreadLocal<>();
     private volatile CollaboratorClient collaborator;
 
     ActiveTestEngine(MontoyaApi api, long throttleMillis) {
@@ -166,6 +177,7 @@ final class ActiveTestEngine {
     List<ActiveFinding> test(HttpRequest base, ScanRun run, ActiveRequestGateway gateway) {
         if (base == null || run == null || gateway == null || !run.isRunning()) return List.of();
         List<ActiveFinding> findings = new ArrayList<>();
+        findingOutput.set(findings); originalRequest.set(base);
         scanRun.set(run);
         requestGateway.set(gateway);
         try {
@@ -206,6 +218,7 @@ final class ActiveTestEngine {
             if (!budgetExhausted()) runProbe("xxe", () -> testXxe(base, findings));
             return findings;
         } finally {
+            findingOutput.remove(); originalRequest.remove(); evidenceCapture.remove();
             scanRun.remove();
             requestGateway.remove();
             currentProbeId.remove();
@@ -387,8 +400,9 @@ final class ActiveTestEngine {
     private int testSsrf(HttpRequest base, InsertionPoint point, List<ActiveFinding> out) {
         CollaboratorClient client = collaborator;
         if (client == null || budgetExhausted()) return 0;
-        String correlation = encodeCorrelation("SSRF", point.label(), base.url());
+        String correlation = correlation("SSRF", point.label(), base.url());
         CollaboratorPayload payload = client.generatePayload(correlation);
+        if (evidenceCapture.get() != null) evidenceCapture.get().issued(payload, "SSRF", point.label());
         HttpResponse response = sendMutated(base, point, ssrfPayload(payload.toString()));
         if (!Boolean.TRUE.equals(lastRequestDispatched.get())) return 0;
         if (response != null && response.bodyToString().contains(payload.toString())) {
@@ -404,8 +418,9 @@ final class ActiveTestEngine {
     private int testBlindXss(HttpRequest base, InsertionPoint point, List<ActiveFinding> out) {
         CollaboratorClient client = collaborator;
         if (client == null || budgetExhausted()) return 0;
-        String correlation = encodeCorrelation("XSS-blind", point.label(), base.url());
+        String correlation = correlation("XSS-blind", point.label(), base.url());
         CollaboratorPayload payload = client.generatePayload(correlation);
+        if (evidenceCapture.get() != null) evidenceCapture.get().issued(payload, "XSS-blind", point.label());
         sendMutated(base, point, blindXssPayload(payload.toString()));
         if (!Boolean.TRUE.equals(lastRequestDispatched.get())) return 0;
         out.add(new ActiveFinding("INFO", "XSS-blind", point.label(),
@@ -416,8 +431,9 @@ final class ActiveTestEngine {
     private int testCommandInjection(HttpRequest base, InsertionPoint point, List<ActiveFinding> out) {
         CollaboratorClient client = collaborator;
         if (client == null || budgetExhausted()) return 0;
-        String correlation = encodeCorrelation("CMDi", point.label(), base.url());
+        String correlation = correlation("CMDi", point.label(), base.url());
         CollaboratorPayload payload = client.generatePayload(correlation);
+        if (evidenceCapture.get() != null) evidenceCapture.get().issued(payload, "CMDi", point.label());
         int before = budgetUsed();
         // Separator variants so at least one survives sh/cmd quoting contexts.
         for (String value : commandPayloads(payload.toString())) {
@@ -605,8 +621,9 @@ final class ActiveTestEngine {
 
         CollaboratorClient client = collaborator;
         if (client != null && !budgetExhausted()) {
-            String correlation = encodeCorrelation("XXE", "(body)", base.url());
+            String correlation = correlation("XXE", "(body)", base.url());
             CollaboratorPayload payload = client.generatePayload(correlation);
+            if (evidenceCapture.get() != null) evidenceCapture.get().issued(payload, "XXE", "(body)");
             HttpResponse response = sendBody(base, XxeEngine.buildOobPayload("http://" + payload + "/xxe"),
                     Set.of(RequestPolicy.Permission.OAST));
             if (response != null) {
@@ -636,8 +653,9 @@ final class ActiveTestEngine {
     private int testHostHeaderInjection(HttpRequest base, List<ActiveFinding> out) {
         CollaboratorClient client = collaborator;
         if (client == null || budgetExhausted()) return 0;
-        String correlation = encodeCorrelation("HostHeader", "Host", base.url());
+        String correlation = correlation("HostHeader", "Host", base.url());
         CollaboratorPayload payload = client.generatePayload(correlation);
+        if (evidenceCapture.get() != null) evidenceCapture.get().issued(payload, "HostHeader", "Host");
         try {
             HttpRequestResponse rr = sendRequest(base.withUpdatedHeader("X-Forwarded-Host", payload.toString()));
             if (rr == null) return 0;
@@ -774,9 +792,14 @@ final class ActiveTestEngine {
         currentProbeId.set(probeId == null || probeId.isBlank() ? "active-probe" : probeId);
         currentProbePermissions.set(permissions == null || permissions.isEmpty()
                 ? Set.of() : Set.copyOf(permissions));
+        EvidenceCapture previous = evidenceCapture.get();
+        EvidenceCapture capture = new EvidenceCapture(scanRun.get(), originalRequest.get(), "NATIVE_ACTIVE", currentProbeId.get());
+        evidenceCapture.set(capture);
+        List<ActiveFinding> output = findingOutput.get(); int before = output.size();
         try {
             probe.run();
         } finally {
+            capture.attach(output, before); evidenceCapture.set(previous);
             currentProbeId.set(previousId);
             currentProbePermissions.set(previousPermissions);
         }
@@ -821,6 +844,7 @@ final class ActiveTestEngine {
         ActiveRequestGateway.Result result = gateway.send(run,
                 RequestPlan.create(request, currentProbeId.get(), required),
                 request);
+        if (evidenceCapture.get() != null) evidenceCapture.get().recordWithTokens(result, request);
         if (result.error() != null) {
             api.logging().logToError("Active request failed for " + request.url(), result.error());
             return null;
@@ -1039,6 +1063,11 @@ final class ActiveTestEngine {
             }
         }
         return false;
+    }
+
+    private String correlation(String testClass, String parameter, String url) {
+        EvidenceCapture capture = evidenceCapture.get();
+        return capture == null ? encodeCorrelation(testClass, parameter, url) : capture.correlation();
     }
 
     static String encodeCorrelation(String testClass, String parameter, String url) {

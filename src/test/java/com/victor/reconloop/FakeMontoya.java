@@ -42,6 +42,8 @@ final class FakeMontoya implements AutoCloseable {
     Predicate<String> inScope = url -> true;
     Function<HttpRequest, HttpResponse> responder = request -> response(200, "", Map.of());
     Consumer<HttpRequest> onSend = request -> {};
+    final Map<String, String> persisted = new java.util.concurrent.ConcurrentHashMap<>();
+    final List<Object> issues = new CopyOnWriteArrayList<>();
     final MontoyaApi api;
 
     FakeMontoya() {
@@ -58,6 +60,12 @@ final class FakeMontoya implements AutoCloseable {
                     (String) args[0], (String) args[1], args.length > 2 && args[2] instanceof HttpParameterType t
                             ? t : method.getName().equals("cookieParameter") ? HttpParameterType.COOKIE : HttpParameterType.URL);
             case "httpHeader" -> header((String) args[0], (String) args[1]);
+            case "auditIssue" -> proxy(burp.api.montoya.scanner.audit.issues.AuditIssue.class, (issue, call, values) -> switch (call.getName()) {
+                case "name" -> args[0]; case "detail" -> args[1]; case "baseUrl" -> args[3];
+                case "severity" -> args[4]; case "confidence" -> args[5];
+                case "requestResponses" -> args[9] instanceof List<?> list ? list : Arrays.asList((Object[]) args[9]);
+                default -> empty(call.getReturnType());
+            });
             case "httpRequestResponse" -> pair((HttpRequest) args[0], (HttpResponse) args[1]);
             case "requestOptions" -> proxy(RequestOptions.class, (value, call, parameters) -> {
                 if (call.getName().equals("withRedirectionMode")) options.put((RequestOptions) value, (RedirectionMode) parameters[0]);
@@ -91,9 +99,15 @@ final class FakeMontoya implements AutoCloseable {
             case "siteMap" -> proxy(method.getReturnType(), (map, call, parameters) -> switch (call.getName()) {
                 case "requestResponses" -> new ArrayList<>(siteMap);
                 case "issues" -> List.of();
-                case "add" -> { if (parameters[0] instanceof HttpRequestResponse rr) siteMap.add(rr); yield null; }
+                case "add" -> { if (parameters[0] instanceof HttpRequestResponse rr) siteMap.add(rr); else issues.add(parameters[0]); yield null; }
                 default -> empty(call.getReturnType());
             });
+            case "persistence" -> proxy(method.getReturnType(), (persistence, call, parameters) ->
+                    proxy(burp.api.montoya.persistence.PersistedObject.class, (store, operation, values) -> switch (operation.getName()) {
+                        case "getString" -> persisted.get(values[0]);
+                        case "setString" -> { persisted.put((String) values[0], (String) values[1]); yield null; }
+                        default -> empty(operation.getReturnType());
+                    }));
             case "logging" -> proxy(method.getReturnType(), (logger, call, parameters) -> {
                 if (call.getName().equals("logToError")) errors.add(Arrays.toString(parameters));
                 return empty(call.getReturnType());
@@ -150,13 +164,16 @@ final class FakeMontoya implements AutoCloseable {
     }
 
     static HttpResponse response(int status, String body, Map<String, String> headers) {
+        String raw = "HTTP/1.1 " + status + " OK\r\n" + headers.entrySet().stream()
+                .map(e -> e.getKey() + ": " + e.getValue() + "\r\n").collect(java.util.stream.Collectors.joining()) + "\r\n" + body;
         return proxy(HttpResponse.class, (self, method, args) -> switch (method.getName()) {
             case "statusCode" -> (short) status;
             case "bodyToString" -> body;
             case "headerValue" -> getHeader(headers, (String) args[0]);
             case "hasHeader" -> getHeader(headers, (String) args[0]) != null;
             case "headers" -> headers.entrySet().stream().map(e -> header(e.getKey(), e.getValue())).toList();
-            case "toString" -> "HTTP/1.1 " + status + " OK\r\n\r\n" + body;
+            case "toByteArray" -> bytes(raw);
+            case "toString" -> raw;
             default -> method.getReturnType() == HttpResponse.class ? self : empty(method.getReturnType());
         });
     }
