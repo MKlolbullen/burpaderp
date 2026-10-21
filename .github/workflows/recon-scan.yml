@@ -1,16 +1,21 @@
 name: Recon Scan
 
-# On-demand CI-native scan: builds the jar and runs the Burp-free Recon Hound CLI
-# (secrets, SCA, DOM-XSS, exposed source maps) against target URLs, uploading the
-# SARIF report. Uses only GitHub-owned actions (repo policy blocks others) and the
-# Gradle wrapper directly.
+# Offline analysis only: analyze a saved response body already in this checkout.
+# Live target fetching is disabled until it can share the outbound gateway (#44).
 
 on:
   workflow_dispatch:
     inputs:
-      targets:
-        description: 'Space-separated target URLs to scan (authorized targets only)'
+      body_file:
+        description: 'Repository path to a saved response body (no URL fetching)'
         required: true
+      artifact_url:
+        description: 'Original HTTP(S) URL used only as SARIF metadata'
+        required: true
+      content_type:
+        description: 'Content type of the saved response body'
+        default: 'text/html'
+        required: false
       fail_on:
         description: 'Fail the run if a finding is at/above this severity'
         required: false
@@ -27,7 +32,7 @@ concurrency:
 
 jobs:
   scan:
-    name: Scan targets
+    name: Analyze saved response
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -42,17 +47,16 @@ jobs:
       - name: Build jar
         run: ./gradlew clean build --no-daemon
 
-      - name: Write target list
-        env:
-          TARGETS: ${{ inputs.targets }}
-        run: printf '%s\n' "$TARGETS" | tr ' ' '\n' | sed '/^$/d' > targets.txt
-
-      - name: Run Recon Hound CLI
+      - name: Analyze saved response with Recon Hound CLI
         env:
           FAIL_ON: ${{ inputs.fail_on }}
+          BODY_FILE: ${{ inputs.body_file }}
+          ARTIFACT_URL: ${{ inputs.artifact_url }}
+          CONTENT_TYPE: ${{ inputs.content_type }}
         run: |
-          JAR="$(ls build/libs/*.jar | head -1)"
-          java -jar "$JAR" --file targets.txt --fail-on "$FAIL_ON" --output recon-hound.sarif
+          JAR="$(find build/libs -maxdepth 1 -type f -name 'burp-recon-hound-*.jar' -print -quit)"
+          java -jar "$JAR" --body-file "$BODY_FILE" --content-type "$CONTENT_TYPE" \
+            --fail-on "$FAIL_ON" --output recon-hound.sarif "$ARTIFACT_URL"
 
       - name: Upload SARIF report
         if: always()

@@ -57,6 +57,15 @@ jobs:
           # The CLI writes usage/help to stderr so bad invocations can share the same formatter.
           java -jar "$JAR" --help >/tmp/recon-hound-help.txt 2>&1
           grep -q -- '--fail-on' /tmp/recon-hound-help.txt
+          printf '%s' '<html>offline fixture</html>' > /tmp/recon-hound-body.html
+          java -jar "$JAR" --body-file /tmp/recon-hound-body.html --fail-on none \
+            --output /tmp/recon-hound-offline.sarif https://does-not-resolve.invalid/
+          test -s /tmp/recon-hound-offline.sarif
+          status=0
+          java -jar "$JAR" --fail-on none --output /tmp/recon-hound-blocked.sarif \
+            https://does-not-resolve.invalid/ || status=$?
+          test "$status" -eq 3
+          test ! -e /tmp/recon-hound-blocked.sarif
           jar tf "$JAR" >/tmp/recon-hound-jar.txt
           grep -q '^com/victor/reconloop/ReconLoopExtension.class$' /tmp/recon-hound-jar.txt
 

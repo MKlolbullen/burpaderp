@@ -32,7 +32,7 @@ func TestDefaultPolicyRequiresOptInForNetworkAndVulnerabilityScanning(t *testing
 	}
 }
 
-func TestExplicitPolicyEnablesNetworkAndActiveStages(t *testing.T) {
+func TestExplicitRiskGrantsDoNotRepresentEgressAuthorization(t *testing.T) {
 	registry := DefaultToolRegistry()
 	policy := DefaultRunPolicy()
 	policy.AllowNetworkProbe = true
@@ -41,6 +41,16 @@ func TestExplicitPolicyEnablesNetworkAndActiveStages(t *testing.T) {
 		spec, _ := registry.MustGet(name)
 		if err := policy.Check(spec); err != nil {
 			t.Fatalf("explicit policy should allow %s: %v", name, err)
+		}
+	}
+}
+
+func TestProfilesRequireAnExplicitEgressClassification(t *testing.T) {
+	profile, _ := CommandProfileFor("httpx")
+	for _, unknown := range []EgressClass{"", "future"} {
+		profile.Egress = unknown
+		if err := ValidateCommandProfile(profile, DefaultToolRegistry()); err == nil {
+			t.Fatalf("unknown egress accepted: %q", unknown)
 		}
 	}
 }

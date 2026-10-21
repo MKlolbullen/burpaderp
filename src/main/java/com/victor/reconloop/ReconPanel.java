@@ -39,6 +39,23 @@ final class ReconPanel extends JPanel {
     private ReconModel.AiFeedTableModel aiFeedModel;
     private JLabel aiFeedUsage;
 
+    private void showRequestPreview(JButton button, java.util.function.Supplier<String> preview) {
+        button.setEnabled(false);
+        new SwingWorker<String, Void>() {
+            protected String doInBackground() { return preview.get(); }
+            protected void done() {
+                button.setEnabled(true);
+                String result;
+                try { result = get(); }
+                catch (Exception e) { result = "Could not prepare this request preview. No requests sent."; }
+                JTextArea text = new JTextArea(result, 24, 100);
+                text.setEditable(false);
+                text.setCaretPosition(0);
+                JOptionPane.showMessageDialog(ReconPanel.this, new JScrollPane(text), "Request preview", JOptionPane.INFORMATION_MESSAGE);
+            }
+        }.execute();
+    }
+
     ReconPanel(MontoyaApi api, ReconController controller,
                ReconModel.FindingTableModel findingModel,
                ReconModel.DiscoveryTableModel discoveryModel,
@@ -64,6 +81,7 @@ final class ReconPanel extends JPanel {
 
         JButton addSeeds = new JButton("Add seeds + start");
         JButton queueSiteMap = new JButton("Queue current in-scope site map");
+        JButton crawlPreview = new JButton("Preview seeds / crawl queue…");
         JButton pause = new JButton("Pause");
         JButton resume = new JButton("Resume");
         JButton reset = new JButton("Reset state");
@@ -87,7 +105,7 @@ final class ReconPanel extends JPanel {
         controls.add(optionsB);
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        buttons.add(addSeeds); buttons.add(queueSiteMap); buttons.add(pause); buttons.add(resume); buttons.add(reset);
+        buttons.add(addSeeds); buttons.add(queueSiteMap); buttons.add(crawlPreview); buttons.add(pause); buttons.add(resume); buttons.add(reset);
         controls.add(buttons);
 
         JLabel payloads = new JLabel("Payload categories: " + controller.payloadCategories());
@@ -111,17 +129,40 @@ final class ReconPanel extends JPanel {
         JCheckBox activeEnabled = new JCheckBox("Enable active tests (fires payloads — authorized targets only)", false);
         JCheckBox mutatingActive = new JCheckBox("Allow mutating active replays (POST/PUT/PATCH/DELETE)", false);
         mutatingActive.setToolTipText("Default active tests replay only GET/HEAD/OPTIONS. Enable only when state-changing requests are explicitly authorized.");
+        JCheckBox oastActive = new JCheckBox("Allow OAST / Collaborator callbacks", false);
+        JCheckBox timeDelayActive = new JCheckBox("Allow time-delay probes", false);
+        JCheckBox uploadActive = new JCheckBox("Allow upload mutations", false);
+        JCheckBox authLockoutActive = new JCheckBox("Allow auth / lockout probes", false);
+        oastActive.setToolTipText("Required before SSRF/blind-XSS/CMDi/host-header and other Collaborator-backed payloads can leave Burp.");
+        timeDelayActive.setToolTipText("Required before SLEEP/PG_SLEEP/WAITFOR-style timing payloads are dispatched.");
+        uploadActive.setToolTipText("Required before multipart upload filenames/bodies are actively replayed.");
+        authLockoutActive.setToolTipText("Required before rate-limit, JWT forgery, or alternate-identity access-control replays are dispatched.");
         JSpinner activeBudget = new JSpinner(new SpinnerNumberModel(60, 1, 5000, 10));
+        JSpinner activeHostBudget = new JSpinner(new SpinnerNumberModel(60, 1, 5000, 10));
+        JSpinner activeEndpointBudget = new JSpinner(new SpinnerNumberModel(20, 1, 5000, 5));
+        JSpinner activeProbeBudget = new JSpinner(new SpinnerNumberModel(20, 1, 5000, 5));
+        activeHostBudget.setToolTipText("Maximum target-directed requests to one host during a run.");
+        activeEndpointBudget.setToolTipText("Maximum requests to one HTTP method + path during a run; query mutations share the same endpoint quota.");
+        activeProbeBudget.setToolTipText("Maximum requests attributed to one probe ID during a run.");
         JTextField ctDomain = new JTextField(18);
         JButton ctButton = new JButton("Enumerate (crt.sh)");
         JTextField paramUrl = new JTextField(22);
         JButton paramButton = new JButton("Discover params (Arjun)");
+        JButton paramPreview = new JButton("Preview params…");
         JTextField graphqlUrl = new JTextField(22);
         JButton graphqlButton = new JButton("Introspect GraphQL");
         JButton graphqlFuzzButton = new JButton("Fuzz GraphQL");
+        JButton graphqlPreview = new JButton("Preview introspection…");
+        JButton graphqlFuzzPreview = new JButton("Preview GraphQL fuzz…");
         JButton runActive = new JButton("Run active tests on in-scope site map");
+        JButton activePreview = new JButton("Preview native probes…");
+        JComboBox<String> previewProbe = new JComboBox<>(new String[]{"All probes", "waf", "reflected-xss", "ssti", "ssrf", "blind-xss",
+                "command-injection", "open-redirect", "crlf", "sqli", "nosqli", "path-traversal", "host-header", "cors", "rate-limit", "file-upload", "xxe"});
+        previewProbe.setToolTipText("Filter preview detail to one probe when the 500-step limit truncates the full plan.");
         JButton runJwt = new JButton("Run JWT alg:none test");
         JButton runTakeover = new JButton("Subdomain takeover check");
+        JButton jwtPreview = new JButton("Preview JWT…");
+        JButton takeoverPreview = new JButton("Preview takeover…");
         JButton importSidecar = new JButton("Import reconctl JSONL…");
         importSidecar.setToolTipText("Imports typed Go-sidecar results after re-checking every record against the current Burp scope. Does not launch a tool or send traffic.");
 
@@ -132,24 +173,47 @@ final class ReconPanel extends JPanel {
         JPanel activeRow1 = new JPanel(new FlowLayout(FlowLayout.LEFT));
         activeRow1.add(activeEnabled);
         activeRow1.add(mutatingActive);
-        activeRow1.add(new JLabel("Run request budget:")); activeRow1.add(activeBudget);
+        activeRow1.add(new JLabel("Global run budget:")); activeRow1.add(activeBudget);
         activeRow1.add(runActive);
         activePanel.add(activeRow1);
+
+        JPanel quotaRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        quotaRow.add(new JLabel("Per-host:")); quotaRow.add(activeHostBudget);
+        quotaRow.add(new JLabel("Per-endpoint:")); quotaRow.add(activeEndpointBudget);
+        quotaRow.add(new JLabel("Per-probe:")); quotaRow.add(activeProbeBudget);
+        quotaRow.add(new JLabel("(effective values are capped by the global run budget)"));
+        activePanel.add(quotaRow);
+
+        JPanel riskRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        riskRow.add(new JLabel("Risk permissions:"));
+        riskRow.add(oastActive);
+        riskRow.add(timeDelayActive);
+        riskRow.add(uploadActive);
+        riskRow.add(authLockoutActive);
+        riskRow.add(new JLabel("(persistent/destructive payloads stay disabled)"));
+        activePanel.add(riskRow);
+        JPanel previewRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        previewRow.add(new JLabel("Native probe dry run:")); previewRow.add(previewProbe); previewRow.add(activePreview);
+        previewRow.add(new JLabel("(no traffic; response branches and runtime templates are identified)"));
+        activePanel.add(previewRow);
 
         JPanel activeRow2 = new JPanel(new FlowLayout(FlowLayout.LEFT));
         activeRow2.add(new JLabel("crt.sh domain:")); activeRow2.add(ctDomain); activeRow2.add(ctButton);
         activeRow2.add(new JLabel("Param-discovery URL:")); activeRow2.add(paramUrl); activeRow2.add(paramButton);
+        activeRow2.add(paramPreview);
         activeRow2.add(new JLabel("Param wordlist: " + controller.paramWordlistSize()));
         activePanel.add(activeRow2);
 
         JPanel activeRow3 = new JPanel(new FlowLayout(FlowLayout.LEFT));
         activeRow3.add(new JLabel("GraphQL URL:")); activeRow3.add(graphqlUrl); activeRow3.add(graphqlButton);
         activeRow3.add(graphqlFuzzButton);
+        activeRow3.add(graphqlPreview);
+        activeRow3.add(graphqlFuzzPreview);
         activePanel.add(activeRow3);
 
         JPanel activeRow4 = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        activeRow4.add(runJwt);
-        activeRow4.add(runTakeover);
+        activeRow4.add(runJwt); activeRow4.add(jwtPreview);
+        activeRow4.add(runTakeover); activeRow4.add(takeoverPreview);
         activeRow4.add(new JLabel("(opt-in — JWT replays GET/HEAD/OPTIONS; takeover fetches enumerated hosts)"));
         activePanel.add(activeRow4);
 
@@ -168,65 +232,32 @@ final class ReconPanel extends JPanel {
         JCheckBox encUrlB64 = new JCheckBox("URL->Base64", false);
         JSpinner corpusBudget = new JSpinner(new SpinnerNumberModel(5, 1, 200, 1));
         JButton runCorpusFuzz = new JButton("Run corpus fuzz on in-scope site map");
+        JButton corpusPreview = new JButton("Preview corpus…");
+        JComboBox<String> corpusPreviewCategory = new JComboBox<>(new String[]{"All categories", "sqli", "sqli2", "xss", "ssti", "lfi", "rce_payloads"});
+        corpusPreviewCategory.setToolTipText("Preview one category beyond the 500-step prefix; execution still uses all relevant categories.");
         JPanel corpusRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
         corpusRow.add(new JLabel("Corpus fuzz encodings:"));
         corpusRow.add(encRaw); corpusRow.add(encUrl); corpusRow.add(encHtml); corpusRow.add(encBase64);
         corpusRow.add(encDoubleUrl); corpusRow.add(encB64Url); corpusRow.add(encUrlB64);
         corpusRow.add(new JLabel("Max payloads/category:")); corpusRow.add(corpusBudget);
-        corpusRow.add(runCorpusFuzz);
+        corpusRow.add(runCorpusFuzz); corpusRow.add(corpusPreviewCategory); corpusRow.add(corpusPreview);
         activePanel.add(corpusRow);
         activePanel.add(new JLabel("(fires payloads/*.txt: LFI/RCE/SQLi/SSTI/XSS corpus at heuristically-matched "
                 + "parameters; destructive entries are skipped, callback hosts are rewritten to Collaborator)"));
 
-        // sqlmap follow-up: deeper confirmation of a parameter already flagged by the native SQLi test.
-        JTextField sqlmapUrl = new JTextField(20);
-        JComboBox<String> sqlmapMethod = new JComboBox<>(new String[]{"GET", "POST"});
-        JTextField sqlmapParam = new JTextField(10);
-        JTextField sqlmapBinary = new JTextField("sqlmap", 10);
-        JButton sqlmapCheck = new JButton("Check sqlmap");
-        JButton sqlmapRun = new JButton("Run sqlmap");
-        JPanel sqlmapRow1 = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        sqlmapRow1.add(new JLabel("sqlmap follow-up — URL:")); sqlmapRow1.add(sqlmapUrl);
-        sqlmapRow1.add(sqlmapMethod);
-        sqlmapRow1.add(new JLabel("Parameter:")); sqlmapRow1.add(sqlmapParam);
-        sqlmapRow1.add(new JLabel("Binary:")); sqlmapRow1.add(sqlmapBinary);
-        sqlmapRow1.add(sqlmapCheck);
-        activePanel.add(sqlmapRow1);
-
-        JTextArea sqlmapBody = new JTextArea(1, 20);
-        JTextField sqlmapCookie = new JTextField(16);
-        JSpinner sqlmapLevel = new JSpinner(new SpinnerNumberModel(1, 1, 5, 1));
-        JSpinner sqlmapRisk = new JSpinner(new SpinnerNumberModel(1, 1, 3, 1));
-        JTextField sqlmapTechniques = new JTextField("BEUST", 6);
-        JTextField sqlmapExtraArgs = new JTextField(16);
-        JSpinner sqlmapTimeout = new JSpinner(new SpinnerNumberModel(120, 10, 3600, 10));
-        JPanel sqlmapRow2 = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        sqlmapRow2.add(new JLabel("POST body:")); sqlmapRow2.add(new JScrollPane(sqlmapBody));
-        sqlmapRow2.add(new JLabel("Cookie:")); sqlmapRow2.add(sqlmapCookie);
-        sqlmapRow2.add(new JLabel("Level:")); sqlmapRow2.add(sqlmapLevel);
-        sqlmapRow2.add(new JLabel("Risk:")); sqlmapRow2.add(sqlmapRisk);
-        sqlmapRow2.add(new JLabel("Techniques:")); sqlmapRow2.add(sqlmapTechniques);
-        sqlmapRow2.add(new JLabel("Timeout(s):")); sqlmapRow2.add(sqlmapTimeout);
-        activePanel.add(sqlmapRow2);
-
-        JPanel sqlmapRow3 = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        sqlmapRow3.add(new JLabel("Extra sqlmap args (advanced — runs with full sqlmap capability, e.g. --dump):"));
-        sqlmapRow3.add(sqlmapExtraArgs);
-        sqlmapRow3.add(sqlmapRun);
-        activePanel.add(sqlmapRow3);
-        activePanel.add(new JLabel("(opt-in — shells out to a locally-installed sqlmap for deeper confirmation than "
-                + "the native SQLi test; default flags are confirmation-only, authorized targets only)"));
+        activePanel.add(new JLabel("sqlmap execution is paused; use the native SQLi probes."));
 
         // Access-control / IDOR (Autorize-style)
         JTextArea acHeaders = new JTextArea(2, 60);
         acHeaders.setToolTipText("Alternate identity headers, one per line, e.g. 'Cookie: session=lowpriv' or 'Authorization: Bearer ...'");
         JCheckBox acUnauth = new JCheckBox("Unauthenticated (strip auth)", false);
         JButton acButton = new JButton("Run access-control test (safe methods)");
+        JButton acPreview = new JButton("Preview access-control…");
         JPanel acRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
         acRow.add(new JLabel("Access-control alternate identity:"));
         acRow.add(new JScrollPane(acHeaders));
         acRow.add(acUnauth);
-        acRow.add(acButton);
+        acRow.add(acButton); acRow.add(acPreview);
         activePanel.add(acRow);
         controls.add(activePanel);
 
@@ -279,10 +310,43 @@ final class ReconPanel extends JPanel {
         reflections.addActionListener(e -> controller.setDetectReflections(reflections.isSelected()));
         activeEnabled.addActionListener(e -> controller.setActiveTestsEnabled(activeEnabled.isSelected()));
         mutatingActive.addActionListener(e -> controller.setMutatingActiveRequests(mutatingActive.isSelected()));
+        oastActive.addActionListener(e -> controller.setOastActiveRequests(oastActive.isSelected()));
+        timeDelayActive.addActionListener(e -> controller.setTimeDelayActiveRequests(timeDelayActive.isSelected()));
+        uploadActive.addActionListener(e -> controller.setUploadActiveRequests(uploadActive.isSelected()));
+        authLockoutActive.addActionListener(e -> controller.setAuthLockoutActiveRequests(authLockoutActive.isSelected()));
         activeBudget.addChangeListener(e -> controller.setActiveRequestBudget((Integer) activeBudget.getValue()));
+        activeHostBudget.addChangeListener(e -> controller.setActivePerHostBudget((Integer) activeHostBudget.getValue()));
+        activeEndpointBudget.addChangeListener(e -> controller.setActivePerEndpointBudget((Integer) activeEndpointBudget.getValue()));
+        activeProbeBudget.addChangeListener(e -> controller.setActivePerProbeBudget((Integer) activeProbeBudget.getValue()));
         osintButton.addActionListener(e -> controller.lookupPassiveOsint(osintDomain.getText()));
         ctButton.addActionListener(e -> controller.enumerateSubdomains(ctDomain.getText()));
         paramButton.addActionListener(e -> controller.discoverParameters(paramUrl.getText()));
+        paramPreview.addActionListener(e -> {
+            String target = paramUrl.getText();
+            showRequestPreview(paramPreview, () -> controller.previewRequests(target, ReconController.PreviewAction.PARAMETERS));
+        });
+        graphqlPreview.addActionListener(e -> {
+            String target = graphqlUrl.getText();
+            showRequestPreview(graphqlPreview, () -> controller.previewRequests(target, ReconController.PreviewAction.GRAPHQL_INTROSPECTION));
+        });
+        graphqlFuzzPreview.addActionListener(e -> {
+            String target = graphqlUrl.getText();
+            showRequestPreview(graphqlFuzzPreview, () -> controller.previewRequests(target, ReconController.PreviewAction.GRAPHQL_FUZZ));
+        });
+        activePreview.addActionListener(e -> {
+            String filter = previewProbe.getSelectedIndex() == 0 ? null : (String) previewProbe.getSelectedItem();
+            showRequestPreview(activePreview, () -> controller.previewActiveTests(filter));
+        });
+        jwtPreview.addActionListener(e -> showRequestPreview(jwtPreview, controller::previewJwtAttacks));
+        takeoverPreview.addActionListener(e -> showRequestPreview(takeoverPreview, controller::previewTakeover));
+        crawlPreview.addActionListener(e -> {
+            String text = seeds.getText();
+            showRequestPreview(crawlPreview, () -> controller.previewCrawl(text));
+        });
+        acPreview.addActionListener(e -> {
+            String headers = acHeaders.getText(); boolean unauthenticated = acUnauth.isSelected();
+            showRequestPreview(acPreview, () -> controller.previewAccessControl(headers, unauthenticated));
+        });
         graphqlButton.addActionListener(e -> controller.introspectGraphql(graphqlUrl.getText()));
         graphqlFuzzButton.addActionListener(e -> controller.fuzzGraphql(graphqlUrl.getText()));
         runActive.addActionListener(e -> controller.runActiveTests());
@@ -299,7 +363,7 @@ final class ReconPanel extends JPanel {
                         summary.startsWith("[error]") ? JOptionPane.ERROR_MESSAGE : JOptionPane.INFORMATION_MESSAGE);
             });
         });
-        runCorpusFuzz.addActionListener(e -> {
+        java.util.function.Supplier<Set<PayloadEncoder.Encoding>> selectedEncodings = () -> {
             Set<PayloadEncoder.Encoding> encodings = EnumSet.noneOf(PayloadEncoder.Encoding.class);
             if (encRaw.isSelected()) encodings.add(PayloadEncoder.Encoding.RAW);
             if (encUrl.isSelected()) encodings.add(PayloadEncoder.Encoding.URL);
@@ -308,22 +372,13 @@ final class ReconPanel extends JPanel {
             if (encDoubleUrl.isSelected()) encodings.add(PayloadEncoder.Encoding.DOUBLE_URL);
             if (encB64Url.isSelected()) encodings.add(PayloadEncoder.Encoding.BASE64_THEN_URL);
             if (encUrlB64.isSelected()) encodings.add(PayloadEncoder.Encoding.URL_THEN_BASE64);
-            controller.runCorpusFuzz(encodings, (Integer) corpusBudget.getValue());
-        });
-        sqlmapCheck.addActionListener(e -> {
-            controller.setSqlmapPath(sqlmapBinary.getText());
-            boolean available = controller.sqlmapAvailable();
-            JOptionPane.showMessageDialog(this,
-                    available ? "sqlmap found and runnable." : "sqlmap not found (or failed to run --version) at \""
-                            + sqlmapBinary.getText() + "\".",
-                    "sqlmap availability", available ? JOptionPane.INFORMATION_MESSAGE : JOptionPane.WARNING_MESSAGE);
-        });
-        sqlmapRun.addActionListener(e -> {
-            controller.setSqlmapPath(sqlmapBinary.getText());
-            controller.runSqlmap(sqlmapUrl.getText(), (String) sqlmapMethod.getSelectedItem(), sqlmapParam.getText(),
-                    sqlmapBody.getText(), sqlmapCookie.getText(), (Integer) sqlmapLevel.getValue(),
-                    (Integer) sqlmapRisk.getValue(), sqlmapTechniques.getText(), sqlmapExtraArgs.getText(),
-                    (Integer) sqlmapTimeout.getValue());
+            return encodings;
+        };
+        runCorpusFuzz.addActionListener(e -> controller.runCorpusFuzz(selectedEncodings.get(), (Integer) corpusBudget.getValue()));
+        corpusPreview.addActionListener(e -> {
+            Set<PayloadEncoder.Encoding> encodings = selectedEncodings.get(); int cap = (Integer) corpusBudget.getValue();
+            String category = corpusPreviewCategory.getSelectedIndex() == 0 ? null : (String) corpusPreviewCategory.getSelectedItem();
+            showRequestPreview(corpusPreview, () -> controller.previewCorpusFuzz(encodings, cap, category));
         });
         acButton.addActionListener(e -> controller.runAccessControlTest(acHeaders.getText(), acUnauth.isSelected()));
         maxRequests.addChangeListener(e -> controller.setMaxRequests((Integer) maxRequests.getValue()));
@@ -712,69 +767,11 @@ final class ReconPanel extends JPanel {
         return panel;
     }
 
-    /** ProjectDiscovery cloud (PDCP) Nuclei scan controls; results are filed as native Burp issues. */
+    /** Template generation remains available; starting cloud target scans is disabled. */
     private JComponent buildPdcpScanPanel(ReconController controller) {
-        JPanel p = new JPanel();
-        p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
-        p.setBorder(BorderFactory.createTitledBorder(
-                "ProjectDiscovery cloud scan (Nuclei) — runs in the cloud, matches import as native Burp issues"));
-
-        JPasswordField pdKey = new JPasswordField(24);
-        pdKey.setToolTipText("ProjectDiscovery Cloud API key. Blank = $PDCP_API_KEY. Kept in memory only, never saved.");
-        JTextField teamId = new JTextField(8);
-        teamId.setToolTipText("Optional X-Team-Id for team-scoped scans.");
-        JTextField templates = new JTextField(22);
-        templates.setToolTipText("Comma-separated template groups, e.g. cves,exposures,misconfiguration. Blank = recommended.");
-        JCheckBox recommended = new JCheckBox("Recommended templates", true);
-        JTextArea targets = new JTextArea(3, 44);
-        targets.setToolTipText("One target host/URL per line.");
-        JButton fill = new JButton("Fill from in-scope");
-        JButton run = new JButton("Run cloud scan");
-        JLabel pdStatus = new JLabel("Needs a ProjectDiscovery Cloud API key (data is sent to ProjectDiscovery — authorized targets only).");
-
-        JPanel row1 = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        row1.add(new JLabel("PDCP key (blank = $PDCP_API_KEY):")); row1.add(pdKey);
-        row1.add(new JLabel("Team id:")); row1.add(teamId);
-        p.add(row1);
-
-        JPanel row2 = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        row2.add(new JLabel("Templates:")); row2.add(templates); row2.add(recommended);
-        row2.add(fill); row2.add(run);
-        p.add(row2);
-
-        JPanel row3 = new JPanel(new BorderLayout(4, 4));
-        row3.add(new JLabel("Targets (one per line):"), BorderLayout.NORTH);
-        row3.add(new JScrollPane(targets), BorderLayout.CENTER);
-        p.add(row3);
-        p.add(pdStatus);
-
-        fill.addActionListener(e -> {
-            List<String> t = controller.collectInScopeTargets();
-            targets.setText(String.join("\n", t));
-            pdStatus.setText("Filled " + t.size() + " in-scope target(s).");
-        });
-        run.addActionListener(e -> {
-            List<String> targetList = new ArrayList<>();
-            for (String line : targets.getText().split("\\R")) {
-                String v = line.trim();
-                if (!v.isEmpty()) targetList.add(v);
-            }
-            List<String> templateList = new ArrayList<>();
-            for (String s : templates.getText().split(",")) {
-                String v = s.trim();
-                if (!v.isEmpty()) templateList.add(v);
-            }
-            if (targetList.isEmpty()) { pdStatus.setText("Add at least one target (or click 'Fill from in-scope')."); return; }
-            run.setEnabled(false);
-            pdStatus.setText("Starting cloud scan…");
-            controller.runPdcpScan(new String(pdKey.getPassword()), teamId.getText(), targetList, templateList,
-                    recommended.isSelected(), msg -> {
-                        pdStatus.setText(msg);
-                        if (msg.startsWith("PDCP scan") || msg.startsWith("[error]") || msg.contains("failed")) {
-                            run.setEnabled(true);
-                        }
-                    });
-        });
+        JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        p.setBorder(BorderFactory.createTitledBorder("ProjectDiscovery cloud scans"));
+        p.add(new JLabel("Cloud scan creation is paused until target requests can be governed."));
         return p;
     }
 

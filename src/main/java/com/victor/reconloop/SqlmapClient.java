@@ -1,29 +1,12 @@
 package com.victor.reconloop;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * Opt-in integration with a real, locally-installed sqlmap binary for deeper confirmation of a
- * parameter already flagged by {@link ActiveTestEngine}'s native SQLi test. Recon Hound's own test is
- * a lightweight, best-effort confirmation; sqlmap is the mature, real tool for thorough confirmation
- * and (only if the user explicitly supplies the flags for it) further exploitation against a target
- * they are authorized to test.
- *
- * <p>Command-line construction and output parsing are pure functions, directly unit-testable; actually
- * spawning the process is a thin {@link ProcessBuilder} wrapper. The default flags built by
- * {@link #buildArgs} never include destructive/exploitation options (dumping, OS/SQL shells, file
- * read/write) -- those only appear if the caller explicitly types them into {@code extraArgs}.
- */
+/** Offline sqlmap argument/output helpers. Process execution is fail-closed until egress is governed. */
 final class SqlmapClient {
 
     record Target(String url, String method, String parameter, String body, String cookieHeader) {}
@@ -32,78 +15,14 @@ final class SqlmapClient {
 
     private static final Pattern TYPE_LINE = Pattern.compile("Type:\\s*(.+)");
 
-    private final String sqlmapPath;
-
     SqlmapClient(String sqlmapPath) {
-        this.sqlmapPath = (sqlmapPath == null || sqlmapPath.isBlank()) ? "sqlmap" : sqlmapPath.trim();
+        // Retained for callers/settings compatibility; no binary is executed, including --version.
     }
 
-    /** True if the configured sqlmap binary can actually be started (`sqlmap --version` succeeds). */
-    boolean isAvailable() {
-        try {
-            Process process = new ProcessBuilder(sqlmapPath, "--version").redirectErrorStream(true).start();
-            boolean finished = process.waitFor(10, TimeUnit.SECONDS);
-            if (!finished) { process.destroyForcibly(); return false; }
-            return process.exitValue() == 0;
-        } catch (IOException e) {
-            return false;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return false;
-        }
-    }
+    boolean isAvailable() { return false; }
 
-    /** Runs sqlmap against {@code target} and blocks (from the caller's worker thread) until it exits or times out. */
     RunResult run(Target target, int level, int risk, String techniques, String extraArgs, long timeoutSeconds) {
-        List<String> command = new ArrayList<>();
-        command.add(sqlmapPath);
-        command.addAll(buildArgs(target, level, risk, techniques, extraArgs));
-
-        ExecutorService outputReader = Executors.newSingleThreadExecutor(r -> {
-            Thread thread = new Thread(r, "Recon-Hound-sqlmap-output");
-            thread.setDaemon(true);
-            return thread;
-        });
-        Process process = null;
-        Future<String> outputFuture = null;
-        try {
-            process = new ProcessBuilder(command).redirectErrorStream(true).start();
-            Process runningProcess = process;
-            outputFuture = outputReader.submit(() ->
-                    new String(runningProcess.getInputStream().readAllBytes(), StandardCharsets.UTF_8));
-
-            boolean finished = process.waitFor(Math.max(1, timeoutSeconds), TimeUnit.SECONDS);
-            if (!finished) {
-                process.destroy();
-                if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroyForcibly();
-                String partial = readOutput(outputFuture, 2);
-                return new RunResult(true, false, List.of(), partial,
-                        "sqlmap timed out after " + timeoutSeconds + "s (partial output captured)");
-            }
-
-            String output = readOutput(outputFuture, 2);
-            return new RunResult(true, looksVulnerable(output), extractInjectionTypes(output), output, null);
-        } catch (IOException e) {
-            return new RunResult(false, false, List.of(), "",
-                    "sqlmap not found or failed to start (" + sqlmapPath + "): " + e.getMessage());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            if (process != null) process.destroyForcibly();
-            return new RunResult(false, false, List.of(), "", "interrupted while waiting for sqlmap");
-        } finally {
-            if (outputFuture != null && !outputFuture.isDone()) outputFuture.cancel(true);
-            outputReader.shutdownNow();
-        }
-    }
-
-    private static String readOutput(Future<String> outputFuture, long timeoutSeconds) {
-        if (outputFuture == null) return "";
-        try {
-            return outputFuture.get(timeoutSeconds, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            outputFuture.cancel(true);
-            return "";
-        }
+        return new RunResult(false, false, List.of(), "", ExternalTargetEgress.blocked("sqlmap"));
     }
 
     // ---- pure cores (unit-tested) ----

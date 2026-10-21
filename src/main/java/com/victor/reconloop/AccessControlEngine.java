@@ -31,6 +31,12 @@ final class AccessControlEngine {
 
     boolean configured() { return unauthenticated || !sessionHeaders.isEmpty(); }
 
+    NativeRequestStep plan(HttpRequest request) {
+        return new NativeRequestRecipe(() -> applyIdentity(request), "access-control-replay",
+                Set.of(RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT), NativeRequestStep.Mutation.ACCESS_CONTROL,
+                NativeRequestStep.Condition.ALWAYS, "identity header values hidden", false).build();
+    }
+
     /** Rebuilds {@code request} under the alternate identity (auth stripped and/or replaced). */
     HttpRequest applyIdentity(HttpRequest request) {
         HttpRequest modified = request
@@ -69,6 +75,47 @@ final class AccessControlEngine {
         }
         return new Result(Verdict.DIFFERENT, "INFO",
                 "Alternate identity response differed (status " + replayStatus + " vs " + origStatus + ").");
+    }
+
+    /**
+     * Body-aware verdict used by live replay. Volatile fields are normalised before comparison so
+     * timestamps/request IDs do not manufacture false differences, while genuinely different pages
+     * no longer pass merely because their byte lengths happen to be similar.
+     */
+    static Result classify(int origStatus, String origBody, int replayStatus, String replayBody) {
+        if (replayStatus == 401 || replayStatus == 403) {
+            return new Result(Verdict.ENFORCED, "INFO",
+                    "Alternate identity received " + replayStatus + " (access control enforced).");
+        }
+        if (replayStatus >= 300 && replayStatus < 400) {
+            return new Result(Verdict.ENFORCED, "INFO",
+                    "Alternate identity was redirected (" + replayStatus + "), likely to a login flow.");
+        }
+
+        boolean origSuccess = origStatus >= 200 && origStatus < 300;
+        if (origSuccess && replayStatus == origStatus) {
+            double similarity = ResponseComparator.similarity(origBody, replayBody);
+            if (ResponseComparator.samePage(origBody, replayBody)) {
+                return new Result(Verdict.BYPASSED, "HIGH",
+                        "Alternate identity received a normalized-equivalent " + replayStatus
+                                + " response (token similarity " + percent(similarity)
+                                + ") — probable broken access control / IDOR.");
+            }
+            if (similarity >= 0.65) {
+                return new Result(Verdict.PARTIAL, "MEDIUM",
+                        "Alternate identity received the same status and a partially similar body ("
+                                + percent(similarity) + ") — review for field-level or partial data exposure.");
+            }
+            return new Result(Verdict.DIFFERENT, "INFO",
+                    "Alternate identity received the same status but materially different normalized content ("
+                            + percent(similarity) + " similarity).");
+        }
+        return new Result(Verdict.DIFFERENT, "INFO",
+                "Alternate identity response differed (status " + replayStatus + " vs " + origStatus + ").");
+    }
+
+    private static String percent(double value) {
+        return String.format(Locale.ROOT, "%.1f%%", Math.max(0.0, Math.min(1.0, value)) * 100.0);
     }
 
     static List<String[]> parseHeaders(String block) {

@@ -29,9 +29,9 @@ and nothing that touches the target happens without a human first.
 | --- | --- |
 | 🔎 **Discover** | Crawl + redirect chains, **webpack-chunk reconstruction**, source-map mining, OpenAPI/GraphQL ingest, crt.sh subdomains, Arjun param discovery, host/IP inventory |
 | 🩻 **Detect** | Secrets (RegexHound + `gf`), **SCA** for vulnerable JS libs, reflected-XSS surface, **DOM-XSS** source→sink, CORS/CSP/JWT hygiene, **clickjacking & security-header** checks, **session-cookie & CSRF** hygiene, **excessive data exposure / mass assignment**, **OAuth/OIDC** & **SAML** flaws, debug-endpoint & **BFLA** candidates, disclosure signals, exposed source maps |
-| 💥 **Exploit** | Collaborator-backed **SSRF/SSTI/blind-XSS/CMDi**, native **SQLi** (error/boolean/time-based) + optional **sqlmap** hand-off, error-based **NoSQL injection**, canary-confirmed **path traversal / LFI**, in-band & OOB **XXE**, active **CORS** origin-bypass confirmation, **rate-limit** & **file-upload** probes, access-control/**IDOR**, **JWT** `alg:none` + weak-secret **forgery**, **GraphQL fuzzing**, **subdomain takeover**, open-redirect/CRLF, opt-in **encoded corpus fuzzing** |
+| 💥 **Exploit** | Collaborator-backed **SSRF/SSTI/blind-XSS/CMDi**, native **SQLi** (error/boolean/time-based; external sqlmap execution paused), error-based **NoSQL injection**, canary-confirmed **path traversal / LFI**, in-band & OOB **XXE**, active **CORS** origin-bypass confirmation, **rate-limit** & **file-upload** probes, access-control/**IDOR**, **JWT** `alg:none` + weak-secret **forgery**, **GraphQL fuzzing**, **subdomain takeover**, open-redirect/CRLF, opt-in **encoded corpus fuzzing** |
 | 🤖 **Agents** | A configurable multi-provider **AI agent team** over the finding inventory — recon → PoC drafter → adversarial verifier → leader — behind a **fail-closed human-approval gate**: it reasons, it never touches the target on its own |
-| 🧠 **AI** | Five providers run together — **LLM JS bug-hunt** (PoC), cross-finding **exploit-chaining**, cross-provider **false-positive triage** (majority vote), **Nuclei** AI templates + **ProjectDiscovery cloud** scans |
+| 🧠 **AI** | Five providers run together — **LLM JS bug-hunt** (PoC), cross-finding **exploit-chaining**, cross-provider **false-positive triage** (majority vote), **Nuclei** AI templates (cloud scan creation paused) |
 | 👁️ **Observe** | A single **AI feed** streams every LLM touchpoint — triage, JS review, chaining, Nuclei authoring, agent rounds, and every gate decision — newest-first, with an estimated-usage meter, in-memory and never persisted |
 | 📤 **Operate** | Native Burp issues + a passive **ScanCheck**, **SARIF + Markdown** export, per-project **persistence**, a typed Go **`reconctl` sidecar import**, and a **headless CI scanner** (`java -jar`) |
 
@@ -152,8 +152,22 @@ Confirming a passive lead still means firing a context-appropriate probe against
 ![Access-control / IDOR testing](docs/img/access-control.svg)
 
 An opt-in **Active testing** panel adds discovery and confirmation that require sending crafted
-traffic. It is **disabled by default**, scope-checked per request, throttled, and request-capped.
-Enable it only against targets you are authorised to test.
+traffic. It is **disabled by default**, scope-checked per request, throttled, and governed by
+hierarchical run quotas. High-impact behaviours are separately fail-closed: Collaborator/OAST,
+time-delay payloads, upload mutations, authentication/lockout replays, and non-safe HTTP methods each
+require their own operator opt-in. Persistent/destructive corpus entries remain blocked. Enable only
+the permissions your rules of engagement actually authorize. Changing a permission or disabling active
+tests cancels current native runs and invalidates queued jobs. Blind-XSS beacons additionally require
+persistent-payload permission and remain blocked until a separate authorization path exists.
+
+Use the **Preview…** actions for native probes, corpus fuzzing, JWT, access-control, takeover, crawl
+seeds/queue, parameters and GraphQL before enabling traffic. Previews send nothing and spend no live
+quota; captured values and uploaded filenames stay hidden. Response-dependent branches are marked,
+and unknown callback/redirect values remain non-executable runtime templates. Dynamic counts describe
+an ordered scenario; the configured global run cap remains the hard dispatch ceiling. Detail stops
+at 500 candidates with an explicit prefix notice; probe/category filters can inspect later groups.
+All native sends require a plan bound to exact Montoya message bytes and service destination.
+See [run governance](docs/RUN_GOVERNANCE.md) for coverage, estimate semantics and remaining release gates.
 
 Every parameter-level probe below injects through a shared **insertion-point model** (`InsertionPoint`)
 rather than query/body parameters alone — so SQLi, NoSQLi, SSTI, path traversal, reflected/blind XSS,
@@ -185,9 +199,8 @@ malform the request or drop the session.
 - **SQL injection** (`ActiveTestEngine`) — native **error-based** (DB error signature diffed against a
   baseline), **boolean-based blind** (true-vs-false response divergence), and **time-based blind**
   (MySQL `SLEEP`, PostgreSQL `pg_sleep`, MSSQL `WAITFOR DELAY`) detection, using a small clean payload
-  set. A confirmed parameter can be handed to a locally-installed **sqlmap** (`SqlmapClient`) for
-  deeper confirmation — default flags are confirmation-only; dumping/shell options only appear if you
-  type them yourself.
+  set. External **sqlmap** execution, including binary checks, is paused until its target
+  requests can share the outbound policy; native SQLi probes remain available.
 - **SSTI** — template-arithmetic polyglots (`{{7*777}}`, `${7*777}`, `#{7*777}`, `<%=7*777%>`, …)
   confirmed only when the distinctive product `5439` is evaluated into the response.
 - **NoSQL injection** — error-based, Mongo-style: injects values that break a query or its `$where`
@@ -327,9 +340,9 @@ finding) to the enabled providers for review.
 - **AI Nuclei templates.** A **Nuclei templates (AI)** tab turns a natural-language description into a
   ready-to-run **Nuclei v3 YAML** template using whichever provider is selected — mirroring
   ProjectDiscovery's cloud `POST /v1/template/ai` with no PDCP account.
-- **ProjectDiscovery cloud scan.** The same tab can launch a **cloud Nuclei scan** with a PDCP API
-  key, poll it to completion, and import every match as a native Burp issue (raw request/response
-  attached when it parses). The key stays in memory / `$PDCP_API_KEY`.
+- **ProjectDiscovery cloud scan.** Starting **cloud Nuclei scans** is paused until downstream target
+  requests can be governed. AI template generation and typed JSONL result import remain available.
+  `PdcpClient` retains read-only status/result API support; scan creation cannot send an API request.
 - **Right-click integration.** Any request/response in Proxy history, the site map, or Repeater has a
   **Recon Hound: AI analysis** submenu — *explain & attack surface*, *find vulnerabilities*, and
   *suggest exploitation & chaining* — plus selection-only variants when text is highlighted.
@@ -343,18 +356,27 @@ Whatever you run here also shows up in the [AI feed](#ai-feed--watch-the-models-
 
 ![Reporting — where findings surface](docs/img/reporting.svg)
 
+Active results follow an explicit evidence lifecycle: **signal → candidate → reproduced → confirmed →
+exploitable** (or rejected). Signals and candidates stay visible in the Active tests table for analyst
+follow-up but are not promoted to native Burp issues. Reproduced-or-stronger findings are reportable;
+confirmed/exploitable evidence receives stronger issue confidence. Reflected metacharacters and one
+timing anomaly are candidates, absence of a rate-limit signal is only a signal, while evaluated SSTI,
+CRLF response-header injection, file-read canaries, and correlated Collaborator callbacks are
+confirmed evidence.
+
 Findings surface in several places:
 
 - the Recon Hound **suite tab** tables — **Findings**, **Discovered resources**, **Insertion points**,
   **XSS reflections**, **Active tests**, **Hosts / IPs**, **XSS vector library**, plus the AI views
   (**AI analysis**, **Agent team**, **AI feed**, **Nuclei templates (AI)**);
-- Burp's **Dashboard / Target issue list** as native audit issues — **every** finding is filed here
-  through a single deduplicated reporter, so results are in Burp's own reports and never live only in
-  the plugin tabs. This covers secrets, disclosure signals, reflected-parameter/XSS candidates,
+- Burp's **Dashboard / Target issue list** as native audit issues — reportable findings are filed
+  through a single deduplicated reporter; active signals/candidates deliberately remain in the plugin
+  until stronger evidence exists. This covers secrets, disclosure signals, reflected-parameter/XSS candidates,
   web-hygiene (CORS/CSP/JWT/cookie/CSRF), data-exposure/mass-assignment, OAuth/OIDC & SAML flaws,
   debug/BFLA candidates, exposed source maps and OpenAPI/GraphQL surface, gf-pattern hits,
-  broken-access-control/IDOR, confirmed active findings (SQLi, SSRF/SSTI/XSS incl. Collaborator OOB,
-  CORS, rate-limit, file-upload), vulnerable JS dependencies (SCA), JWT defects incl. offline
+  broken-access-control/IDOR, reproduced/confirmed active findings (SQLi, SSTI, CRLF, CORS,
+  path traversal/XXE, verified file upload, and Collaborator OOB), vulnerable JS dependencies (SCA),
+  JWT defects incl. offline
   weak-secret cracks, heuristic DOM-XSS, and LLM-identified JavaScript bugs (with PoC and chain).
   Informational results are filed at `INFORMATION` so nothing is dropped;
 - Burp's **native scan pipeline** — Recon Hound registers a **passive scan check**, so its detectors
@@ -370,29 +392,35 @@ deliberately *not* persisted — see above.)
 
 ## CI-native scanning (no Burp required)
 
-The same jar is a standalone command-line scanner — its passive engines (secret detection, SCA,
-heuristic DOM-XSS, exposed source maps) are Burp-free, so they run anywhere with `java -jar`:
+The same jar analyzes saved response bodies with its Burp-free passive engines (secret detection,
+SCA, heuristic DOM-XSS and source-map recognition):
 
-```
-java -jar burp-recon-hound.jar --fail-on high -o recon-hound.sarif https://target.example/app.js
-java -jar burp-recon-hound.jar --file targets.txt --fail-on medium
+```bash
+java -jar burp-recon-hound.jar --body-file artifacts/app.js --content-type application/javascript \
+  --fail-on high -o recon-hound.sarif https://target.example/app.js
 ```
 
-It validates and de-duplicates HTTP(S) targets, fetches each URL, creates missing report directories,
-writes a **SARIF 2.1.0** report, and exits non-zero when a finding meets `--fail-on` (`high` default /
-`medium` / `low` / `info` / `none`) so it can gate a pipeline. Target files accept blank lines and
-`#` comments. Invalid URLs, unknown options, missing option values, and invalid severity thresholds
-fail fast with exit code 2. A ready **`Recon Scan`** GitHub Actions workflow
-(`.github/workflows/recon-scan.yml`, `workflow_dispatch`) builds the jar, scans the URLs you pass, and
-uploads the SARIF artifact.
+The single HTTP(S) URL is artifact metadata and is never resolved or fetched. Live URL fetching is
+paused until it can use the shared outbound policy. A live invocation, including `--file targets.txt`,
+exits **3** before creating or replacing a report, even with `--fail-on none`. `--body-file` accepts one
+regular local file and exactly one metadata URL; `--content-type` defaults to `text/html`. Offline
+analysis does not establish public accessibility of a detected source map.
+
+Offline mode creates report directories and writes **SARIF 2.1.0**. Exit codes are 0 clean, 1 findings
+meeting `--fail-on` (`high` / `medium` / `low` / `info` / `none`), 2 bad input, and 3 blocked live fetching.
+The **Recon Scan** workflow (`.github/workflows/recon-scan.yml`) accepts a saved body path already in
+the checkout and its metadata URL; it performs no target download.
 
 ## Run governance & the `reconctl` sidecar
 
 Active behaviour is governed by an explicit control plane: a per-run request policy and hard request
-**budget** gate every target-directed send, and each active run carries a scope snapshot and a
-verification state rather than a loose "confirmed" flag. An optional typed Go **`reconctl`** sidecar
-keeps external network scans and active fuzzing behind explicit command flags and typed input/output
-contracts; Burp **re-checks scope** when importing its JSONL, and importing never launches a tool or
+**budget** gate every native Montoya target dispatch. Each active run carries a scope snapshot.
+Native sends now resolve/validate DNS answers and bind a numeric Montoya service with original SNI
+and message bytes; Burp physical-peer verification remains a release gate. See the
+[DNS/API contract and runtime limits](docs/RUN_GOVERNANCE.md#dns-and-numeric-service-binding).
+Findings carry an explicit verification state rather than a loose "confirmed" flag. An optional typed Go **`reconctl`** sidecar
+blocks unsupported target-HTTP producers even with opt-in flags, while retaining provider/DNS
+profiles, explicit opt-in TCP scans and typed input/output contracts; Burp **re-checks scope** when importing its JSONL, and importing never launches a tool or
 sends a request. See **[run governance and the sidecar handoff](docs/RUN_GOVERNANCE.md)** and the
 [recon contracts](docs/RECON_CONTRACTS.md).
 
@@ -402,7 +430,11 @@ Passive analysis observes only what the target already returned. Active behaviou
 
 - opt-in and **off by default**;
 - Burp-scope bounded, same-origin by default, and request/redirect capped;
-- gated by the per-run request policy and budget;
+- gated by the per-run request policy plus **global / per-host / per-endpoint / per-probe quotas**;
+- split into explicit risk permissions: non-safe HTTP methods, **OAST/Collaborator**, **time-delay**,
+  **upload mutation**, and **authentication/lockout** probes are all off until separately enabled;
+- persistent/destructive corpus payloads remain hard-disabled rather than being exposed behind a
+  convenient "do something regrettable" checkbox;
 - and, for the AI agent team, held behind a **fail-closed human-approval gate** — the team reasons
   but never touches the target on its own, and every gate decision is recorded in the AI feed.
 

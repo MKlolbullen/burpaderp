@@ -6,7 +6,7 @@ import burp.api.montoya.http.message.requests.HttpRequest;
 import java.util.Objects;
 
 /**
- * The one dispatch point for migrated target-directed requests.
+ * The admission gate for every native target-directed Montoya dispatch.
  *
  * <p>The policy is evaluated before a request-budget token is acquired.  A second cancellation
  * check after acquisition prevents a request that raced with cancellation from being sent; consuming
@@ -17,6 +17,15 @@ final class ActiveRequestGateway {
     interface Sender {
         HttpRequestResponse send(HttpRequest request) throws Exception;
     }
+
+    /** Production native transport prepares a numeric destination before any token is reserved. */
+    interface PreparedSender extends Sender {
+        Dispatch prepare(HttpRequest request) throws Exception;
+        @Override default HttpRequestResponse send(HttpRequest request) {
+            throw new IllegalStateException("destination preparation is mandatory");
+        }
+    }
+    @FunctionalInterface interface Dispatch { HttpRequestResponse send() throws Exception; }
 
     record Result(RequestPolicy.Decision decision, HttpRequestResponse response, Exception error, boolean dispatched) {
         static Result denied(RequestPolicy.Decision decision) {
@@ -32,36 +41,67 @@ final class ActiveRequestGateway {
         this.sender = Objects.requireNonNull(sender, "sender");
     }
 
-    Result send(ScanRun run, RequestPolicy.PlannedRequest planned, HttpRequest request) {
-        if (request == null || planned == null) {
-            return Result.denied(RequestPolicy.Decision.deny(RequestPolicy.DecisionCode.INVALID_REQUEST,
-                    "planned and concrete requests are required"));
-        }
-        try {
-            if (!planned.matches(request.method(), request.url())) {
-                return Result.denied(RequestPolicy.Decision.deny(RequestPolicy.DecisionCode.INVALID_REQUEST,
-                        "concrete request does not match its approved plan"));
+    Result send(ScanRun run, RequestPlan plan, HttpRequest request) {
+        if (plan == null || !plan.matches(request)) return invalidPlan();
+        if (Thread.currentThread().isInterrupted()) return Result.denied(RequestPolicy.Decision.deny(
+                RequestPolicy.DecisionCode.CANCELLED, "worker interrupted before destination preparation"));
+        RequestPolicy.PlannedRequest planned = plan.policyRequest();
+        Dispatch dispatch = null;
+        if (sender instanceof PreparedSender prepared) {
+            RequestPolicy.Decision initial = policy.evaluate(run, planned);
+            if (!initial.allowed()) return Result.denied(initial);
+            if (run.requestBudget().exhausted()) return Result.denied(admit(run, policy, planned));
+            try {
+                dispatch = prepared.prepare(request);
+                if (dispatch == null) throw new IllegalStateException("missing prepared dispatch");
+            } catch (DestinationGuard.Rejected e) {
+                return Result.denied(RequestPolicy.Decision.deny(e.code, e.getMessage()));
+            } catch (Exception e) {
+                return Result.denied(RequestPolicy.Decision.deny(RequestPolicy.DecisionCode.DESTINATION_BINDING_FAILED,
+                        "destination preparation failed closed"));
             }
-        } catch (RuntimeException e) {
-            return Result.denied(RequestPolicy.Decision.deny(RequestPolicy.DecisionCode.INVALID_REQUEST,
-                    "could not inspect concrete request"));
         }
-
-        RequestPolicy.Decision decision = policy.evaluate(run, planned);
+        if (Thread.currentThread().isInterrupted()) return Result.denied(RequestPolicy.Decision.deny(
+                RequestPolicy.DecisionCode.CANCELLED, "worker interrupted before admission"));
+        RequestPolicy.Decision decision = admit(run, policy, planned);
         if (!decision.allowed()) return Result.denied(decision);
-        if (!run.requestBudget().tryAcquire()) {
-            return Result.denied(RequestPolicy.Decision.deny(RequestPolicy.DecisionCode.BUDGET_EXHAUSTED,
-                    "run request budget is exhausted"));
-        }
+        // Montoya HttpRequest transformations are immutable. Check again after policy callbacks and
+        // quota acquisition so a changed concrete message never inherits an earlier approval.
+        if (!plan.matches(request)) return invalidPlan();
         if (!run.isRunning()) {
             RequestPolicy.DecisionCode code = run.isCancelled()
                     ? RequestPolicy.DecisionCode.CANCELLED : RequestPolicy.DecisionCode.RUN_NOT_ACTIVE;
             return Result.denied(RequestPolicy.Decision.deny(code, "run stopped before dispatch"));
         }
         try {
-            return new Result(decision, sender.send(request), null, true);
+            return new Result(decision, dispatch == null ? sender.send(request) : dispatch.send(), null, true);
         } catch (Exception e) {
             return new Result(decision, null, e, true);
         }
+    }
+
+    private static Result invalidPlan() {
+        return Result.denied(RequestPolicy.Decision.deny(RequestPolicy.DecisionCode.INVALID_REQUEST,
+                "concrete request bytes or transport destination do not match its plan"));
+    }
+
+    /** Shared by live dispatch and dry-run against an isolated quota snapshot. */
+    static RequestPolicy.Decision admit(ScanRun run, RequestPolicy policy, RequestPolicy.PlannedRequest planned) {
+        RequestPolicy.Decision decision = policy.evaluate(run, planned);
+        if (!decision.allowed()) return decision;
+        ScanRun.Allocation allocation = run.tryAcquire(planned);
+        if (!allocation.allowed()) {
+            RequestPolicy.DecisionCode code = switch (allocation.exhaustedQuota()) {
+                case HOST -> RequestPolicy.DecisionCode.HOST_BUDGET_EXHAUSTED;
+                case ENDPOINT -> RequestPolicy.DecisionCode.ENDPOINT_BUDGET_EXHAUSTED;
+                case PROBE -> RequestPolicy.DecisionCode.PROBE_BUDGET_EXHAUSTED;
+                case GLOBAL -> RequestPolicy.DecisionCode.BUDGET_EXHAUSTED;
+            };
+            return RequestPolicy.Decision.deny(code,
+                    allocation.exhaustedQuota().name().toLowerCase(java.util.Locale.ROOT)
+                            + " request budget exhausted for " + allocation.key()
+                            + " (" + allocation.used() + "/" + allocation.limit() + ")");
+        }
+        return decision;
     }
 }

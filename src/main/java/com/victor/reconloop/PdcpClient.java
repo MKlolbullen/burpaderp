@@ -13,54 +13,45 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Minimal ProjectDiscovery Cloud (PDCP) API client: create a Nuclei scan, poll its status, and pull
- * results. Raw HTTPS with an {@code X-Api-Key} header (and optional {@code X-Team-Id}), mirroring
+ * Read-only ProjectDiscovery Cloud (PDCP) API client: inspect existing scan status and results.
+ * Creating remote target scans is disabled until their egress can be governed. Raw HTTPS with an {@code X-Api-Key} header (and optional {@code X-Team-Id}), mirroring
  * {@link LlmClient} — no SDK is bundled, calls go direct (respecting any system proxy), and the key is
  * never persisted. Responses are parsed with the in-tree {@link Json} parser.
  *
  * <p>Endpoints (base {@code https://api.projectdiscovery.io}):
- * {@code POST /v1/scans}, {@code GET /v1/scans/{id}}, {@code GET /v1/scans/results}.
+ * {@code GET /v1/scans/{id}}, {@code GET /v1/scans/results}.
  */
 final class PdcpClient {
     private static final String BASE = "https://api.projectdiscovery.io";
 
-    private final HttpClient http = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(20))
-            .proxy(ProxySelector.getDefault())
-            .build();
+    private final HttpClient http;
+
+    PdcpClient() {
+        this(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20))
+                .proxy(ProxySelector.getDefault()).followRedirects(HttpClient.Redirect.NEVER).build());
+    }
+
+    PdcpClient(HttpClient http) {
+        if (http.followRedirects() != HttpClient.Redirect.NEVER) {
+            throw new IllegalArgumentException("PDCP result reads must not follow redirects");
+        }
+        this.http = http;
+    }
 
     record ScanCreated(String scanId, String error) {}
     record ScanStatus(String status, int totalResult, double progress, String error) {}
     record Result(String target, String severity, String name, String templateId, String scanId,
                   boolean matched, String request, String response, String vulnId, String vulnStatus) {}
 
-    /** Creates a scan. When {@code templates} is empty, {@code recommended} should be true. */
+    /** Remote target scans cannot be metered or cancelled per request by this process. */
     ScanCreated createScan(String apiKey, String teamId, String name, List<String> targets,
                            List<String> templates, boolean recommended) {
-        String body = "{"
-                + "\"name\":\"" + LlmProvider.jsonEscape(name) + "\","
-                + "\"targets\":[" + jsonArray(targets) + "],"
-                + "\"templates\":[" + jsonArray(templates) + "],"
-                + "\"recommended\":" + recommended
-                + "}";
-        try {
-            HttpResponse<String> resp = send("POST", "/v1/scans", apiKey, teamId, body);
-            if (resp.statusCode() / 100 != 2) {
-                return new ScanCreated(null, "[HTTP " + resp.statusCode() + "] " + snippet(resp.body()));
-            }
-            Object root = Json.parse(resp.body());
-            String id = findString(root, "scan_id");
-            if (id == null) id = findString(root, "id");
-            return id != null ? new ScanCreated(id, null)
-                    : new ScanCreated(null, "[warning] no scan_id in response: " + snippet(resp.body()));
-        } catch (Exception e) {
-            return new ScanCreated(null, "[error] " + e.getMessage());
-        }
+        return new ScanCreated(null, ExternalTargetEgress.blocked("PDCP scan creation"));
     }
 
     ScanStatus getScan(String apiKey, String teamId, String scanId) {
         try {
-            HttpResponse<String> resp = send("GET", "/v1/scans/" + enc(scanId), apiKey, teamId, null);
+            HttpResponse<String> resp = read("/v1/scans/" + enc(scanId), apiKey, teamId);
             if (resp.statusCode() / 100 != 2) return new ScanStatus(null, 0, 0, "[HTTP " + resp.statusCode() + "]");
             Map<String, Object> o = Json.asObject(unwrap(Json.parse(resp.body())));
             if (o == null) return new ScanStatus(null, 0, 0, "[warning] unexpected status body");
@@ -77,7 +68,7 @@ final class PdcpClient {
         try {
             StringBuilder path = new StringBuilder("/v1/scans/results?limit=" + Math.max(1, limit) + "&offset=0");
             if (hosts != null && !hosts.isEmpty()) path.append("&host=").append(enc(String.join(",", hosts)));
-            HttpResponse<String> resp = send("GET", path.toString(), apiKey, teamId, null);
+            HttpResponse<String> resp = read(path.toString(), apiKey, teamId);
             if (resp.statusCode() / 100 != 2) return out;
             for (Object item : extractArray(Json.parse(resp.body()))) {
                 Map<String, Object> m = Json.asObject(item);
@@ -99,7 +90,7 @@ final class PdcpClient {
         return out;
     }
 
-    private HttpResponse<String> send(String method, String path, String apiKey, String teamId, String body)
+    private HttpResponse<String> read(String path, String apiKey, String teamId)
             throws Exception {
         HttpRequest.Builder b = HttpRequest.newBuilder()
                 .uri(URI.create(BASE + path))
@@ -107,19 +98,8 @@ final class PdcpClient {
                 .header("X-Api-Key", apiKey == null ? "" : apiKey)
                 .header("Content-Type", "application/json");
         if (teamId != null && !teamId.isBlank()) b.header("X-Team-Id", teamId.trim());
-        if ("GET".equals(method)) b.GET();
-        else b.method(method, HttpRequest.BodyPublishers.ofString(body == null ? "" : body));
+        b.GET();
         return http.send(b.build(), HttpResponse.BodyHandlers.ofString());
-    }
-
-    private static String jsonArray(List<String> items) {
-        if (items == null || items.isEmpty()) return "";
-        StringBuilder b = new StringBuilder();
-        for (int i = 0; i < items.size(); i++) {
-            if (i > 0) b.append(",");
-            b.append("\"").append(LlmProvider.jsonEscape(items.get(i))).append("\"");
-        }
-        return b.toString();
     }
 
     /** Unwraps a {@code {"data": ...}} envelope if present. */
@@ -142,29 +122,6 @@ final class PdcpClient {
         return List.of();
     }
 
-    /** Depth-first search for the first scalar value under {@code key}. */
-    private static String findString(Object node, String key) {
-        if (node instanceof Map<?, ?> m) {
-            Object v = m.get(key);
-            if (v != null && !(v instanceof Map) && !(v instanceof List)) return scalar(v);
-            for (Object child : m.values()) {
-                String r = findString(child, key);
-                if (r != null) return r;
-            }
-        } else if (node instanceof List<?> list) {
-            for (Object child : list) {
-                String r = findString(child, key);
-                if (r != null) return r;
-            }
-        }
-        return null;
-    }
-
-    private static String scalar(Object v) {
-        if (v instanceof Double d && d == Math.floor(d) && !Double.isInfinite(d)) return String.valueOf((long) (double) d);
-        return String.valueOf(v).strip();
-    }
-
     private static double toDouble(Object o) {
         if (o instanceof Double d) return d;
         if (o == null) return 0;
@@ -183,9 +140,4 @@ final class PdcpClient {
         return URLEncoder.encode(v == null ? "" : v, StandardCharsets.UTF_8);
     }
 
-    private static String snippet(String body) {
-        if (body == null) return "(empty)";
-        String t = body.strip();
-        return t.length() <= 400 ? t : t.substring(0, 397) + "...";
-    }
 }

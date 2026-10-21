@@ -69,39 +69,6 @@ final class CorpusFuzzEngine {
 
     void setCollaborator(CollaboratorClient collaborator) { this.collaborator = collaborator; }
 
-    /**
-     * Fuzzes one parameter with the relevant corpus categories, in every requested encoding.
-     * {@code maxPerCategory} remains a local category cap, while the caller-owned {@link ScanRun}
-     * provides the hard whole-run cap shared across every target/parameter/category.
-     */
-    List<ActiveTestEngine.ActiveFinding> fuzz(HttpRequest base, HttpParameter parameter,
-                                               Set<PayloadEncoder.Encoding> encodings, int maxPerCategory) {
-        return fuzz(base, parameter, encodings, maxPerCategory, false);
-    }
-
-    /** Compatibility entry point for callers that do not yet own a first-class run. */
-    List<ActiveTestEngine.ActiveFinding> fuzz(HttpRequest base, HttpParameter parameter,
-                                               Set<PayloadEncoder.Encoding> encodings, int maxPerCategory,
-                                               boolean allowMutating) {
-        if (base == null || parameter == null || maxPerCategory <= 0) return List.of();
-        if (!allowMutating && !ActiveTestEngine.isSafeMethod(base)) return List.of();
-        int categories = Math.max(1, relevantCategories(parameter.name(), parameter.value(),
-                rceParamHints, library.categories()).size());
-        ScanProfile profile = allowMutating ? ScanProfile.ACTIVE_MUTATION : ScanProfile.ACTIVE_SAFE;
-        ScanRun run = ScanRun.begin(profile, ScopeSnapshot.forTargetUrl(base.url()),
-                Math.max(1, maxPerCategory * categories));
-        Set<RequestPolicy.Permission> permissions = allowMutating
-                ? EnumSet.of(RequestPolicy.Permission.UNSAFE_HTTP_METHOD, RequestPolicy.Permission.STATE_CHANGING)
-                : Set.of();
-        ActiveRequestGateway gateway = new ActiveRequestGateway(
-                new RequestPolicy(api.scope()::isInScope, permissions), api.http()::sendRequest);
-        try {
-            return fuzz(base, parameter, encodings, maxPerCategory, run, gateway);
-        } finally {
-            if (run.isRunning()) run.complete();
-        }
-    }
-
     List<ActiveTestEngine.ActiveFinding> fuzz(HttpRequest base, HttpParameter parameter,
                                                Set<PayloadEncoder.Encoding> encodings, int maxPerCategory,
                                                ScanRun run, ActiveRequestGateway gateway) {
@@ -115,28 +82,33 @@ final class CorpusFuzzEngine {
                 if (categoryBudget.exhausted() || run.requestBudget().exhausted() || !run.isRunning()) break;
                 if (isDestructive(rawPayload)) continue;
 
-                String payload = rawPayload;
-                if (findCallbackHost(rawPayload).isPresent()) {
+                String callbackHost = null;
+                boolean oastPayload = findCallbackHost(rawPayload).isPresent();
+                if (oastPayload) {
                     CollaboratorClient client = collaborator;
                     if (client == null) continue;
                     CollaboratorPayload oobPayload = client.generatePayload(
                             ActiveTestEngine.encodeCorrelation("CorpusFuzz-" + category, parameter.name(), base.url()));
-                    payload = rewriteCallbackHost(rawPayload, oobPayload.toString());
+                    callbackHost = oobPayload.toString();
                 }
 
-                boolean timeBased = mentionsSleep(payload);
-                for (PayloadEncoder.Encoding encoding : encodings) {
+                boolean timeBased = mentionsSleep(rawPayload);
+                for (PayloadEncoder.Encoding encoding : encodings.stream().sorted().toList()) {
                     if (categoryBudget.exhausted() || run.requestBudget().exhausted() || !run.isRunning()) break;
-                    String encoded = PayloadEncoder.encode(payload, encoding);
+                    String encoded = encodedPayload(rawPayload, callbackHost, encoding);
 
                     if (timeBased) {
                         // A timing comparison needs baseline + mutation from both the local category
                         // quota and the global run quota. Never spend the final token on half a pair.
                         if (categoryBudget.remaining() < 2 || run.requestBudget().remaining() < 2) break;
+                        EnumSet<RequestPolicy.Permission> timingPermissions =
+                                EnumSet.of(RequestPolicy.Permission.TIME_DELAY);
+                        if (oastPayload) timingPermissions.add(RequestPolicy.Permission.OAST);
                         long baselineMillis = timeRequest(base, parameter, parameter.value(),
-                                categoryBudget, run, gateway);
+                                categoryBudget, run, gateway, category, timingPermissions);
+                        if (baselineMillis < 0) break;
                         long payloadMillis = timeRequest(base, parameter, encoded,
-                                categoryBudget, run, gateway);
+                                categoryBudget, run, gateway, category, timingPermissions);
                         if (baselineMillis >= 0 && payloadMillis >= 0
                                 && ActiveTestEngine.looksTimeBased(baselineMillis, payloadMillis, TIME_BASED_DELAY_SECONDS)) {
                             out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-" + category, parameter.name(),
@@ -146,7 +118,10 @@ final class CorpusFuzzEngine {
                         continue;
                     }
 
-                    HttpResponse response = sendMutated(base, parameter, encoded, categoryBudget, run, gateway);
+                    Set<RequestPolicy.Permission> payloadPermissions = oastPayload
+                            ? Set.of(RequestPolicy.Permission.OAST) : Set.of();
+                    HttpResponse response = sendMutated(base, parameter, encoded, categoryBudget, run, gateway,
+                            category, payloadPermissions);
                     if (response == null) continue;
                     String body = response.bodyToString();
 
@@ -173,24 +148,85 @@ final class CorpusFuzzEngine {
         return out;
     }
 
+    /** All candidate encodings, with the same raw risk classification and local category caps as execution. */
+    Iterable<NativeRequestStep> plan(HttpRequest base, HttpParameter parameter,
+                                   Set<PayloadEncoder.Encoding> encodings, int maxPerCategory) {
+        return plan(base, parameter, encodings, maxPerCategory, null);
+    }
+
+    Iterable<NativeRequestStep> plan(HttpRequest base, HttpParameter parameter, Set<PayloadEncoder.Encoding> encodings,
+                                   int maxPerCategory, String categoryFilter) {
+        List<PayloadEncoder.Encoding> selected = encodings.stream().sorted().toList();
+        return () -> {
+            List<String> categories = maxPerCategory <= 0 ? List.of()
+                    : relevantCategories(parameter.name(), parameter.value(), rceParamHints, library.categories());
+            return categories.stream().filter(category -> categoryFilter == null || category.equals(categoryFilter)).flatMap(category -> {
+                Object localKey = new Object();
+                return java.util.stream.IntStream.range(0, library.get(category).size()).boxed()
+                        .filter(i -> !isDestructive(library.get(category).get(i)))
+                        .flatMap(i -> selected.stream().flatMap(encoding -> {
+                            String raw = library.get(category).get(i);
+                            boolean oast = findCallbackHost(raw).isPresent();
+                            boolean timing = mentionsSleep(raw);
+                            Set<RequestPolicy.Permission> risks = risks(oast, timing);
+                            String detail = "parameter " + parameter.name() + "; " + category + " entry " + (i + 1) + "; " + encoding
+                                    + "; local cap " + maxPerCategory;
+                            java.util.function.Supplier<HttpRequest> mutation = () -> mutate(base, parameter,
+                                    encodedPayload(raw, oast ? ActiveTestEngine.PREVIEW_CALLBACK : null, encoding));
+                            NativeRequestRecipe payload = new NativeRequestRecipe(mutation, "corpus-fuzz:" + category, risks,
+                                    NativeRequestStep.Mutation.CORPUS_VALUE, timing ? NativeRequestStep.Condition.PRIOR_DISPATCH
+                                            : oast ? NativeRequestStep.Condition.RUNTIME_VALUE : NativeRequestStep.Condition.ALWAYS,
+                                    detail, oast);
+                            if (!timing) return java.util.stream.Stream.of(new java.util.AbstractMap.SimpleImmutableEntry<>(payload,
+                                    new NativeRequestStep.Constraints(localKey, maxPerCategory, 1, null, null)));
+                            Object pair = new Object();
+                            NativeRequestRecipe baseline = new NativeRequestRecipe(() -> mutate(base, parameter, parameter.value()),
+                                    "corpus-fuzz:" + category, risks, NativeRequestStep.Mutation.TIMING_BASELINE,
+                                    NativeRequestStep.Condition.ALWAYS, detail + "; timing baseline", false);
+                            return java.util.stream.Stream.of(
+                                    new java.util.AbstractMap.SimpleImmutableEntry<>(baseline, new NativeRequestStep.Constraints(localKey, maxPerCategory, 2, null, pair)),
+                                    new java.util.AbstractMap.SimpleImmutableEntry<>(payload, new NativeRequestStep.Constraints(localKey, maxPerCategory, 1, pair, null)));
+                        }));
+            }).map(entry -> entry.getKey().build().withConstraints(entry.getValue())).iterator();
+        };
+    }
+
+    private static Set<RequestPolicy.Permission> risks(boolean oast, boolean timing) {
+        EnumSet<RequestPolicy.Permission> risks = EnumSet.noneOf(RequestPolicy.Permission.class);
+        if (oast) risks.add(RequestPolicy.Permission.OAST);
+        if (timing) risks.add(RequestPolicy.Permission.TIME_DELAY);
+        return Set.copyOf(risks);
+    }
+
+    private static HttpRequest mutate(HttpRequest base, HttpParameter parameter, String value) {
+        return base.withUpdatedParameters(HttpParameter.parameter(parameter.name(), value, parameter.type()));
+    }
+
+    private static String encodedPayload(String raw, String callbackHost, PayloadEncoder.Encoding encoding) {
+        return PayloadEncoder.encode(callbackHost == null ? raw : rewriteCallbackHost(raw, callbackHost), encoding);
+    }
+
     private HttpResponse sendMutated(HttpRequest base, HttpParameter parameter, String value,
-                                     RequestBudget categoryBudget, ScanRun run, ActiveRequestGateway gateway) {
+                                     RequestBudget categoryBudget, ScanRun run, ActiveRequestGateway gateway,
+                                     String category, Set<RequestPolicy.Permission> extraPermissions) {
         try {
-            if (!categoryBudget.tryAcquire()) return null;
-            HttpParameter mutated = HttpParameter.parameter(parameter.name(), value, parameter.type());
-            HttpRequest request = base.withUpdatedParameters(mutated);
-            Set<RequestPolicy.Permission> permissions = ActiveTestEngine.isSafeMethod(request)
-                    ? Set.of()
-                    : EnumSet.of(RequestPolicy.Permission.UNSAFE_HTTP_METHOD, RequestPolicy.Permission.STATE_CHANGING);
+            if (categoryBudget.exhausted()) return null;
+            HttpRequest request = mutate(base, parameter, value);
+            EnumSet<RequestPolicy.Permission> permissions = EnumSet.noneOf(RequestPolicy.Permission.class);
+            if (extraPermissions != null) permissions.addAll(extraPermissions);
+            Set<RequestPolicy.Permission> required = NativeRequestRecipe.mutationPermissions(request, permissions);
             ActiveRequestGateway.Result result = gateway.send(run,
-                    new RequestPolicy.PlannedRequest(request.method(), request.url(),
-                            "corpus-fuzz:" + parameter.name(), permissions),
+                    RequestPlan.create(request,
+                            "corpus-fuzz:" + category, required),
                     request);
             if (result.error() != null) {
                 api.logging().logToError("Corpus fuzz probe failed for " + parameter.name(), result.error());
                 return null;
             }
             if (!result.dispatched()) return null;
+            // This fuzzer is serialized per invocation, so charging the local category quota after
+            // gateway dispatch is safe and ensures policy/quota denials do not consume corpus quota.
+            if (!categoryBudget.tryAcquire()) return null;
             throttle();
             return result.response() == null ? null : result.response().response();
         } catch (Exception e) {
@@ -200,12 +236,13 @@ final class CorpusFuzzEngine {
     }
 
     private long timeRequest(HttpRequest base, HttpParameter parameter, String value,
-                             RequestBudget categoryBudget, ScanRun run, ActiveRequestGateway gateway) {
+                             RequestBudget categoryBudget, ScanRun run, ActiveRequestGateway gateway,
+                             String category, Set<RequestPolicy.Permission> permissions) {
         if (categoryBudget.exhausted() || run.requestBudget().exhausted() || !run.isRunning()) return -1;
         long start = System.currentTimeMillis();
         int categoryBefore = categoryBudget.used();
         int runBefore = run.requestBudget().used();
-        sendMutated(base, parameter, value, categoryBudget, run, gateway);
+        sendMutated(base, parameter, value, categoryBudget, run, gateway, category, permissions);
         if (categoryBudget.used() == categoryBefore || run.requestBudget().used() == runBefore) return -1;
         return System.currentTimeMillis() - start;
     }

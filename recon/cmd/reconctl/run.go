@@ -29,7 +29,7 @@ func runTool(args []string, in io.Reader, out, errOut io.Writer) error {
 	fs.Var(&cidrs, "scope-cidr", "authorised CIDR; use /32 or /128 for one IP (repeatable)")
 	allowDerived := fs.Bool("allow-derived-ips", false, "permit network probing DNS-derived IPs")
 	allowNetwork := fs.Bool("allow-network", false, "enable network_probe tools such as naabu")
-	allowActive := fs.Bool("allow-active", false, "enable active_fuzz/vulnerability tools such as nuclei")
+	allowActive := fs.Bool("allow-active", false, "allow active_fuzz risk; unsupported HTTP producers remain blocked")
 	runIDRaw := fs.String("run-id", "", "optional UUID used to correlate emitted records with a Burp scan run")
 	rejectsPath := fs.String("rejects", "", "quarantine JSONL path")
 	maxLine := fs.Int("max-line-bytes", 4<<20, "maximum normalized input record size")
@@ -53,6 +53,10 @@ func runTool(args []string, in io.Reader, out, errOut io.Writer) error {
 	if _, ok := recon.CommandProfileFor(spec.Name); !ok {
 		return fmt.Errorf("tool %s has no pinned executable profile", spec.Name)
 	}
+	if err := recon.CheckProfileEgress(spec.Name); err != nil {
+		return err
+	}
+
 	scope, err := recon.NewScope(domains, cidrs, *allowDerived)
 	if err != nil {
 		return err
