@@ -4,6 +4,7 @@ import burp.api.montoya.http.message.HttpRequestResponse;
 import burp.api.montoya.http.message.requests.HttpRequest;
 
 import java.util.Objects;
+import java.util.function.LongSupplier;
 
 /**
  * The admission gate for every native target-directed Montoya dispatch.
@@ -28,9 +29,13 @@ final class ActiveRequestGateway {
     @FunctionalInterface interface Dispatch { HttpRequestResponse send() throws Exception; }
 
     record Result(RequestPolicy.Decision decision, HttpRequestResponse response, Exception error, boolean dispatched,
-                  FindingEvidence.Exchange exchange) {
+                  FindingEvidence.Exchange exchange, long transportElapsedNanos) {
         Result(RequestPolicy.Decision decision, HttpRequestResponse response, Exception error, boolean dispatched) {
-            this(decision, response, error, dispatched, null);
+            this(decision, response, error, dispatched, null, -1);
+        }
+        Result(RequestPolicy.Decision decision, HttpRequestResponse response, Exception error, boolean dispatched,
+               FindingEvidence.Exchange exchange) {
+            this(decision, response, error, dispatched, exchange, exchange == null ? -1 : exchange.transportElapsedNanos());
         }
         static Result denied(RequestPolicy.Decision decision) {
             return new Result(decision, null, null, false);
@@ -39,20 +44,27 @@ final class ActiveRequestGateway {
 
     private final RequestPolicy policy;
     private final Sender sender;
+    private final LongSupplier nanoTime;
 
     ActiveRequestGateway(RequestPolicy policy, Sender sender) {
+        this(policy, sender, System::nanoTime);
+    }
+
+    /** Package-local monotonic clock seam for deterministic timing integration tests. */
+    ActiveRequestGateway(RequestPolicy policy, Sender sender, LongSupplier nanoTime) {
         this.policy = Objects.requireNonNull(policy, "policy");
         this.sender = Objects.requireNonNull(sender, "sender");
+        this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
     }
 
     Result send(ScanRun run, RequestPlan plan, HttpRequest request) {
-        long start = System.nanoTime();
+        long start = nanoTime.getAsLong();
         Result result = dispatch(run, plan, request);
         if (run == null || plan == null || plan.policyRequest() == null || request == null) return result;
         // Evidence collection must not change a completed dispatch or policy decision.
         try {
             return new Result(result.decision(), result.response(), result.error(), result.dispatched(),
-                    EvidenceCapture.exchange(run, plan, request, result, System.nanoTime() - start));
+                    EvidenceCapture.exchange(run, plan, request, result, nanoTime.getAsLong() - start), result.transportElapsedNanos());
         } catch (RuntimeException unavailable) { return result; }
     }
 
@@ -88,10 +100,14 @@ final class ActiveRequestGateway {
                     ? RequestPolicy.DecisionCode.CANCELLED : RequestPolicy.DecisionCode.RUN_NOT_ACTIVE;
             return Result.denied(RequestPolicy.Decision.deny(code, "run stopped before dispatch"));
         }
+        // Measure only the admitted transport invocation, excluding gateway DNS/admission and engine pacing.
+        // This is API elapsed time, not a wire-level RTT or proof of server execution.
+        long start = nanoTime.getAsLong();
         try {
-            return new Result(decision, dispatch == null ? sender.send(request) : dispatch.send(), null, true);
+            HttpRequestResponse response = dispatch == null ? sender.send(request) : dispatch.send();
+            return new Result(decision, response, null, true, null, Math.max(0, nanoTime.getAsLong() - start));
         } catch (Exception e) {
-            return new Result(decision, null, e, true);
+            return new Result(decision, null, e, true, null, Math.max(0, nanoTime.getAsLong() - start));
         }
     }
 

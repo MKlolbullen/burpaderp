@@ -52,13 +52,13 @@ final class CorpusFuzzEngine {
             "file", "path", "page", "doc", "document", "template", "include", "dir", "folder",
             "load", "filename", "filepath", "download", "resource", "view");
     private static final List<String> UNIVERSAL_CATEGORIES = List.of("sqli", "sqli2", "xss", "ssti");
-    private static final int TIME_BASED_DELAY_SECONDS = 5;
 
     private final MontoyaApi api;
     private final PayloadLibrary library;
     private final long throttleMillis;
     private final Set<String> rceParamHints;
     private final ThreadLocal<EvidenceCapture> evidenceCapture = new ThreadLocal<>();
+    private final ThreadLocal<Long> lastTransportMillis = ThreadLocal.withInitial(() -> -1L);
     private volatile CollaboratorClient collaborator;
 
     CorpusFuzzEngine(MontoyaApi api, PayloadLibrary library, long throttleMillis) {
@@ -104,22 +104,24 @@ final class CorpusFuzzEngine {
                     try {
 
                         if (timeBased) {
-                            // A timing comparison needs baseline + mutation from both the local category
-                            // quota and the global run quota. Never spend the final token on half a pair.
-                            if (categoryBudget.remaining() < 2 || run.requestBudget().remaining() < 2) break;
-                            EnumSet<RequestPolicy.Permission> timingPermissions =
-                                    EnumSet.of(RequestPolicy.Permission.TIME_DELAY);
+                            // Every matched pair needs two remaining local/global tokens. Each actual
+                            // send still checks all quota dimensions, grants and cancellation at the gate.
+                            EnumSet<RequestPolicy.Permission> timingPermissions = EnumSet.of(RequestPolicy.Permission.TIME_DELAY);
                             if (oastPayload) timingPermissions.add(RequestPolicy.Permission.OAST);
-                            long baselineMillis = timeRequest(base, parameter, parameter.value(),
-                                    categoryBudget, run, gateway, category, timingPermissions);
-                            if (baselineMillis < 0) break;
-                            long payloadMillis = timeRequest(base, parameter, encoded,
-                                    categoryBudget, run, gateway, category, timingPermissions);
-                            if (baselineMillis >= 0 && payloadMillis >= 0
-                                    && ActiveTestEngine.looksTimeBased(baselineMillis, payloadMillis, TIME_BASED_DELAY_SECONDS)) {
+                            List<Long> baseline = new ArrayList<>(), payload = new ArrayList<>();
+                            for (int sample = 0; sample < TimingVerification.SAMPLES; sample++) {
+                                if (categoryBudget.remaining() < 2 || run.requestBudget().remaining() < 2 || !run.isRunning()) break;
+                                long control = timeRequest(base, parameter, parameter.value(), categoryBudget, run, gateway, category, timingPermissions);
+                                if (control < 0) break;
+                                long mutation = timeRequest(base, parameter, encoded, categoryBudget, run, gateway, category, timingPermissions);
+                                if (mutation < 0) break;
+                                baseline.add(control); payload.add(mutation);
+                            }
+                            var timing = TimingVerification.paired(baseline, payload);
+                            if (timing.state() != VerificationState.SIGNAL) {
                                 out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-" + category, parameter.name(),
-                                        "[" + encoding + "] time-based signal from corpus payload: " + truncate(rawPayload),
-                                        VerificationState.CANDIDATE, base.url()));
+                                        "[" + encoding + "] timing payload: " + truncate(rawPayload) + ". " + timing.rationale(),
+                                        timing.state(), base.url()));
                             }
                             continue;
                         }
@@ -148,7 +150,7 @@ final class CorpusFuzzEngine {
                                     "[" + encoding + "] payload reflected unencoded in response: " + truncate(rawPayload),
                                     VerificationState.CANDIDATE, base.url()));
                         }
-                    } finally { capture.attach(out, firstFinding); evidenceCapture.remove(); }
+                    } finally { capture.attach(out, firstFinding); evidenceCapture.remove(); lastTransportMillis.remove(); }
                 }
             }
         }
@@ -181,18 +183,28 @@ final class CorpusFuzzEngine {
                             java.util.function.Supplier<HttpRequest> mutation = () -> mutate(base, parameter,
                                     encodedPayload(raw, oast ? ActiveTestEngine.PREVIEW_CALLBACK : null, encoding));
                             NativeRequestRecipe payload = new NativeRequestRecipe(mutation, "corpus-fuzz:" + category, risks,
-                                    NativeRequestStep.Mutation.CORPUS_VALUE, timing ? NativeRequestStep.Condition.PRIOR_DISPATCH
-                                            : oast ? NativeRequestStep.Condition.RUNTIME_VALUE : NativeRequestStep.Condition.ALWAYS,
+                                    NativeRequestStep.Mutation.CORPUS_VALUE, oast ? NativeRequestStep.Condition.RUNTIME_VALUE : NativeRequestStep.Condition.ALWAYS,
                                     detail, oast);
                             if (!timing) return java.util.stream.Stream.of(new java.util.AbstractMap.SimpleImmutableEntry<>(payload,
                                     new NativeRequestStep.Constraints(localKey, maxPerCategory, 1, null, null)));
-                            Object pair = new Object();
-                            NativeRequestRecipe baseline = new NativeRequestRecipe(() -> mutate(base, parameter, parameter.value()),
-                                    "corpus-fuzz:" + category, risks, NativeRequestStep.Mutation.TIMING_BASELINE,
-                                    NativeRequestStep.Condition.ALWAYS, detail + "; timing baseline", false);
-                            return java.util.stream.Stream.of(
-                                    new java.util.AbstractMap.SimpleImmutableEntry<>(baseline, new NativeRequestStep.Constraints(localKey, maxPerCategory, 2, null, pair)),
-                                    new java.util.AbstractMap.SimpleImmutableEntry<>(payload, new NativeRequestStep.Constraints(localKey, maxPerCategory, 1, pair, null)));
+                            List<java.util.Map.Entry<NativeRequestRecipe, NativeRequestStep.Constraints>> samples = new ArrayList<>();
+                            Object previousPayload = null;
+                            for (int sample = 0; sample < TimingVerification.SAMPLES; sample++) {
+                                Object baselineKey = new Object(), payloadKey = new Object();
+                                NativeRequestRecipe baseline = new NativeRequestRecipe(() -> mutate(base, parameter, parameter.value()),
+                                        "corpus-fuzz:" + category, risks, NativeRequestStep.Mutation.TIMING_BASELINE,
+                                        sample == 0 ? NativeRequestStep.Condition.ALWAYS : NativeRequestStep.Condition.RESPONSE_BRANCH,
+                                        detail + "; timing control " + (sample + 1) + "/" + TimingVerification.SAMPLES, false);
+                                NativeRequestRecipe timedPayload = new NativeRequestRecipe(mutation, "corpus-fuzz:" + category, risks,
+                                        NativeRequestStep.Mutation.TIMING_PAYLOAD, NativeRequestStep.Condition.BASELINE_SUCCESS,
+                                        detail + "; timing payload " + (sample + 1) + "/" + TimingVerification.SAMPLES, oast);
+                                samples.add(new java.util.AbstractMap.SimpleImmutableEntry<>(baseline,
+                                        new NativeRequestStep.Constraints(localKey, maxPerCategory, 2, previousPayload, baselineKey)));
+                                samples.add(new java.util.AbstractMap.SimpleImmutableEntry<>(timedPayload,
+                                        new NativeRequestStep.Constraints(localKey, maxPerCategory, 1, baselineKey, payloadKey)));
+                                previousPayload = payloadKey;
+                            }
+                            return samples.stream();
                         }));
             }).map(entry -> entry.getKey().build().withConstraints(entry.getValue())).iterator();
         };
@@ -216,6 +228,7 @@ final class CorpusFuzzEngine {
     private HttpResponse sendMutated(HttpRequest base, HttpParameter parameter, String value,
                                      RequestBudget categoryBudget, ScanRun run, ActiveRequestGateway gateway,
                                      String category, Set<RequestPolicy.Permission> extraPermissions) {
+        lastTransportMillis.set(-1L);
         try {
             if (categoryBudget.exhausted()) return null;
             HttpRequest request = mutate(base, parameter, value);
@@ -226,16 +239,17 @@ final class CorpusFuzzEngine {
                     RequestPlan.create(request,
                             "corpus-fuzz:" + category, required),
                     request);
+            // Charge actual invocations before optional capture/error handling. This ledger is private
+            // to the serialized fuzzer call; admission denials spend no local token.
+            boolean locallyCharged = !result.dispatched() || categoryBudget.tryAcquire();
             if (evidenceCapture.get() != null) evidenceCapture.get().record(result, extraPermissions != null && extraPermissions.contains(RequestPolicy.Permission.OAST)
                     && !java.util.Objects.equals(value, parameter.value()));
+            if (!result.dispatched() || !locallyCharged) return null;
+            lastTransportMillis.set(TimingVerification.sampleMillis(result));
             if (result.error() != null) {
                 api.logging().logToError("Corpus fuzz probe failed for " + parameter.name(), result.error());
                 return null;
             }
-            if (!result.dispatched()) return null;
-            // This fuzzer is serialized per invocation, so charging the local category quota after
-            // gateway dispatch is safe and ensures policy/quota denials do not consume corpus quota.
-            if (!categoryBudget.tryAcquire()) return null;
             throttle();
             return result.response() == null ? null : result.response().response();
         } catch (Exception e) {
@@ -248,12 +262,8 @@ final class CorpusFuzzEngine {
                              RequestBudget categoryBudget, ScanRun run, ActiveRequestGateway gateway,
                              String category, Set<RequestPolicy.Permission> permissions) {
         if (categoryBudget.exhausted() || run.requestBudget().exhausted() || !run.isRunning()) return -1;
-        long start = System.currentTimeMillis();
-        int categoryBefore = categoryBudget.used();
-        int runBefore = run.requestBudget().used();
         sendMutated(base, parameter, value, categoryBudget, run, gateway, category, permissions);
-        if (categoryBudget.used() == categoryBefore || run.requestBudget().used() == runBefore) return -1;
-        return System.currentTimeMillis() - start;
+        return lastTransportMillis.get();
     }
 
     private void throttle() {

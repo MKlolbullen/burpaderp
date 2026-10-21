@@ -50,11 +50,17 @@ record FindingEvidence(String id, String captureId, String runId, String source,
 
     record Exchange(String id, String runId, String probeId, String method, String url, String decision,
                     boolean dispatchAttempted, long elapsedNanos, String errorType,
-                    Bytes plannedRequest, Bytes returnedRequest, Bytes response) {
+                    Bytes plannedRequest, Bytes returnedRequest, Bytes response, long transportElapsedNanos) {
+        Exchange(String id, String runId, String probeId, String method, String url, String decision,
+                 boolean dispatchAttempted, long elapsedNanos, String errorType,
+                 Bytes plannedRequest, Bytes returnedRequest, Bytes response) {
+            this(id, runId, probeId, method, url, decision, dispatchAttempted, elapsedNanos, errorType,
+                    plannedRequest, returnedRequest, response, -1);
+        }
         int retainedBytes() { return plannedRequest.retainedBytes() + returnedRequest.retainedBytes() + response.retainedBytes(); }
         Exchange withoutBytes() {
             return new Exchange(id, runId, probeId, method, url, decision, dispatchAttempted, elapsedNanos, errorType,
-                    plannedRequest.withoutBytes(), returnedRequest.withoutBytes(), response.withoutBytes());
+                    plannedRequest.withoutBytes(), returnedRequest.withoutBytes(), response.withoutBytes(), transportElapsedNanos);
         }
     }
     record OastToken(String payloadId, String testClass, String parameter, boolean dispatchAttempted) {}
@@ -108,7 +114,8 @@ record FindingEvidence(String id, String captureId, String runId, String source,
                 .append("\nComplete retained sequence: ").append(complete()).append("\nBytes are API observations, not proof of wire delivery or the physical peer.\n");
         for (Exchange e : exchanges) out.append("\n").append(e.probeId).append(" ").append(e.method).append(" ").append(e.url)
                 .append(" | ").append(e.decision).append(" | dispatch attempted=").append(e.dispatchAttempted)
-                .append(" | elapsed ns=").append(e.elapsedNanos).append("\nRequest: ").append(e.plannedRequest.capture)
+                .append(" | gateway elapsed ns=").append(e.elapsedNanos).append(" | transport elapsed ns=")
+                .append(e.transportElapsedNanos < 0 ? "unknown" : e.transportElapsedNanos).append("\nRequest: ").append(e.plannedRequest.capture)
                 .append(" sha256=").append(e.plannedRequest.sha256).append("\nResponse: ").append(e.response.capture)
                 .append(" sha256=").append(e.response.sha256).append('\n');
         if (observation != null) out.append("\nOOB: ").append(observation.type).append(" id=").append(observation.payloadId)

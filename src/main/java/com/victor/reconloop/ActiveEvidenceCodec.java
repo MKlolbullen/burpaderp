@@ -4,7 +4,7 @@ import java.util.*;
 
 /** Atomic JSONL snapshot: a version/count/digest header followed by strictly validated record lines. */
 final class ActiveEvidenceCodec {
-    static final int VERSION = 1;
+    static final int VERSION = 2;
     static final int MAX_CHARS = 24 * 1024 * 1024;
     static final int MAX_RECORD_CHARS = 2 * 1024 * 1024;
     enum Status { ABSENT, CURRENT, MIGRATED, UNSUPPORTED, CORRUPT }
@@ -21,7 +21,7 @@ final class ActiveEvidenceCodec {
             if (retained > ReconModel.ActiveTableModel.MAX_RETAINED_BYTES) throw invalid();
             if (!ids.add(row.evidenceRecord().id())) throw invalid();
             Map<String, Object> object = rowMap(row);
-            readRow(object);
+            readRow(object, VERSION);
             String line = Json.write(object);
             if (line.length() > MAX_RECORD_CHARS) throw invalid();
             // One validation path for writes/restores. Never write a snapshot this version cannot read.
@@ -48,7 +48,7 @@ final class ActiveEvidenceCodec {
             keys(header, version == 0 ? "schemaVersion,recordCount" : "schemaVersion,recordCount,payloadSha256");
             int count = integer(header, "recordCount", 0, ReconModel.ActiveTableModel.MAX_ROWS);
             String payload = snapshot.substring(split + 1);
-            if (version == VERSION && !FindingEvidence.digest(payload).equals(text(header, "payloadSha256", 64))) throw invalid();
+            if (version >= 1 && !FindingEvidence.digest(payload).equals(text(header, "payloadSha256", 64))) throw invalid();
             String[] lines = payload.isEmpty() ? new String[0] : payload.split("\n", -1);
             if (lines.length != count) throw invalid();
             List<ReconModel.ActiveRow> rows = new ArrayList<>(); Set<String> ids = new HashSet<>();
@@ -56,13 +56,13 @@ final class ActiveEvidenceCodec {
             for (String line : lines) {
                 if (line.length() > MAX_RECORD_CHARS) throw invalid();
                 Map<String, Object> record = map(Json.parseStrict(line));
-                ReconModel.ActiveRow row = version == 0 ? legacy(record) : readRow(record);
+                ReconModel.ActiveRow row = version == 0 ? legacy(record) : readRow(record, version);
                 if (!ids.add(row.evidenceRecord().id())) throw invalid();
                 retained += row.evidenceRecord().retainedBytes();
                 if (retained > ReconModel.ActiveTableModel.MAX_RETAINED_BYTES) throw invalid();
                 rows.add(row);
             }
-            return new Loaded(version == 0 ? Status.MIGRATED : Status.CURRENT, List.copyOf(rows));
+            return new Loaded(version < VERSION ? Status.MIGRATED : Status.CURRENT, List.copyOf(rows));
         } catch (RuntimeException invalid) { return new Loaded(Status.CORRUPT, List.of()); }
     }
 
@@ -96,7 +96,8 @@ final class ActiveEvidenceCodec {
     }
     private static Map<String, Object> exchangeMap(FindingEvidence.Exchange e) {
         return obj("id", e.id(), "runId", e.runId(), "probeId", e.probeId(), "method", e.method(), "url", e.url(), "decision", e.decision(),
-                "dispatchAttempted", e.dispatchAttempted(), "elapsedNanos", Long.toString(e.elapsedNanos()), "errorType", e.errorType(),
+                "dispatchAttempted", e.dispatchAttempted(), "elapsedNanos", Long.toString(e.elapsedNanos()),
+                "transportElapsedNanos", Long.toString(e.transportElapsedNanos()), "errorType", e.errorType(),
                 "plannedRequest", bytesMap(e.plannedRequest()), "returnedRequest", bytesMap(e.returnedRequest()), "response", bytesMap(e.response()));
     }
     private static Map<String, Object> oobMap(FindingEvidence.Oob o) {
@@ -105,12 +106,12 @@ final class ActiveEvidenceCodec {
                 "httpProtocol", o.httpProtocol(), "httpRequest", bytesMap(o.httpRequest()), "httpResponse", bytesMap(o.httpResponse()), "smtpProtocol", o.smtpProtocol(), "smtpUtf8", bytesMap(o.smtpUtf8()));
     }
 
-    private static ReconModel.ActiveRow readRow(Map<String, Object> row) {
+    private static ReconModel.ActiveRow readRow(Map<String, Object> row, int version) {
         keys(row, "severity,testClass,parameter,status,evidence,url,provenance");
         return new ReconModel.ActiveRow(text(row, "severity", 32), text(row, "testClass", 256), text(row, "parameter", 4096),
-                text(row, "status", 128), text(row, "evidence", 65536), text(row, "url", 65536), readEvidence(map(row.get("provenance"))));
+                text(row, "status", 128), text(row, "evidence", 65536), text(row, "url", 65536), readEvidence(map(row.get("provenance")), version));
     }
-    private static FindingEvidence readEvidence(Map<String, Object> o) {
+    private static FindingEvidence readEvidence(Map<String, Object> o, int version) {
         keys(o, "id,captureId,runId,source,detectorId,detectorVersion,verificationState,observedAt,rationale,reproduction,originalRequest,originalResponse,attempted,omittedExchanges,exchanges,issuedTokens,observation,relatedEvidenceIds");
         String id = uuid(o, "id", false), capture = uuid(o, "captureId", true), run = uuid(o, "runId", true);
         String source = text(o, "source", 64);
@@ -119,18 +120,26 @@ final class ActiveEvidenceCodec {
         List<FindingEvidence.Exchange> exchanges = new ArrayList<>(); Set<String> exchangeIds = new HashSet<>();
         for (Object item : list(o, "exchanges", FindingEvidence.MAX_EXCHANGES)) {
             Map<String, Object> e = map(item);
-            keys(e, "id,runId,probeId,method,url,decision,dispatchAttempted,elapsedNanos,errorType,plannedRequest,returnedRequest,response");
+            keys(e, "id,runId,probeId,method,url,decision,dispatchAttempted,elapsedNanos,errorType,plannedRequest,returnedRequest,response"
+                    + (version >= 2 ? ",transportElapsedNanos" : ""));
             String exchangeId = uuid(e, "id", false), exchangeRun = uuid(e, "runId", false);
             if (!exchangeIds.add(exchangeId) || !exchangeRun.equals(run)) throw invalid();
             String elapsed = text(e, "elapsedNanos", 19);
             if (!elapsed.matches("0|[1-9][0-9]*")) throw invalid();
             long nanos = Long.parseLong(elapsed);
+            long transport = -1;
+            if (version >= 2) {
+                String duration = text(e, "transportElapsedNanos", 19);
+                if (!duration.matches("-1|0|[1-9][0-9]*")) throw invalid();
+                transport = Long.parseLong(duration);
+                if (transport > nanos) throw invalid();
+            }
             String decision = text(e, "decision", 64); RequestPolicy.DecisionCode.valueOf(decision);
             boolean dispatched = bool(e, "dispatchAttempted");
             FindingEvidence.Bytes planned = readBytes(map(e.get("plannedRequest"))), returned = readBytes(map(e.get("returnedRequest"))), response = readBytes(map(e.get("response")));
-            if (!dispatched && (returned.capture() != FindingEvidence.Capture.UNAVAILABLE || response.capture() != FindingEvidence.Capture.UNAVAILABLE)) throw invalid();
+            if (!dispatched && (transport != -1 || returned.capture() != FindingEvidence.Capture.UNAVAILABLE || response.capture() != FindingEvidence.Capture.UNAVAILABLE)) throw invalid();
             exchanges.add(new FindingEvidence.Exchange(exchangeId, exchangeRun, text(e, "probeId", 256), text(e, "method", 32),
-                    text(e, "url", 65536), decision, dispatched, nanos, text(e, "errorType", 256), planned, returned, response));
+                    text(e, "url", 65536), decision, dispatched, nanos, text(e, "errorType", 256), planned, returned, response, transport));
         }
         int attempted = integer(o, "attempted", 0, 1_000_000), omitted = integer(o, "omittedExchanges", 0, 1_000_000);
         if ((long) omitted + exchanges.size() != attempted) throw invalid();

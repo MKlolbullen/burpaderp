@@ -9,15 +9,15 @@ claim about TCP attempts, delivery, physical peer, browser execution or exploit 
 
 | Owner | Contract |
 | --- | --- |
-| `ActiveRequestGateway.Result.exchange` | Immutable receipt for an inspected request: run/probe IDs, method/logical URL, policy decision, dispatch-attempt flag, elapsed nanoseconds, exception class, intended request and returned request/response bytes. Denials do not manufacture responses or consume quota. Elapsed time includes preparation/admission, not just the HTTP exchange. Capturing optional evidence cannot change the send result. |
+| `ActiveRequestGateway.Result.exchange` | Immutable receipt for an inspected request: run/probe IDs, method/logical URL, policy decision, dispatch-attempt flag, elapsed nanoseconds, exception class, intended request and returned request/response bytes. Denials do not manufacture responses or consume quota. `elapsedNanos` includes preparation/admission. Separate `transportElapsedNanos` measures only the admitted transport invocation; `-1` means unknown/not invoked, never an inferred zero. Both use a monotonic clock and are API observations, not wire RTT. Capturing optional evidence cannot change the send result. |
 | `EvidenceCapture` | One native probe/insertion point or corpus encoding variant. Captures the original request and ordered receipts; retains real `HttpRequestResponse` objects only for immediate native issue attachment. No replay or approval capability. |
-| `FindingEvidence` | Stable evidence ID, capture ID, run ID, source, detector ID/version, typed `VerificationState`, UTC observation time, rationale, reproduction guidance, bounded byte observations, omission counts, issued OAST payload IDs and associated OOB records. Original cached response is included where the comparison uses it, notably access control. Detector version `1` is an explicit implementation revision, not the schema or repository version; bump it when the detector's semantics change. |
-| `ActiveEvidenceCodec` | Schema `1` JSONL snapshot: version/count/SHA-256 header, then one JSON object per active table row. Bytes use Base64, full length/hash, captured-prefix hash and capture status. Strict fields/types/enums, run consistency, IDs, timestamp syntax, counts, canonical Base64 and captured hashes are checked before writes and restores. The digest detects accidental changes; it is not an authenticity signature. |
+| `FindingEvidence` | Stable evidence ID, capture ID, run ID, source, detector ID/version, typed `VerificationState`, UTC observation time, rationale, reproduction guidance, bounded byte observations, omission counts, issued OAST payload IDs and associated OOB records. Original cached response is included where the comparison uses it, notably access control. Detector revision is independent of storage/repository versions. Native SQLi and corpus captures now use revision `2`; other detectors retain their previous revision. |
+| `ActiveEvidenceCodec` | Schema `2` JSONL snapshot: version/count/SHA-256 header, then one JSON object per active table row. Bytes use Base64, full length/hash, captured-prefix hash and capture status. Strict fields/types/enums, run consistency, IDs, timestamp syntax, counts, canonical Base64 and captured hashes are checked before writes and restores. The digest detects accidental changes; it is not an authenticity signature. |
 | `PersistedState` | Separate project extension-data string `reconhound.active-evidence`. Encodes before one `setString` replacement. Existing Findings/Hosts/assets/hashed-dedupe keys and AI triage format remain compatible. The snapshot is not a transaction across all those keys or a crash-proof write-ahead log. |
 | `ReconController` | Snapshots table references on the EDT; periodic serialization/writes run on the existing background executor. A generation and monotonic snapshot sequence reject pre-reset or superseded saves. Unload performs a final synchronous save. Restore only restores data/deduplication; it starts no run, HTTP, DNS, Collaborator client, poll or issue re-filing. |
 | `ReconPanel` | Active tests has independent Observation, Verification and Capture columns. “View evidence…” shows read-only provenance and JSON/Base64 using plain text, including partial-capture flags. There is no replay control. |
 
-The first schema covers findings, not every admitted/denied request in an entire run. Requests from
+The evidence snapshot covers findings, not every admitted/denied request in an entire run. Requests from
 probes without a finding are not durably journaled, except pending OAST cases retained for callbacks.
 Restored records confer no scope/risk grants and do not restore a live run, session or OAST client.
 Reproduction needs current authorization, credentials and fresh callback identifiers. Shared corpus
@@ -28,7 +28,7 @@ variants can be associated with one payload and remain explicitly ambiguous.
 | Production path | Retained evidence / interpretation |
 | --- | --- |
 | `ActiveTestEngine` | Per-probe, per-insertion-point original and gateway sequence, including available baseline/control/mutation responses. Existing typed detector states remain; runtime HTTP evidence is attached to reportable native issues. |
-| `CorpusFuzzEngine` | Exact encoded request actually submitted, not just the source corpus string. Timing cases keep baseline and mutation together. An attempted OAST mutation creates a pending SIGNAL case even when there is no response/reflection. |
+| `CorpusFuzzEngine` | Exact encoded request actually submitted, not just the source corpus string. Timing cases keep up to three alternating baseline/mutation pairs, valid transport samples and median/MAD rationale; see [timing verification](TIMING_VERIFICATION.md). An attempted OAST mutation creates a pending SIGNAL case even when there is no response/reflection. |
 | Parameter discovery | Baseline plus candidate request; reflected generated canary is REPRODUCED discovery, a lone status/length change is CANDIDATE. This is not vulnerability confirmation. |
 | JWT none / weak-secret replay | Valid-token baseline and forged request/response; response acceptance is REPRODUCED, rejection is REJECTED. Status/length similarity does not prove privileged access. |
 | Access-control comparison | Original cached request/response plus replay receipt. Matching content is REPRODUCED, partial similarity is CANDIDATE, denied/different results are REJECTED. Actual sensitive privileges need analyst verification. |
@@ -76,11 +76,18 @@ prevent duplicate filing. Missing parents after retention eviction cannot be rec
 - A missing/empty key restores no active history: earlier releases did **not** persist Active tests.
   The compatibility import format (`schemaVersion: 0`, count header, six row strings and optional
   boolean `confirmed`) maps true to REPRODUCED and false/missing to SIGNAL. It invents no prior raw
-  bytes, timestamp, run or detector version; a normal save migrates it to schema 1. Legacy constructor
+  bytes, timestamp, run or detector version; a normal save migrates it to schema 2. Legacy constructor
   compatibility uses the same conservative boolean interpretation.
+- Schema 1 is validated with its original fields and digest, then migrated without changing IDs, byte
+  evidence, detector revision, rationale or historical state. Its gateway elapsed time is preserved;
+  transport duration becomes unknown (`-1`). Total gateway time is never reinterpreted as transport
+  time. Schema 2 stores nanosecond durations as decimal strings to avoid JSON-number precision loss;
+  a transport duration cannot exceed gateway elapsed time or exist for a denied dispatch. Older
+  schema-1 plugins preserve schema-2 snapshots as unsupported rather than overwriting them. Migration
+  does not re-run or retrospectively reclassify a historical detector result.
 - Future schema versions and malformed/truncated/digest-invalid snapshots restore no active rows and
   are preserved byte-for-byte. Periodic saves and unload cannot overwrite them. Explicit project
-  Reset clears the active key into an empty schema-1 snapshot. Existing passive/triage data can still
+  Reset clears the active key into an empty schema-2 snapshot. Existing passive/triage data can still
   restore/save independently.
 
 Raw request/response/OOB data can contain credentials, tokens and personal data. Base64 is not
