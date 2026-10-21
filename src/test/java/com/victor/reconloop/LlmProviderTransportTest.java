@@ -11,6 +11,24 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.Assert.*;
 
 public class LlmProviderTransportTest {
+    @Test public void configuredJobOutputLimitIsSerializedAndInvalidLimitsCannotSend() throws Exception {
+        AtomicReference<String> body = new AtomicReference<>();
+        var client = new LlmClient(request -> {
+            java.util.concurrent.CompletableFuture<String> text = new java.util.concurrent.CompletableFuture<>();
+            request.bodyPublisher().orElseThrow().subscribe(new java.util.concurrent.Flow.Subscriber<ByteBuffer>() {
+                final java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+                public void onSubscribe(java.util.concurrent.Flow.Subscription subscription) { subscription.request(Long.MAX_VALUE); }
+                public void onNext(ByteBuffer buffer) { byte[] chunk = new byte[buffer.remaining()]; buffer.get(chunk); bytes.writeBytes(chunk); }
+                public void onError(Throwable error) { text.completeExceptionally(error); }
+                public void onComplete() { text.complete(bytes.toString(java.nio.charset.StandardCharsets.UTF_8)); }
+            });
+            body.set(text.get()); return new LlmClient.Reply(401, "");
+        });
+        client.complete(LlmProvider.OPENAI, "m", "fake", "system", "input", 3072);
+        assertEquals(3072, ((Number) Json.asObject(Json.parseStrict(body.get())).get("max_completion_tokens")).intValue());
+        var never = new LlmClient(request -> { fail("Invalid budget cannot send"); return null; });
+        assertTrue(never.complete(LlmProvider.OPENAI, "m", "fake", "s", "p", 8193).startsWith("[error]"));
+    }
     @Test public void allProvidersHaveIndependentKeyAndModelEnvironmentVariables() {
         for (LlmProvider p : LlmProvider.values()) {
             assertEquals(p.name() + "_API_KEY", p.envVar());

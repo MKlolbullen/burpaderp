@@ -3,7 +3,9 @@
 The existing **AI analysis** tab now opens an **Evidence review** workspace. It reviews captured
 HTTP requests/responses, JavaScript/TypeScript, source maps, API specs and other UTF-8 text together.
 It makes provider API calls only. It cannot fetch a target URL, run a suggested PoC, execute JavaScript,
-follow a model-generated link, invoke a tool, or file a native Burp issue.
+follow a model-generated link or file a native Burp issue. Independent review has no tools.
+The [five-agent job workflow](FIVE_AGENT_JOBS.md) adds bounded local text tools over the same selected
+evidence; open it with **Plan agent jobs…**.
 
 ## Configure existing keys
 
@@ -30,7 +32,7 @@ the data; enabled rows without a key are omitted.
 
 ## Review workflow
 
-Global scan controls collapse when the AI analysis tab opens, leaving room for evidence and results.
+Global scan controls collapse when the AI analysis or Agent team tab opens, leaving room for evidence and results.
 Use **Show scan controls** to reopen them; this layout change does not alter scanning permissions.
 
 1. Select one or more captured exchanges in Proxy history, the site map or Repeater, then right-click

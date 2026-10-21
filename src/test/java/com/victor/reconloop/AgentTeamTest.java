@@ -25,14 +25,14 @@ public class AgentTeamTest {
         assertEquals(AgentRole.RECON, AgentRole.defaultRoleFor(LlmProvider.GEMINI));
         assertEquals(AgentRole.EXPLOIT_DRAFTER, AgentRole.defaultRoleFor(LlmProvider.OPENAI));
         assertEquals(AgentRole.VERIFIER, AgentRole.defaultRoleFor(LlmProvider.XAI));
-        assertEquals(AgentRole.UNCENSORED, AgentRole.defaultRoleFor(LlmProvider.VENICE));
+        assertEquals(AgentRole.PAYLOAD_SPECIALIST, AgentRole.defaultRoleFor(LlmProvider.VENICE));
     }
 
-    /** Verifies that only exploit drafter and uncensored roles are marked as sensitive. */
+    /** Verifies that only exploit drafter and payload specialist roles are marked as sensitive. */
     @Test
-    public void onlyExploitDrafterAndUncensoredAreSensitive() {
+    public void onlyDraftingRolesAreSensitive() {
         assertTrue(AgentRole.EXPLOIT_DRAFTER.sensitive());
-        assertTrue(AgentRole.UNCENSORED.sensitive());
+        assertTrue(AgentRole.PAYLOAD_SPECIALIST.sensitive());
         assertFalse(AgentRole.LEADER.sensitive());
         assertFalse(AgentRole.RECON.sensitive());
         assertFalse(AgentRole.VERIFIER.sensitive());

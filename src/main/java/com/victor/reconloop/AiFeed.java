@@ -32,6 +32,7 @@ final class AiFeed {
         CHAIN_ANALYSIS("Chain analysis"),
         NUCLEI_TEMPLATE("Nuclei template"),
         AGENT_ROUND("Agent round"),
+        AGENT_JOB("Agent job call"),
         GATE_DECISION("Gate decision"),
         ESCALATION("Escalation");
 

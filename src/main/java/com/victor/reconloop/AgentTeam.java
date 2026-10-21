@@ -19,6 +19,7 @@ final class AgentTeam {
      */
     record AgentSpec(AgentRole role, LlmProvider provider, String model, String apiKey,
                      ReasoningEffort effort, int tokenBudget) {
+        @Override public String toString() { return role + "/" + provider + "/" + model + " [key redacted]"; }
 
         /**
          * Returns the "most powerful" score for leader election when no role is explicitly LEADER.

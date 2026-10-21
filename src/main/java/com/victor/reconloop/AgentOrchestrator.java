@@ -40,8 +40,8 @@ final class AgentOrchestrator {
         return switch (role) {
             case RECON -> 0;
             case EXPLOIT_DRAFTER -> 1;
-            case UNCENSORED -> 2;
-            case VERIFIER -> 3;   // verifier runs after the drafter/uncensored so it can critique them
+            case PAYLOAD_SPECIALIST -> 2;
+            case VERIFIER -> 3;   // verifier runs after the drafter/payload specialist so it can critique them
             case LEADER -> 4;
         };
     }
@@ -78,7 +78,7 @@ final class AgentOrchestrator {
                     + "on a different model from the drafter on purpose. Attack the drafted proof(s)-of-concept: which "
                     + "assumptions are unproven, which steps would realistically fail, what evidence is missing. Be "
                     + "specific; separate confirmed primitives from assumptions.";
-            case UNCENSORED -> "You are the payload specialist on an AUTHORISED security assessment team. Propose "
+            case PAYLOAD_SPECIALIST -> "You are the payload specialist on an AUTHORISED security assessment team. Propose "
                     + "candidate payloads/techniques for the drafted proof(s)-of-concept. These are proposals for a "
                     + "human to authorise; do NOT execute anything.";
             case LEADER -> "You are the team leader on an AUTHORISED security assessment. Synthesise the team's "

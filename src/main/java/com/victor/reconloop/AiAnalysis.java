@@ -85,6 +85,9 @@ final class AiAnalysis {
         return new Redacted(value, count);
     }
 
+    /** Apply the same best-effort masking to derived tool/model text before sharing it again. */
+    static String redactDerived(String value) { return redact(value).text(); }
+
     static Snapshot prepare(List<Source> sources, String focus) {
         validateSources(sources);
         if (focus == null) focus = "";

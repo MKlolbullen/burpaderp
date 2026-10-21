@@ -37,9 +37,23 @@ public class ReconPanelAiLayoutTest {
                     var toggle = find(panel, JToggleButton.class, b -> b.getText().equals("Show scan controls"));
                     assertNotNull(toggle); toggle.doClick(); assertEquals("Hide scan controls", toggle.getText());
                     toggle.doClick(); assertEquals("Show scan controls", toggle.getText());
+                    for (var provider : LlmProvider.values()) {
+                        var checkbox = find(panel, JCheckBox.class, box -> box.getText().equals(provider.label()));
+                        checkbox.doClick();
+                    }
+                    fillKeys(panel);
+                    review.stage(AiAnalysis.Kind.JAVASCRIPT, "app.js", "el.innerHTML = location.hash;");
+                    var planner = find(panel, JButton.class, b -> b.getText().equals("Plan agent jobs…")); planner.doClick(); layout(panel);
+                    var team = find(panel, EvidenceAgentPanel.class, v -> true);
+                    assertTrue(team.run.isEnabled()); assertTrue("Agent job workspace must remain usable", team.getHeight() >= 450);
+                    review.editor.append(" // evidence changed"); assertFalse("Changed evidence must invalidate the team plan", team.run.isEnabled());
                 });
                 assertTrue(fake.sent.isEmpty()); assertTrue(fake.issues.isEmpty());
             } finally { controller.shutdown(); }
         }
+    }
+    private static void fillKeys(Component component) {
+        if (component instanceof JPasswordField password) password.setText("FAKE-ONLY");
+        if (component instanceof Container container) for (var child : container.getComponents()) fillKeys(child);
     }
 }
