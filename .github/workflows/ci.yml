@@ -48,6 +48,9 @@ jobs:
       - name: Build and test
         run: ./gradlew clean build --no-daemon --stacktrace
 
+      - name: Test runtime verification receiver and offline comparison
+        run: python3 -m unittest discover -s tools/runtime-verification/tests -v
+
       - name: CLI smoke test
         shell: bash
         run: |
@@ -68,11 +71,20 @@ jobs:
           test ! -e /tmp/recon-hound-blocked.sarif
           jar tf "$JAR" >/tmp/recon-hound-jar.txt
           grep -q '^com/victor/reconloop/ReconLoopExtension.class$' /tmp/recon-hound-jar.txt
+          # The manual harness has one extension entry point and is isolated from the production JAR.
+          VERIFY_JAR=build/runtime-verification/recon-hound-runtime-verification.jar
+          test -s "$VERIFY_JAR"
+          jar tf "$VERIFY_JAR" >/tmp/recon-hound-runtime-jar.txt
+          grep -q '^com/victor/reconloop/RuntimeVerificationExtension.class$' /tmp/recon-hound-runtime-jar.txt
+          if grep -q '^com/victor/reconloop/ReconLoopExtension.class$' /tmp/recon-hound-runtime-jar.txt; then exit 1; fi
+          if grep -q '^com/victor/reconloop/RuntimeVerificationExtension.class$' /tmp/recon-hound-jar.txt; then exit 1; fi
 
       - name: Upload jar artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: burp-recon-hound-jar-${{ github.sha }}
-          path: build/libs/*.jar
+          path: |
+            build/libs/*.jar
+            build/runtime-verification/*.jar
           if-no-files-found: error
           retention-days: 14

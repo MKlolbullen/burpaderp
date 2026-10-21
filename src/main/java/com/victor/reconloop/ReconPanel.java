@@ -284,7 +284,22 @@ final class ReconPanel extends JPanel {
         tabs.addTab("Discovered resources", new JScrollPane(discoveries));
         tabs.addTab("Insertion points", new JScrollPane(parameters));
         tabs.addTab("XSS reflections", new JScrollPane(reflectionTable));
-        tabs.addTab("Active tests", new JScrollPane(activeTable));
+        JPanel activeResults = new JPanel(new BorderLayout());
+        activeResults.add(new JScrollPane(activeTable), BorderLayout.CENTER);
+        JButton viewEvidence = new JButton("View evidence…");
+        viewEvidence.addActionListener(event -> {
+            int selected = activeTable.getSelectedRow();
+            if (selected < 0) return;
+            ReconModel.ActiveRow row = activeModel.row(activeTable.convertRowIndexToModel(selected));
+            JTabbedPane evidenceTabs = new JTabbedPane();
+            JTextArea summary = new JTextArea(row.evidenceRecord().describe(), 24, 100); summary.setEditable(false);
+            JTextArea json = new JTextArea(Json.write(ActiveEvidenceCodec.rowMap(row)), 24, 100); json.setEditable(false);
+            evidenceTabs.addTab("Summary", new JScrollPane(summary));
+            evidenceTabs.addTab("JSON / exact captured bytes (Base64)", new JScrollPane(json));
+            JOptionPane.showMessageDialog(this, evidenceTabs, "Finding evidence", JOptionPane.PLAIN_MESSAGE);
+        });
+        activeResults.add(viewEvidence, BorderLayout.SOUTH);
+        tabs.addTab("Active tests", activeResults);
         tabs.addTab("Hosts / IPs", buildAssetPanel(controller, assetTable, assetModel));
         tabs.addTab("XSS vector library", new JScrollPane(vectorTable));
         aiTab = buildAiPanel(controller);

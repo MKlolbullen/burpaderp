@@ -37,6 +37,11 @@ final class NativeRunRegistry implements AutoCloseable {
         return run;
     }
 
+    synchronized boolean ownsCurrentRun(String id) {
+        return runs.entrySet().stream().anyMatch(entry -> entry.getKey().id().toString().equals(id)
+                && entry.getKey().isRunning() && isCurrent(entry.getValue()));
+    }
+
     synchronized void finish(Ticket ticket) {
         runs.entrySet().removeIf(entry -> {
             if (!entry.getValue().equals(ticket)) return false;
