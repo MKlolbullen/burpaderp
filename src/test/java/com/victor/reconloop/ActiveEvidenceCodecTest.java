@@ -26,7 +26,7 @@ public class ActiveEvidenceCodecTest {
     }
 
     static String frame(String payload) {
-        return Json.write(Map.of("schemaVersion", 1, "recordCount", payload.isEmpty() ? 0 : payload.split("\n", -1).length,
+        return Json.write(Map.of("schemaVersion", ActiveEvidenceCodec.VERSION, "recordCount", payload.isEmpty() ? 0 : payload.split("\n", -1).length,
                 "payloadSha256", FindingEvidence.digest(payload))) + "\n" + payload;
     }
 
@@ -117,5 +117,36 @@ public class ActiveEvidenceCodecTest {
         }
         assertEquals(1.25, ((Number) Json.parseStrict("1.25")).doubleValue(), 0);
         assertEquals(-125, ((Number) Json.parseStrict("-1.25e2")).doubleValue(), 0);
+    }
+    @Test public void schemaOneFixtureMigratesWithoutInventingTransportTimeOrChangingEvidence() throws Exception {
+        String previous = java.nio.file.Files.readString(java.nio.file.Path.of("src/test/resources/active-evidence-v1.jsonl"));
+        var loaded = ActiveEvidenceCodec.decode(previous);
+        assertEquals(ActiveEvidenceCodec.Status.MIGRATED, loaded.status());
+        var row = loaded.rows().getFirst(); var evidence = row.evidenceRecord();
+        assertEquals("cccccccc-cccc-4ccc-8ccc-cccccccccccc", evidence.id()); assertEquals("1", evidence.detectorVersion());
+        assertEquals(VerificationState.REPRODUCED,evidence.state()); assertTrue(evidence.complete());
+        assertEquals(2_000_000_000L,evidence.exchanges().getFirst().elapsedNanos());
+        assertEquals(-1,evidence.exchanges().getFirst().transportElapsedNanos());
+        Map<String,String> values = new HashMap<>(Map.of(PersistedState.K_ACTIVE_EVIDENCE,previous));
+        assertTrue(PersistedState.saveActiveEvidence(store(values),loaded.rows()));
+        var restored = PersistedState.loadActiveEvidence(store(values));
+        assertEquals(ActiveEvidenceCodec.Status.CURRENT,restored.status()); assertEquals(loaded.rows(),restored.rows());
+        assertEquals(ActiveEvidenceCodec.Status.CORRUPT,ActiveEvidenceCodec.decode(previous+" ").status());
+    }
+    @Test public void schemaTwoRoundTripsTransportDurationExactlyAndRejectsImpossibleTiming() {
+        Map<String,Object> object = ActiveEvidenceCodec.rowMap(sample(VerificationState.REPRODUCED));
+        var exchange = Json.asObject(Json.asArray(Json.asObject(object.get("provenance")).get("exchanges")).getFirst());
+        exchange.put("transportElapsedNanos",Long.toString(Long.MAX_VALUE));
+        var loaded = ActiveEvidenceCodec.decode(frame(Json.write(object)));
+        assertEquals(ActiveEvidenceCodec.Status.CURRENT,loaded.status());
+        assertEquals(Long.MAX_VALUE,loaded.rows().getFirst().evidenceRecord().exchanges().getFirst().transportElapsedNanos());
+        for (String invalid : List.of("-2","01","1.5","9223372036854775808")) {
+            exchange.put("transportElapsedNanos",invalid);
+            assertEquals(ActiveEvidenceCodec.Status.CORRUPT,ActiveEvidenceCodec.decode(frame(Json.write(object))).status());
+        }
+        exchange.put("transportElapsedNanos","2"); exchange.put("elapsedNanos","1");
+        assertEquals(ActiveEvidenceCodec.Status.CORRUPT,ActiveEvidenceCodec.decode(frame(Json.write(object))).status());
+        exchange.put("elapsedNanos","10"); exchange.put("dispatchAttempted",false);
+        assertEquals(ActiveEvidenceCodec.Status.CORRUPT,ActiveEvidenceCodec.decode(frame(Json.write(object))).status());
     }
 }

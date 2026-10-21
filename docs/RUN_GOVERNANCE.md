@@ -157,7 +157,7 @@ request through the gateway.
 | Parameter discovery | `ParameterDiscoveryEngine.probes` / `plan`: GET baseline and chunks of at most 20 new URL parameters | Upper bound if the baseline returns a response. A denied baseline skips dependent chunks. Added names/counts are shown, captured values hidden. |
 | GraphQL introspection / fuzz | `GraphQlRequestPlanner.introspection` / `fuzz` | One introspection candidate or three fuzz candidates (suggestion, 100 aliases, batch), subject to policy/quotas. |
 | Active probes | `ActiveTestEngine.plan(base, probeFilter)` | Candidate catalog shares payload constants, `InsertionPoint.apply`, callback/XML/upload builders and permission derivation with execution. Includes baseline/error/boolean/timing branches, NoSQL, traversal, headers, CORS, auth bursts, uploads and XXE. Baseline admission dependencies are explicit; earlier confirmations can skip later candidates. |
-| Corpus fuzz | `CorpusFuzzEngine.plan(base, parameter, encodings, maxPerCategory, categoryFilter)` | Shares destructive filtering, raw risk classification, callback rewriting, encoding and parameter mutation with execution. Encodings have stable enum order. Each parameter/category has its own local cap inside the run caps. Timing baselines require two remaining global/local tokens; a denied baseline skips its paired mutation. |
+| Corpus fuzz | `CorpusFuzzEngine.plan(base, parameter, encodings, maxPerCategory, categoryFilter)` | Shares destructive filtering, raw risk classification, callback rewriting, encoding and parameter mutation with execution. Encodings have stable enum order. Each parameter/category has its own local cap inside the run caps. Timing expands to at most three alternating control/payload pairs. Each control requires two remaining global/local tokens; later pairs depend on earlier admissions and completed responses. Failure/denial skips dependent samples. Every dispatched invocation, including transport errors, consumes the local category cap. |
 | JWT | `JwtRequestPlanner.plan`, `baseline`, `noneVariants`, `weakSecret` | Original replay, four alg:none variants and an optional offline weak-secret forgery. Forgeries require baseline admission and a successful response. Tokens/claims/signing keys never enter display text. |
 | Access-control replay | `AccessControlEngine.plan` | Same cached-response safe-method selection and identity mutation as execution. Cookie/Authorization are removed and configured headers applied; values stay hidden. |
 | Takeover | `TakeoverRequestPlanner.plan` / `step` | Stable host ordering, root HTTPS GET, then HTTP fallback unless HTTPS matched a fingerprint. |
@@ -259,3 +259,7 @@ beyond the checked numeric API destination. Native plans remain in-memory dispat
 persisted approval artifacts or complete run audit trails. TCP/DNS/provider process traffic is explicitly outside the
 native HTTP dispatch ledger. Full-product wire-level isolation is not established by these gates.
 Do not interpret passing native/external-boundary tests as closing #44 or approving v1.0.
+
+Timing verification now uses separate monotonic transport durations, completed responses and bounded
+repetitions; [the timing contract](TIMING_VERIFICATION.md) describes states, exclusions, preview
+conditions and schema-1 migration. This does not change the outstanding Burp connection-path gate.

@@ -365,6 +365,12 @@ CRLF response-header injection and file-read canaries are confirmed detector evi
 Collaborator callback confirms the interaction; browser execution and exploit impact need separate proof.
 Native helper reports retain their explicit interpretation, including tentative takeover candidates.
 
+[Timing verification](docs/TIMING_VERIFICATION.md) measures admitted transport calls separately from
+client preparation/pacing. Corpus delay probes use up to three alternating control/payload pairs;
+median/MAD and matched delays are required for REPRODUCED. Partial/inconsistent anomalies remain
+CANDIDATE. Missing responses, failed sends and HTTP errors do not become timing samples. Schema-1
+project evidence migrates to schema 2 while preserving historical state and marking unknown timings.
+
 Findings surface in several places:
 
 - the Recon Hound **suite tab** tables — **Findings**, **Discovered resources**, **Insertion points**,

@@ -158,6 +158,7 @@ final class ActiveTestEngine {
     private final ThreadLocal<Set<RequestPolicy.Permission>> currentProbePermissions =
             ThreadLocal.withInitial(Set::of);
     private final ThreadLocal<Boolean> lastRequestDispatched = ThreadLocal.withInitial(() -> false);
+    private final ThreadLocal<Long> lastTransportMillis = ThreadLocal.withInitial(() -> -1L);
     private final ThreadLocal<EvidenceCapture> evidenceCapture = new ThreadLocal<>();
     private final ThreadLocal<List<ActiveFinding>> findingOutput = new ThreadLocal<>();
     private final ThreadLocal<HttpRequest> originalRequest = new ThreadLocal<>();
@@ -223,7 +224,7 @@ final class ActiveTestEngine {
             requestGateway.remove();
             currentProbeId.remove();
             currentProbePermissions.remove();
-            lastRequestDispatched.remove();
+            lastRequestDispatched.remove(); lastTransportMillis.remove();
         }
     }
 
@@ -508,12 +509,13 @@ final class ActiveTestEngine {
             if (timing.delayed()) {
                 out.add(new ActiveFinding("HIGH", "SQLi", point.label(),
                         "Repeated time-based blind signal for payload " + payload
-                                + ": baseline median=" + timing.baselineMedianMillis() + "ms"
+                                + ": monotonic transport invocation durations (excluding gateway DNS/admission, throttle and evidence); baseline="
+                                + baselineTimings + "ms, payload=" + payloadTimings + "ms; baseline median=" + timing.baselineMedianMillis() + "ms"
                                 + " (MAD=" + timing.baselineMadMillis() + "ms), payload median="
                                 + timing.payloadMedianMillis() + "ms (MAD=" + timing.payloadMadMillis()
                                 + "ms), delta=" + timing.medianDeltaMillis() + "ms across "
                                 + timing.consistentDelayedSamples() + "/" + payloadTimings.size()
-                                + " consistently delayed samples",
+                                + " consistently delayed samples. This reproduces a timing signal; interpreter execution and impact remain unproven.",
                         VerificationState.REPRODUCED, base.url()));
                 break;
             }
@@ -573,10 +575,9 @@ final class ActiveTestEngine {
     }
 
     private long timeRequest(HttpRequest base, InsertionPoint point, String value) {
-        long start = System.currentTimeMillis();
+        lastTransportMillis.set(-1L);
         sendMutated(base, point, value, Set.of(RequestPolicy.Permission.TIME_DELAY));
-        return Boolean.TRUE.equals(lastRequestDispatched.get())
-                ? System.currentTimeMillis() - start : -1;
+        return lastTransportMillis.get();
     }
 
     private List<Long> timingSamples(HttpRequest base, InsertionPoint point, String value, int count) {
@@ -829,7 +830,7 @@ final class ActiveTestEngine {
     }
 
     private HttpRequestResponse sendRequest(HttpRequest request, Set<RequestPolicy.Permission> extraPermissions) {
-        lastRequestDispatched.set(false);
+        lastRequestDispatched.set(false); lastTransportMillis.set(-1L);
         if (request == null) return null;
         ScanRun run = scanRun.get();
         ActiveRequestGateway gateway = requestGateway.get();
@@ -844,6 +845,7 @@ final class ActiveTestEngine {
         ActiveRequestGateway.Result result = gateway.send(run,
                 RequestPlan.create(request, currentProbeId.get(), required),
                 request);
+        lastTransportMillis.set(TimingVerification.sampleMillis(result));
         if (evidenceCapture.get() != null) evidenceCapture.get().recordWithTokens(result, request);
         if (result.error() != null) {
             api.logging().logToError("Active request failed for " + request.url(), result.error());

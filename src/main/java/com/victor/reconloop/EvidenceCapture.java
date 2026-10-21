@@ -52,7 +52,8 @@ final class EvidenceCapture {
     }
     FindingEvidence snapshot(VerificationState state, String rationale) {
         return new FindingEvidence(UUID.randomUUID().toString(), captureId, runId, source, probeId,
-                FindingEvidence.DETECTOR_VERSION, state, Instant.now().toString(), rationale,
+                source.equals("CORPUS") || (source.equals("NATIVE_ACTIVE") && probeId.equals("sqli")) ? "2" : FindingEvidence.DETECTOR_VERSION,
+                state, Instant.now().toString(), rationale,
                 "Inspect the captured original and ordered request/response observations. Reproduce only with current scope and risk grants; refresh session credentials and OAST identifiers. Stored data never authorizes replay.",
                 original, exchanges, attempted, Math.max(0, attempted - exchanges.size()), tokens, null, List.of());
     }
@@ -97,6 +98,6 @@ final class EvidenceCapture {
         return new FindingEvidence.Exchange(UUID.randomUUID().toString(), run.id().toString(), metadata.probeId(),
                 metadata.method(), metadata.url(), result.decision().code().name(), result.dispatched(), Math.max(0, elapsed),
                 result.error() == null ? "" : result.error().getClass().getSimpleName(), bytes(() -> request.toByteArray().getBytes()),
-                bytes(() -> pair.request().toByteArray().getBytes()), bytes(() -> pair.response().toByteArray().getBytes()));
+                bytes(() -> pair.request().toByteArray().getBytes()), bytes(() -> pair.response().toByteArray().getBytes()), result.transportElapsedNanos());
     }
 }
