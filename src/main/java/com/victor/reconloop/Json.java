@@ -18,6 +18,8 @@ import java.util.Map;
 final class Json {
     private final String s;
     private int i;
+    private boolean strict;
+    private int depth, nodes;
 
     private Json(String s) { this.s = s; }
 
@@ -32,6 +34,7 @@ final class Json {
     /** Parses exactly one complete JSON value, rejecting trailing non-whitespace data. */
     static Object parseStrict(String text) {
         Json p = new Json(text == null ? "" : text);
+        p.strict = true;
         p.ws();
         Object v = p.value();
         p.ws();
@@ -219,6 +222,11 @@ final class Json {
     }
 
     private Object value() {
+        if (strict && (++nodes > 200_000 || ++depth > 64)) throw err("JSON resource limit");
+        try { return readValue(); } finally { if (strict) depth--; }
+    }
+
+    private Object readValue() {
         char c = peek();
         return switch (c) {
             case '{' -> object();
@@ -241,6 +249,7 @@ final class Json {
             ws();
             expect(':');
             ws();
+            if (strict && m.containsKey(key)) throw err("duplicate object key");
             m.put(key, value());
             ws();
             char c = next();
@@ -283,12 +292,15 @@ final class Json {
                     case 'f' -> b.append('\f');
                     case 'u' -> {
                         if (i + 4 > s.length()) throw err("truncated \\u escape");
-                        b.append((char) Integer.parseInt(s.substring(i, i + 4), 16));
+                        String hex = s.substring(i, i + 4);
+                        if (strict && !hex.matches("[0-9a-fA-F]{4}")) throw err("invalid unicode escape");
+                        b.append((char) Integer.parseInt(hex, 16));
                         i += 4;
                     }
-                    default -> b.append(e);
+                    default -> { if (strict) throw err("invalid string escape"); b.append(e); }
                 }
             } else {
+                if (strict && c < 0x20) throw err("unescaped control character");
                 b.append(c);
             }
         }
@@ -300,7 +312,10 @@ final class Json {
         String num = s.substring(start, i);
         if (num.isEmpty()) throw err("invalid value");
         try {
-            return Double.parseDouble(num);
+            if (strict && !num.matches("-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?")) throw new NumberFormatException();
+            double value = Double.parseDouble(num);
+            if (strict && !Double.isFinite(value)) throw new NumberFormatException();
+            return value;
         } catch (NumberFormatException e) {
             throw err("invalid number '" + num + "'");
         }

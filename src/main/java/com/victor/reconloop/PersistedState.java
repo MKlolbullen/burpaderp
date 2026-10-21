@@ -10,12 +10,13 @@ import java.util.List;
 /**
  * Serialises Recon Hound's cross-session state into Burp's project-scoped
  * {@link PersistedObject} (extension data): the issue-dedupe keys, the host/IP asset inventory, and
- * the Findings / Hosts table rows. This lets a reopened project (or a reloaded extension) restore the
+ * the Findings / Hosts table rows and bounded active evidence. This lets a reopened project (or a reloaded extension) restore the
  * plugin's results and, crucially, avoid re-filing findings it already reported.
  *
- * <p>Storage is newline-delimited records with tab-separated fields; field values are sanitised of
+ * <p>Legacy keys use newline-delimited records with tab-separated fields; field values are sanitised of
  * tabs/newlines on write. The findings format is backward compatible: legacy six-field rows load
  * with an empty AI-triage verdict, while current seven-field rows retain that verdict.
+ * Active evidence has a separate versioned JSONL key; see {@link ActiveEvidenceCodec}.
  */
 final class PersistedState {
     static final String K_FILED = "reconhound.filed";
@@ -23,6 +24,24 @@ final class PersistedState {
     static final String K_IPS = "reconhound.ips";
     static final String K_FINDINGS = "reconhound.findings";
     static final String K_ASSETS = "reconhound.assets";
+
+    static final String K_ACTIVE_EVIDENCE = "reconhound.active-evidence";
+
+    static ActiveEvidenceCodec.Loaded loadActiveEvidence(PersistedObject store) {
+        return ActiveEvidenceCodec.decode(store.getString(K_ACTIVE_EVIDENCE));
+    }
+
+    /** Unknown/corrupt snapshots are preserved until the operator explicitly resets project results. */
+    static boolean saveActiveEvidence(PersistedObject store, List<ReconModel.ActiveRow> rows) {
+        if (!loadActiveEvidence(store).writable()) return false;
+        String snapshot = ActiveEvidenceCodec.encode(rows);
+        store.setString(K_ACTIVE_EVIDENCE, snapshot);
+        return true;
+    }
+
+    static void resetActiveEvidence(PersistedObject store) {
+        store.setString(K_ACTIVE_EVIDENCE, ActiveEvidenceCodec.encode(List.of()));
+    }
 
     static void saveStrings(PersistedObject store, String key, Collection<String> values) {
         store.setString(key, String.join("\n", values));
