@@ -17,7 +17,6 @@ enum LlmProvider {
     OPENAI("OpenAI", "gpt-4o", "OPENAI_API_KEY", "content"),
     XAI("xAI (Grok)", "grok-2-latest", "XAI_API_KEY", "content"),
     GEMINI("Google Gemini", "gemini-1.5-pro", "GEMINI_API_KEY", "text"),
-    /** Venice.ai provider for uncensored content generation that mainstream models refuse. */
     VENICE("Venice.ai", "venice-uncensored", "VENICE_API_KEY", "content");
 
     private final String label;
@@ -35,6 +34,11 @@ enum LlmProvider {
     String label() { return label; }
     String defaultModel() { return defaultModel; }
     String envVar() { return envVar; }
+    String modelEnvVar() { return name() + "_MODEL"; }
+    String configuredModel(java.util.function.Function<String, String> environment) {
+        String configured = environment.apply(modelEnvVar());
+        return configured == null || configured.isBlank() ? defaultModel : configured.strip();
+    }
     /** JSON field carrying the assistant's text in this provider's response. */
     String responseField() { return responseField; }
 
@@ -46,11 +50,11 @@ enum LlmProvider {
             case VENICE -> "https://api.venice.ai/api/v1/chat/completions";
             case GEMINI -> "https://generativelanguage.googleapis.com/v1beta/models/"
                     + URLEncoder.encode(model, StandardCharsets.UTF_8)
-                    + ":generateContent?key=" + URLEncoder.encode(apiKey, StandardCharsets.UTF_8);
+                    + ":generateContent";
         };
     }
 
-    /** Header name/value pairs for the request (Gemini authenticates via the URL, so no auth header). */
+    /** Credentials stay in headers, never in URLs. */
     String[][] headers(String apiKey) {
         return switch (this) {
             case ANTHROPIC -> new String[][]{
@@ -61,7 +65,7 @@ enum LlmProvider {
                     {"content-type", "application/json"},
                     {"authorization", "Bearer " + apiKey}};
             case GEMINI -> new String[][]{
-                    {"content-type", "application/json"}};
+                    {"content-type", "application/json"}, {"x-goog-api-key", apiKey}};
         };
     }
 
@@ -84,13 +88,51 @@ enum LlmProvider {
                         + ",\"system\":" + systemJson
                         + ",\"messages\":[{\"role\":\"user\",\"content\":\"" + usr + "\"}]}";
             }
-            case OPENAI, XAI, VENICE -> "{\"model\":\"" + mdl + "\",\"max_tokens\":" + maxTokens
+            case OPENAI, XAI, VENICE -> "{\"model\":\"" + mdl + "\",\""
+                    + (this == OPENAI ? "max_completion_tokens" : "max_tokens") + "\":" + maxTokens
                     + ",\"messages\":[{\"role\":\"system\",\"content\":\"" + sys + "\"},"
                     + "{\"role\":\"user\",\"content\":\"" + usr + "\"}]}";
             case GEMINI -> "{\"systemInstruction\":{\"parts\":[{\"text\":\"" + sys + "\"}]},"
                     + "\"contents\":[{\"parts\":[{\"text\":\"" + usr + "\"}]}],"
                     + "\"generationConfig\":{\"maxOutputTokens\":" + maxTokens + "}}";
         };
+    }
+
+    /** Read only the assistant answer, never an arbitrary matching field in metadata or thinking. */
+    String assistantText(String body) {
+        var root = Json.asObject(Json.parseStrict(body));
+        if (root == null || root.containsKey("error")) return null;
+        if (this == OPENAI || this == XAI || this == VENICE) {
+            var choices = Json.asArray(root.get("choices"));
+            if (choices == null || choices.isEmpty()) return null;
+            var choice = Json.asObject(choices.get(0));
+            if (choice == null || (choice.get("finish_reason") != null
+                    && !"stop".equals(choice.get("finish_reason")))) return null;
+            var message = Json.asObject(choice.get("message"));
+            return message != null && message.get("content") instanceof String s ? s : null;
+        }
+        java.util.List<Object> parts;
+        if (this == ANTHROPIC) {
+            if (root.get("stop_reason") != null && !"end_turn".equals(root.get("stop_reason"))) return null;
+            parts = Json.asArray(root.get("content"));
+        } else {
+            var candidates = Json.asArray(root.get("candidates"));
+            if (candidates == null || candidates.isEmpty()) return null;
+            var candidate = Json.asObject(candidates.get(0));
+            if (candidate == null || (candidate.get("finishReason") != null
+                    && !"STOP".equals(candidate.get("finishReason")))) return null;
+            var content = Json.asObject(candidate.get("content"));
+            parts = content == null ? null : Json.asArray(content.get("parts"));
+        }
+        if (parts == null) return null;
+        StringBuilder answer = new StringBuilder();
+        for (Object value : parts) {
+            var part = Json.asObject(value);
+            if (part == null || Boolean.TRUE.equals(part.get("thought"))) continue;
+            if (this == ANTHROPIC && !"text".equals(part.get("type"))) continue;
+            if (part.get("text") instanceof String s) answer.append(s);
+        }
+        return answer.isEmpty() ? null : answer.toString();
     }
 
     static String jsonEscape(String value) {
