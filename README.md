@@ -10,7 +10,7 @@
 ![Java](https://img.shields.io/badge/Java-21-c2410c)
 ![API](https://img.shields.io/badge/Burp-Montoya-db2777)
 
-[**Install**](#install) · [**Capabilities**](#capability-map) · [**AI agent team**](#multi-agent-ai-team) · [**AI feed**](#ai-feed--watch-the-models-work) · [**Control plane**](docs/RUN_GOVERNANCE.md) · [**CLI / CI mode**](#ci-native-scanning-no-burp-required) · [**How it works**](#what-it-does)
+[**Install**](#install) · [**Capabilities**](#capability-map) · [**AI agent team**](#five-agent-evidence-team) · [**AI feed**](#ai-feed--watch-the-models-work) · [**Control plane**](docs/RUN_GOVERNANCE.md) · [**CLI / CI mode**](#ci-native-scanning-no-burp-required) · [**How it works**](#what-it-does)
 
 </div>
 
@@ -271,40 +271,41 @@ HTTPS (no vendor SDK is bundled). Two principles hold across everything below:
 - **Nothing auto-fires.** Every AI action is on-demand, and nothing that puts packets on the target's
   wire happens without an explicit human decision.
 
-### Multi-agent AI team
+### Five-agent evidence team
 
-Recon Hound can run several providers together as a small "cyber team" over the finding inventory.
-Enable one or more providers in the **AI analysis** tab, then click **Run agent team (findings)** —
-the run streams live into the dedicated **Agent team** tab. Each provider takes a role:
+The **Agent team → Five-agent evidence jobs** workspace runs five dependency-ordered jobs over the
+same selected, redacted requests/responses and source files. Stage evidence in **AI analysis**, then
+click **Plan agent jobs…** to inspect recipients, procedures, local tools and call limits before running.
 
-| Role | Default provider | What it does |
+| Job / agent | Default provider | Deliverable |
 | --- | --- | --- |
-| **Recon / breadth** | Gemini | First-pass triage over the inventory; surfaces what's worth deeper work |
-| **Exploit reasoner** | OpenAI | Drafts a proof-of-concept *on paper*; never executes anything |
-| **Adversarial verifier** | xAI (Grok) | A *different* provider that attacks the drafter's assumptions |
-| **Uncensored specialist** | Venice.ai | Proposes payloads mainstream models over-refuse — always the hardest-gated |
-| **Leader / final call** | Anthropic (Claude) | Synthesises the team, ranks the real issues, and proposes next steps |
+| Surface analyst | Gemini | Captured attack surface, sources/sinks, trust boundaries and gaps |
+| Vulnerability / PoC analyst | OpenAI | Source-grounded vulnerability candidates and manual PoCs |
+| Payload / boundary specialist | Venice | Inert payload variations, parsing/encoding boundaries and prerequisites |
+| Skeptical reviewer | xAI / Grok | Every candidate challenged for missing evidence and benign explanations |
+| Lead reporter | Anthropic / Claude | Prioritized assessment retaining uncertainty and reviewer disagreement |
 
-- **Leader election.** The most powerful configured member leads (an explicit leader role wins;
-  otherwise the highest reasoning-effort/budget). The leader makes the final call.
-- **Fail-closed human-approval gate** (`ActionGate`). The team *reasons* — it never touches the
-  target on its own. Reading and drafting a PoC on paper proceed automatically; anything that would
-  put packets on the wire, recreate or execute a vulnerability, or change target state becomes a
-  **human-approval escalation**. Unrecognised actions fail closed to "needs a human".
-- **The Agent team tab** shows the run as it happens: a per-round table (recon → drafter → verifier →
-  leader, each with provider, model, status, and estimated tokens), the leader's decision and
-  synthesis, the **human-approval queue** of proposed steps the team may *not* run itself, and an
-  estimated-usage meter.
-- **Reasoning effort.** A provider-neutral `low → max` scale maps onto each vendor's own reasoning
-  knob (Anthropic effort levels, OpenAI/xAI `reasoning_effort`, Gemini thinking budget).
-- **No target traffic.** The run makes LLM calls only; the leader's synthesis and every escalation
-  come back to the tab for you to act on.
+Providers are configurable; the reviewer uses a different provider from the two drafting roles.
+Versioned review skills cover XSS, CSRF, SSRF, secrets, access control, injection and logic flaws.
+Actual local tools index/read/search/compare selected text, decode selected excerpts and check exact
+evidence quotes. These tools have no target transport, shell or arbitrary filesystem access.
+
+Each agent has an enforced output-token limit and 0–2 local-tool requests. Default completed runs
+use 5–10 provider calls; the hard maximum is 15. Failed jobs skip their dependents, cancellation stops
+later calls, and changes to evidence or provider credentials invalidate the plan. Findings stay
+**CANDIDATE**; the report preserves source IDs/hashes, manual PoCs, assumptions and both review verdicts.
+See [five-agent setup, tools, budgets and failure behavior](docs/FIVE_AGENT_JOBS.md).
+
+The earlier **Run agent team (findings)** action is available under **Prompt tools (raw input)** and
+streams into **Agent team → Finding inventory (raw input)**. Its leader synthesis/escalation view
+continues to operate on the in-scope finding inventory.
 
 ### AI feed — watch the models work
 
 A single **AI feed** tab is the one place that shows *everything the AI is doing*, as a newest-first
 stream. Every LLM touchpoint records an event: false-positive **triage** (per provider), **JS review**
-(per file), cross-finding **chain analysis**, **Nuclei-template** authoring, each **agent round**, and
+(per file), cross-finding **chain analysis**, **Nuclei-template** authoring, each **agent round**,
+each bounded **agent job call**, and
 — made first-class — the leader's **gate decision** and every **human-approval escalation** it raises.
 
 - Each event carries its kind, provider, model, outcome (`ok` / `error` / `held for human`), estimated

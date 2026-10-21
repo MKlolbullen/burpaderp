@@ -39,6 +39,8 @@ final class AiAnalysisPanel extends JPanel {
     private int editing = -1, nextId = 1;
     private long generation;
     private boolean loading, importing;
+    private Runnable evidenceChanged = () -> {};
+    private final JButton team = new JButton("Plan agent jobs…");
 
     AiAnalysisPanel(Supplier<List<LlmClient.LlmCredential>> credentials, Runner runner) {
         super(new BorderLayout(4, 4)); this.credentials = credentials; this.runner = runner;
@@ -48,6 +50,7 @@ final class AiAnalysisPanel extends JPanel {
         top.add(tools, BorderLayout.NORTH);
         JPanel question = new JPanel(new BorderLayout(4, 4));
         question.add(new JLabel("Review focus (optional):"), BorderLayout.WEST); question.add(focus);
+        question.add(team, BorderLayout.EAST); team.setEnabled(false);
         top.add(question, BorderLayout.SOUTH); add(top, BorderLayout.NORTH);
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.setVisibleRowCount(4);
@@ -66,9 +69,10 @@ final class AiAnalysisPanel extends JPanel {
         add(bottom, BorderLayout.SOUTH);
         send.setEnabled(false); cancel.setEnabled(false);
         DocumentListener changes = new DocumentListener() {
-            public void insertUpdate(DocumentEvent e) { invalidatePreview(); }
-            public void removeUpdate(DocumentEvent e) { invalidatePreview(); }
-            public void changedUpdate(DocumentEvent e) { invalidatePreview(); }
+            private void changed() { invalidatePreview(); if (!loading) evidenceChanged.run(); }
+            public void insertUpdate(DocumentEvent e) { changed(); }
+            public void removeUpdate(DocumentEvent e) { changed(); }
+            public void changedUpdate(DocumentEvent e) { changed(); }
         };
         editor.getDocument().addDocumentListener(changes); focus.getDocument().addDocumentListener(changes);
         list.addListSelectionListener(e -> {
@@ -86,7 +90,7 @@ final class AiAnalysisPanel extends JPanel {
         remove.addActionListener(e -> {
             int index = list.getSelectedIndex(); if (index < 0) return;
             loading = true; editing = -1; sources.remove(index); list.clearSelection(); loading = false;
-            load(-1); invalidatePreview();
+            load(-1); invalidatePreview(); evidenceChanged.run();
         });
         prepare.addActionListener(e -> preparePreview());
         send.addActionListener(e -> startReview());
@@ -98,7 +102,7 @@ final class AiAnalysisPanel extends JPanel {
         AiAnalysis.Source source = new AiAnalysis.Source("s" + nextId, kind, name, text);
         List<AiAnalysis.Source> proposed = sourceList(); proposed.add(source); AiAnalysis.validateSources(proposed);
         nextId++; sources.addElement(source); list.setSelectedIndex(sources.size() - 1);
-        invalidatePreview(); status.setText(sources.size() + " staged source(s); nothing sent. Preview before analysis.");
+        invalidatePreview(); evidenceChanged.run(); status.setText(sources.size() + " staged source(s); nothing sent. Preview before analysis.");
     }
 
     private List<AiAnalysis.Source> sourceList() {
@@ -123,7 +127,11 @@ final class AiAnalysisPanel extends JPanel {
         prepared = null; recipients = List.of(); send.setEnabled(false);
         preview.setText("Preview out of date. Click Preview analysis after finishing your edits.");
     }
-    void credentialsChanged() { cancelReview(); invalidatePreview(); }
+    void credentialsChanged() { cancelReview(); invalidatePreview(); evidenceChanged.run(); }
+    void setTeamPlanner(Runnable open, Runnable changed) {
+        team.addActionListener(e -> open.run()); team.setEnabled(true); evidenceChanged = changed;
+    }
+    AiAnalysis.Snapshot snapshotForTeam() { saveEditor(); return AiAnalysis.prepare(sourceList(), focus.getText()); }
 
     void preparePreview() {
         try {
@@ -172,6 +180,7 @@ final class AiAnalysisPanel extends JPanel {
         send.setEnabled(false); cancel.setEnabled(busy); prepare.setEnabled(!busy && !importing);
         add.setEnabled(!busy && !importing); file.setEnabled(!busy && !importing); remove.setEnabled(!busy && !importing);
         editor.setEditable(!busy && !importing); focus.setEditable(!busy && !importing); list.setEnabled(!busy && !importing);
+        team.setEnabled(!busy && !importing && team.getActionListeners().length > 0);
     }
     private void message(String text) { status.setText(text); }
     void showMessage(String text) { message(text); }

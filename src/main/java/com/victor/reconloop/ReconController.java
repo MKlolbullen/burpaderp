@@ -1917,6 +1917,20 @@ final class ReconController implements HttpHandler {
         }
     }
 
+    /** Five dependency-ordered evidence jobs with bounded local tools; no target transport or issue publisher. */
+    Future<?> runEvidenceAgentJobs(EvidenceAgentJobs.Plan plan, Consumer<EvidenceAgentRunner.Event> onEvent,
+                                   Consumer<EvidenceAgentRunner.Outcome> onDone) {
+        return llmWorker.submit(() -> {
+            EvidenceAgentRunner runner = new EvidenceAgentRunner((credential, system, prompt, maxTokens) ->
+                    llmClient.complete(credential.provider(), credential.model(), credential.apiKey(), system, prompt, maxTokens));
+            var outcome = runner.run(plan, event -> SwingUtilities.invokeLater(() -> onEvent.accept(event)),
+                    () -> Thread.currentThread().isInterrupted(), usage -> emitAiFeed(AiFeed.Kind.AGENT_JOB,
+                            usage.provider(), usage.model(), usage.outcome(), usage.input(), usage.output(),
+                            usage.jobId() + " / call " + usage.call(), "Bounded evidence job; conclusions remain unverified."));
+            SwingUtilities.invokeLater(() -> onDone.accept(outcome));
+        });
+    }
+
     /** One explicit, cancellable call per selected provider; no target transport or issue publisher. */
     Future<?> reviewEvidence(List<LlmClient.LlmCredential> credentials, AiAnalysis.Snapshot snapshot,
                              Consumer<AiAnalysis.ProviderReport> onReport, Runnable onDone) {

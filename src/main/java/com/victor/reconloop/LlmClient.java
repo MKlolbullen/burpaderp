@@ -269,6 +269,11 @@ final class LlmClient {
     }
 
     String complete(LlmProvider provider, String model, String apiKey, String system, String prompt) {
+        return complete(provider, model, apiKey, system, prompt, MAX_OUTPUT_TOKENS);
+    }
+
+    String complete(LlmProvider provider, String model, String apiKey, String system, String prompt, int maxOutputTokens) {
+        if (maxOutputTokens < 256 || maxOutputTokens > 8192) return "[error] Output limit must be 256–8192 tokens.";
         if (provider == null) return "[error] No provider selected.";
         if (apiKey == null || apiKey.isBlank()) {
             return "[error] No API key. Set it in the field or export $" + provider.envVar() + ".";
@@ -282,7 +287,7 @@ final class LlmClient {
                     .uri(URI.create(provider.endpoint(usedModel, apiKey)))
                     .timeout(Duration.ofSeconds(120))
                     .POST(HttpRequest.BodyPublishers.ofString(
-                            provider.requestBody(usedModel, system, input, MAX_OUTPUT_TOKENS)));
+                            provider.requestBody(usedModel, system, input, maxOutputTokens)));
             for (String[] header : provider.headers(apiKey)) {
                 builder.header(header[0], header[1]);
             }

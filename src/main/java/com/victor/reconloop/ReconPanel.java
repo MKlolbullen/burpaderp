@@ -27,6 +27,8 @@ final class ReconPanel extends JPanel {
 
     // Agent-team activity tab
     private Component agentTeamTab;
+    private EvidenceAgentPanel evidenceAgents;
+    private JTabbedPane agentTeamModes;
     private ReconModel.AgentActivityTableModel agentActivityModel;
     private JLabel agentDecision;
     private JTextArea agentSynthesis;
@@ -311,12 +313,12 @@ final class ReconPanel extends JPanel {
         tabs.addTab("XSS vector library", new JScrollPane(vectorTable));
         aiTab = buildAiPanel(controller);
         tabs.addTab("AI analysis", aiTab);
-        agentTeamTab = buildAgentTeamPanel();
+        agentTeamTab = buildAgentTeamPanel(controller);
         tabs.addTab("Agent team", agentTeamTab);
         tabs.addTab("AI feed", buildAiFeedPanel(controller));
         tabs.addTab("Nuclei templates (AI)", buildNucleiPanel(controller));
         tabs.addChangeListener(e -> {
-            boolean show = tabs.getSelectedComponent() != aiTab;
+            boolean show = tabs.getSelectedComponent() != aiTab && tabs.getSelectedComponent() != agentTeamTab;
             scanControls.setSelected(show); controls.setVisible(show);
             scanControls.setText(show ? "Hide scan controls" : "Show scan controls");
             revalidate();
@@ -618,7 +620,7 @@ final class ReconPanel extends JPanel {
             agentSynthesis.setText("");
             agentEscalations.setText("");
             agentUsage.setText(" ");
-            if (agentTeamTab != null) tabs.setSelectedComponent(agentTeamTab);
+            if (agentTeamTab != null) { tabs.setSelectedComponent(agentTeamTab); agentTeamModes.setSelectedIndex(1); }
             runTeam.setEnabled(false);
             analyze.setEnabled(false);
             controller.runAgentTeam(specs, 60,
@@ -666,7 +668,7 @@ final class ReconPanel extends JPanel {
      * and an estimated-usage meter. Populated by {@link ReconController#runAgentTeam} via the
      * "Run agent team (findings)" button in the AI tab; it makes LLM calls only and sends no target traffic.
      */
-    private JComponent buildAgentTeamPanel() {
+    private JComponent buildAgentTeamPanel(ReconController controller) {
         JPanel panel = new JPanel(new BorderLayout(6, 6));
 
         agentDecision = new JLabel("No agent-team run yet. Enable providers in the AI tab and click \"Run agent team (findings)\".");
@@ -699,7 +701,14 @@ final class ReconPanel extends JPanel {
 
         panel.add(top, BorderLayout.NORTH);
         panel.add(split, BorderLayout.CENTER);
-        return panel;
+        evidenceAgents = new EvidenceAgentPanel(aiReview::snapshotForTeam, this::enabledCredentials, controller::runEvidenceAgentJobs);
+        agentTeamModes = new JTabbedPane();
+        agentTeamModes.addTab("Five-agent evidence jobs", evidenceAgents);
+        agentTeamModes.addTab("Finding inventory (raw input)", panel);
+        aiReview.setTeamPlanner(() -> {
+            tabs.setSelectedComponent(agentTeamTab); agentTeamModes.setSelectedIndex(0); evidenceAgents.preparePlan();
+        }, evidenceAgents::contextChanged);
+        return agentTeamModes;
     }
 
     /**
