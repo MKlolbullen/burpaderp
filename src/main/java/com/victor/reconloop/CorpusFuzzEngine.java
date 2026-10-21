@@ -58,6 +58,7 @@ final class CorpusFuzzEngine {
     private final PayloadLibrary library;
     private final long throttleMillis;
     private final Set<String> rceParamHints;
+    private final ThreadLocal<EvidenceCapture> evidenceCapture = new ThreadLocal<>();
     private volatile CollaboratorClient collaborator;
 
     CorpusFuzzEngine(MontoyaApi api, PayloadLibrary library, long throttleMillis) {
@@ -82,13 +83,15 @@ final class CorpusFuzzEngine {
                 if (categoryBudget.exhausted() || run.requestBudget().exhausted() || !run.isRunning()) break;
                 if (isDestructive(rawPayload)) continue;
 
+                EvidenceCapture prototype = new EvidenceCapture(run, base, "CORPUS", "corpus-fuzz:" + category);
                 String callbackHost = null;
                 boolean oastPayload = findCallbackHost(rawPayload).isPresent();
                 if (oastPayload) {
                     CollaboratorClient client = collaborator;
                     if (client == null) continue;
                     CollaboratorPayload oobPayload = client.generatePayload(
-                            ActiveTestEngine.encodeCorrelation("CorpusFuzz-" + category, parameter.name(), base.url()));
+                            prototype.correlation());
+                    prototype.issued(oobPayload, "CorpusFuzz-" + category, parameter.name());
                     callbackHost = oobPayload.toString();
                 }
 
@@ -96,52 +99,56 @@ final class CorpusFuzzEngine {
                 for (PayloadEncoder.Encoding encoding : encodings.stream().sorted().toList()) {
                     if (categoryBudget.exhausted() || run.requestBudget().exhausted() || !run.isRunning()) break;
                     String encoded = encodedPayload(rawPayload, callbackHost, encoding);
+                    EvidenceCapture capture = prototype.variant(base);
+                    evidenceCapture.set(capture); int firstFinding = out.size();
+                    try {
 
-                    if (timeBased) {
-                        // A timing comparison needs baseline + mutation from both the local category
-                        // quota and the global run quota. Never spend the final token on half a pair.
-                        if (categoryBudget.remaining() < 2 || run.requestBudget().remaining() < 2) break;
-                        EnumSet<RequestPolicy.Permission> timingPermissions =
-                                EnumSet.of(RequestPolicy.Permission.TIME_DELAY);
-                        if (oastPayload) timingPermissions.add(RequestPolicy.Permission.OAST);
-                        long baselineMillis = timeRequest(base, parameter, parameter.value(),
-                                categoryBudget, run, gateway, category, timingPermissions);
-                        if (baselineMillis < 0) break;
-                        long payloadMillis = timeRequest(base, parameter, encoded,
-                                categoryBudget, run, gateway, category, timingPermissions);
-                        if (baselineMillis >= 0 && payloadMillis >= 0
-                                && ActiveTestEngine.looksTimeBased(baselineMillis, payloadMillis, TIME_BASED_DELAY_SECONDS)) {
+                        if (timeBased) {
+                            // A timing comparison needs baseline + mutation from both the local category
+                            // quota and the global run quota. Never spend the final token on half a pair.
+                            if (categoryBudget.remaining() < 2 || run.requestBudget().remaining() < 2) break;
+                            EnumSet<RequestPolicy.Permission> timingPermissions =
+                                    EnumSet.of(RequestPolicy.Permission.TIME_DELAY);
+                            if (oastPayload) timingPermissions.add(RequestPolicy.Permission.OAST);
+                            long baselineMillis = timeRequest(base, parameter, parameter.value(),
+                                    categoryBudget, run, gateway, category, timingPermissions);
+                            if (baselineMillis < 0) break;
+                            long payloadMillis = timeRequest(base, parameter, encoded,
+                                    categoryBudget, run, gateway, category, timingPermissions);
+                            if (baselineMillis >= 0 && payloadMillis >= 0
+                                    && ActiveTestEngine.looksTimeBased(baselineMillis, payloadMillis, TIME_BASED_DELAY_SECONDS)) {
+                                out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-" + category, parameter.name(),
+                                        "[" + encoding + "] time-based signal from corpus payload: " + truncate(rawPayload),
+                                        VerificationState.CANDIDATE, base.url()));
+                            }
+                            continue;
+                        }
+
+                        Set<RequestPolicy.Permission> payloadPermissions = oastPayload
+                                ? Set.of(RequestPolicy.Permission.OAST) : Set.of();
+                        HttpResponse response = sendMutated(base, parameter, encoded, categoryBudget, run, gateway,
+                                category, payloadPermissions);
+                        if (response == null) continue;
+                        String body = response.bodyToString();
+
+                        if (("sqli".equals(category) || "sqli2".equals(category)) && ActiveTestEngine.containsSqlError(body)) {
                             out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-" + category, parameter.name(),
-                                    "[" + encoding + "] time-based signal from corpus payload: " + truncate(rawPayload),
+                                    "[" + encoding + "] database error signature from corpus payload: " + truncate(rawPayload),
+                                    VerificationState.REPRODUCED, base.url()));
+                        } else if ("lfi".equals(category) && containsPasswdMarker(body)) {
+                            out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-lfi", parameter.name(),
+                                    "[" + encoding + "] /etc/passwd contents returned for corpus payload: " + truncate(rawPayload),
+                                    VerificationState.REPRODUCED, base.url()));
+                        } else if ("rce_payloads".equals(category) && containsIdOutput(body)) {
+                            out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-rce", parameter.name(),
+                                    "[" + encoding + "] command output (uid=.../gid=...) returned for corpus payload: " + truncate(rawPayload),
+                                    VerificationState.CONFIRMED, base.url()));
+                        } else if (body != null && !rawPayload.isBlank() && body.contains(rawPayload)) {
+                            out.add(new ActiveTestEngine.ActiveFinding("MEDIUM", "CorpusFuzz-" + category, parameter.name(),
+                                    "[" + encoding + "] payload reflected unencoded in response: " + truncate(rawPayload),
                                     VerificationState.CANDIDATE, base.url()));
                         }
-                        continue;
-                    }
-
-                    Set<RequestPolicy.Permission> payloadPermissions = oastPayload
-                            ? Set.of(RequestPolicy.Permission.OAST) : Set.of();
-                    HttpResponse response = sendMutated(base, parameter, encoded, categoryBudget, run, gateway,
-                            category, payloadPermissions);
-                    if (response == null) continue;
-                    String body = response.bodyToString();
-
-                    if (("sqli".equals(category) || "sqli2".equals(category)) && ActiveTestEngine.containsSqlError(body)) {
-                        out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-" + category, parameter.name(),
-                                "[" + encoding + "] database error signature from corpus payload: " + truncate(rawPayload),
-                                VerificationState.REPRODUCED, base.url()));
-                    } else if ("lfi".equals(category) && containsPasswdMarker(body)) {
-                        out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-lfi", parameter.name(),
-                                "[" + encoding + "] /etc/passwd contents returned for corpus payload: " + truncate(rawPayload),
-                                VerificationState.REPRODUCED, base.url()));
-                    } else if ("rce_payloads".equals(category) && containsIdOutput(body)) {
-                        out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-rce", parameter.name(),
-                                "[" + encoding + "] command output (uid=.../gid=...) returned for corpus payload: " + truncate(rawPayload),
-                                VerificationState.CONFIRMED, base.url()));
-                    } else if (body != null && !rawPayload.isBlank() && body.contains(rawPayload)) {
-                        out.add(new ActiveTestEngine.ActiveFinding("MEDIUM", "CorpusFuzz-" + category, parameter.name(),
-                                "[" + encoding + "] payload reflected unencoded in response: " + truncate(rawPayload),
-                                VerificationState.CANDIDATE, base.url()));
-                    }
+                    } finally { capture.attach(out, firstFinding); evidenceCapture.remove(); }
                 }
             }
         }
@@ -219,6 +226,8 @@ final class CorpusFuzzEngine {
                     RequestPlan.create(request,
                             "corpus-fuzz:" + category, required),
                     request);
+            if (evidenceCapture.get() != null) evidenceCapture.get().record(result, extraPermissions != null && extraPermissions.contains(RequestPolicy.Permission.OAST)
+                    && !java.util.Objects.equals(value, parameter.value()));
             if (result.error() != null) {
                 api.logging().logToError("Corpus fuzz probe failed for " + parameter.name(), result.error());
                 return null;

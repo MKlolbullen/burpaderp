@@ -24,6 +24,27 @@ java {
     targetCompatibility = JavaVersion.VERSION_21
 }
 
+// A separate, manually loaded Burp harness. It reuses production classes but never enters the
+// normal extension JAR; loading it does not load the scanner or send a request automatically.
+sourceSets {
+    runtimeVerification {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+configurations.runtimeVerificationCompileOnly.extendsFrom(configurations.compileOnly)
+dependencies { testImplementation sourceSets.runtimeVerification.output }
+tasks.named('test') { dependsOn tasks.named('runtimeVerificationClasses') }
+
+tasks.register('runtimeVerificationJar', Jar) {
+    dependsOn tasks.named('runtimeVerificationClasses')
+    from(sourceSets.main.output) { exclude 'com/victor/reconloop/ReconLoopExtension.class' }
+    from sourceSets.runtimeVerification.output
+    archiveFileName = 'recon-hound-runtime-verification.jar'
+    destinationDirectory = layout.buildDirectory.dir('runtime-verification')
+}
+tasks.named('build') { dependsOn tasks.named('runtimeVerificationJar') }
+
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     // Compile with any installed JDK >= 21 while still producing Java 21 bytecode.

@@ -1,9 +1,13 @@
 # Burp destination-binding runtime verification
 
-Status on 2026-10-19: **NOT RUN**. This workspace has a Montoya API JAR and in-memory fixtures, not a
+Status on 2026-10-21: **NOT RUN**. This workspace has a Montoya API JAR and in-memory fixtures, not a
 running Burp Suite instance. CI proves API arguments/bytes, cancellation and quotas; it cannot prove
 which TCP peer Burp reaches. Do not close issue #44 or claim wire-level destination enforcement from
 those tests.
+
+The separate [runtime verification kit](BURP_RUNTIME_KIT.md) now builds a manual Burp harness,
+receiving-only HTTP/TLS fixture and offline byte comparison. It makes the first bounded experiments
+executable without changing production enforcement. Its self-tests do not change any status below.
 
 ## Contracts under test
 
@@ -51,6 +55,6 @@ remove that configuration's active execution capability before claiming the conn
 complete. A one-time settings inspection is not atomic with sending and cannot establish this
 invariant. This matrix alone is validation planning, not an implementation of peer enforcement.
 
-Versioned structured evidence persistence and durable run/audit records remain separate work. Disabled
-external HTTP producers from the preceding slice must stay disabled until equivalent enforcement
+Bounded [versioned finding evidence](ACTIVE_EVIDENCE.md) is implemented separately; durable full-run
+audit/approval records remain separate work. Disabled external HTTP producers must stay disabled until equivalent enforcement
 exists; an opt-in or proxy flag does not satisfy this test.

@@ -3,3 +3,6 @@ build/
 /dist/*.jar
 *.iml
 .idea/
+
+# Python runtime-verification tools
+__pycache__/

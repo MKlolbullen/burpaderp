@@ -37,8 +37,9 @@ public class OutboundGatewayInvariantTest {
         JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
         assertNotNull("Run architecture checks on a JDK", compiler);
         try (StandardJavaFileManager manager = compiler.getStandardFileManager(null, null, null);
-             Stream<Path> paths = Files.walk(Path.of("src/main/java"))) {
-            List<File> files = paths.filter(p -> p.toString().endsWith(".java"))
+             Stream<Path> main = Files.walk(Path.of("src/main/java"));
+             Stream<Path> harness = Files.walk(Path.of("src/runtimeVerification/java"))) {
+            List<File> files = Stream.concat(main, harness).filter(p -> p.toString().endsWith(".java"))
                     .map(Path::toFile).toList();
             assertEquals(List.of(), violations(manager.getJavaFileObjectsFromFiles(files)));
         }
@@ -167,7 +168,7 @@ public class OutboundGatewayInvariantTest {
                     } else if (type.equals(PACKAGE + "RequestPolicy") && name.equals("assessTemplate")) {
                         forbidden = !caller.equals(PACKAGE + "RequestPreview");
                     } else if (type.equals(PACKAGE + "MontoyaTargetTransport")) {
-                        forbidden = !caller.equals(type) && !(name.equals("<init>") && caller.equals(PACKAGE + "ReconController"));
+                        forbidden = !caller.equals(type) && !(name.equals("<init>") && Set.of(PACKAGE + "ReconController", PACKAGE + "RuntimeVerificationCases").contains(caller));
                     } else if (type.equals("burp.api.montoya.http.HttpService") && name.equals("ipAddress")) {
                         forbidden = true; // Dynamic name resolution is not a connection attestation.
                     } else if (type.equals("java.net.InetAddress") && Set.of("getByName", "getAllByName").contains(name)) {

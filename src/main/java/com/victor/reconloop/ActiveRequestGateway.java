@@ -27,7 +27,11 @@ final class ActiveRequestGateway {
     }
     @FunctionalInterface interface Dispatch { HttpRequestResponse send() throws Exception; }
 
-    record Result(RequestPolicy.Decision decision, HttpRequestResponse response, Exception error, boolean dispatched) {
+    record Result(RequestPolicy.Decision decision, HttpRequestResponse response, Exception error, boolean dispatched,
+                  FindingEvidence.Exchange exchange) {
+        Result(RequestPolicy.Decision decision, HttpRequestResponse response, Exception error, boolean dispatched) {
+            this(decision, response, error, dispatched, null);
+        }
         static Result denied(RequestPolicy.Decision decision) {
             return new Result(decision, null, null, false);
         }
@@ -42,6 +46,17 @@ final class ActiveRequestGateway {
     }
 
     Result send(ScanRun run, RequestPlan plan, HttpRequest request) {
+        long start = System.nanoTime();
+        Result result = dispatch(run, plan, request);
+        if (run == null || plan == null || plan.policyRequest() == null || request == null) return result;
+        // Evidence collection must not change a completed dispatch or policy decision.
+        try {
+            return new Result(result.decision(), result.response(), result.error(), result.dispatched(),
+                    EvidenceCapture.exchange(run, plan, request, result, System.nanoTime() - start));
+        } catch (RuntimeException unavailable) { return result; }
+    }
+
+    private Result dispatch(ScanRun run, RequestPlan plan, HttpRequest request) {
         if (plan == null || !plan.matches(request)) return invalidPlan();
         if (Thread.currentThread().isInterrupted()) return Result.denied(RequestPolicy.Decision.deny(
                 RequestPolicy.DecisionCode.CANCELLED, "worker interrupted before destination preparation"));

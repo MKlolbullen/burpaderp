@@ -356,13 +356,14 @@ Whatever you run here also shows up in the [AI feed](#ai-feed--watch-the-models-
 
 ![Reporting — where findings surface](docs/img/reporting.svg)
 
-Active results follow an explicit evidence lifecycle: **signal → candidate → reproduced → confirmed →
+Native probe results follow an explicit evidence lifecycle: **signal → candidate → reproduced → confirmed →
 exploitable** (or rejected). Signals and candidates stay visible in the Active tests table for analyst
 follow-up but are not promoted to native Burp issues. Reproduced-or-stronger findings are reportable;
 confirmed/exploitable evidence receives stronger issue confidence. Reflected metacharacters and one
 timing anomaly are candidates, absence of a rate-limit signal is only a signal, while evaluated SSTI,
-CRLF response-header injection, file-read canaries, and correlated Collaborator callbacks are
-confirmed evidence.
+CRLF response-header injection and file-read canaries are confirmed detector evidence. A correlated
+Collaborator callback confirms the interaction; browser execution and exploit impact need separate proof.
+Native helper reports retain their explicit interpretation, including tentative takeover candidates.
 
 Findings surface in several places:
 
@@ -389,6 +390,16 @@ The **Findings** tab can **export** to **SARIF 2.1.0** (code-scanning / CI inges
 asset inventory, and the Findings/Hosts rows — is **persisted to the Burp project**
 (`api.persistence()`), so reopening the project restores results and avoids re-filing. (The AI feed is
 deliberately *not* persisted — see above.)
+
+The **Active tests** table now persists bounded [versioned finding evidence](docs/ACTIVE_EVIDENCE.md):
+typed verification state, detector/run provenance, original and actual gateway request/response
+observations, and correlated OOB data. **View evidence…** displays read-only JSON/Base64 and explicit
+truncation flags. Restore never sends or replays. Raw bytes may include credentials; protect the Burp
+project as sensitive evidence. This is finding storage, not a complete run/approval audit log.
+
+The separate [Burp runtime verification kit](docs/BURP_RUNTIME_KIT.md) builds a manual harness JAR and
+provides a receiving HTTP/TLS fixture with offline byte comparison. It supports testing actual Burp
+routing; CI self-tests do not attest the physical peer or complete the v1.0 release gate.
 
 ## CI-native scanning (no Burp required)
 

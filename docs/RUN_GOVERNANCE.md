@@ -253,8 +253,9 @@ beyond v1.0; re-enabling them without equivalent enforcement cannot.
 
 ### Remaining release gates
 
-Issue #44 still requires verification/control of the actual Burp connection path beyond the checked
-numeric API destination, and versioned structured evidence persistence. Native plans here are in-memory dispatch bindings, not persisted
-approval artifacts or run audit trails. TCP/DNS/provider process traffic is explicitly outside the
+Bounded [versioned finding evidence](ACTIVE_EVIDENCE.md) now persists typed native/corpus/helper and
+OOB observations. Issue #44 still requires verification/control of the actual Burp connection path
+beyond the checked numeric API destination. Native plans remain in-memory dispatch bindings, not
+persisted approval artifacts or complete run audit trails. TCP/DNS/provider process traffic is explicitly outside the
 native HTTP dispatch ledger. Full-product wire-level isolation is not established by these gates.
 Do not interpret passing native/external-boundary tests as closing #44 or approving v1.0.
