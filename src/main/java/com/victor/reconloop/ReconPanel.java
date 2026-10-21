@@ -22,10 +22,8 @@ final class ReconPanel extends JPanel {
     private JTabbedPane tabs;
     private Component aiTab;
     private List<CredentialRow> credentialRows;
-    private JTextArea aiSystem;
-    private JTextArea aiInput;
-    private JTextArea aiOutput;
-    private JButton aiAnalyze;
+    private AiAnalysisPanel aiReview;
+    private JTabbedPane aiModes;
 
     // Agent-team activity tab
     private Component agentTeamTab;
@@ -262,8 +260,17 @@ final class ReconPanel extends JPanel {
         controls.add(activePanel);
 
         JLabel status = new JLabel(controller.status());
-        controls.add(status);
-        add(controls, BorderLayout.NORTH);
+        JToggleButton scanControls = new JToggleButton("Hide scan controls", true);
+        JPanel scanHeader = new JPanel(new BorderLayout(4, 4));
+        JPanel scanStatus = new JPanel(new BorderLayout(8, 0));
+        scanStatus.add(scanControls, BorderLayout.WEST); scanStatus.add(status);
+        scanHeader.add(scanStatus, BorderLayout.NORTH); scanHeader.add(controls);
+        scanControls.addActionListener(e -> {
+            controls.setVisible(scanControls.isSelected());
+            scanControls.setText(scanControls.isSelected() ? "Hide scan controls" : "Show scan controls");
+            revalidate();
+        });
+        add(scanHeader, BorderLayout.NORTH);
 
         JTable findings = new JTable(findingModel);
         findings.setAutoCreateRowSorter(true);
@@ -308,6 +315,12 @@ final class ReconPanel extends JPanel {
         tabs.addTab("Agent team", agentTeamTab);
         tabs.addTab("AI feed", buildAiFeedPanel(controller));
         tabs.addTab("Nuclei templates (AI)", buildNucleiPanel(controller));
+        tabs.addChangeListener(e -> {
+            boolean show = tabs.getSelectedComponent() != aiTab;
+            scanControls.setSelected(show); controls.setVisible(show);
+            scanControls.setText(show ? "Hide scan controls" : "Show scan controls");
+            revalidate();
+        });
         add(tabs, BorderLayout.CENTER);
 
         // Every LLM touchpoint streams into the AI feed; the controller delivers events on the EDT.
@@ -412,15 +425,16 @@ final class ReconPanel extends JPanel {
         api.userInterface().applyThemeToComponent(this);
     }
 
-    /** Loads content into the AI tab, optionally sets a system-prompt preset, selects the tab, and runs. */
-    void sendToAi(String text, String systemPreset) {
-        if (aiInput == null) return;
+    /** Stage content locally; context-menu actions never trigger a provider call. */
+    void stageAiSources(List<AiAnalysis.Source> sources, String reviewFocus) {
+        if (aiReview == null) return;
         SwingUtilities.invokeLater(() -> {
-            if (systemPreset != null && !systemPreset.isBlank()) aiSystem.setText(systemPreset);
-            aiInput.setText(text == null ? "" : text);
-            aiInput.setCaretPosition(0);
             if (aiTab != null) tabs.setSelectedComponent(aiTab);
-            aiAnalyze.doClick();
+            aiModes.setSelectedComponent(aiReview);
+            try {
+                for (var source : sources) aiReview.stage(source.kind(), source.name(), source.text());
+                aiReview.focus.setText(reviewFocus == null ? "" : reviewFocus);
+            } catch (IllegalArgumentException ex) { aiReview.showMessage(ex.getMessage()); }
         });
     }
 
@@ -464,7 +478,7 @@ final class ReconPanel extends JPanel {
         JPanel panel = new JPanel(new BorderLayout(6, 6));
 
         JButton analyze = new JButton("Analyze");
-        JButton clearKeys = new JButton("Clear all keys");
+        JButton clearKeys = new JButton("Clear entered keys");
         JSpinner jsBudget = new JSpinner(new SpinnerNumberModel(15, 1, 500, 5));
         JButton analyzeJs = new JButton("Analyze in-scope JS → Burp issues");
         analyzeJs.setToolTipText("Sends in-scope JavaScript from the site map to the enabled LLM provider(s), "
@@ -478,7 +492,6 @@ final class ReconPanel extends JPanel {
                 + "prioritises, a drafter reasons a PoC on paper, a different-provider verifier attacks it, and the "
                 + "most powerful provider leads and synthesises. Anything that would touch the target is held as a "
                 + "human-approval escalation. Makes LLM calls only — no target traffic is sent.");
-        this.aiAnalyze = analyze;
 
         List<CredentialRow> rows = new ArrayList<>();
         JPanel providersPanel = new JPanel(new GridLayout(0, 1, 2, 2));
@@ -486,24 +499,38 @@ final class ReconPanel extends JPanel {
                 "LLM providers — enable one or more; multiple run together (JS bug-hunt throughput, triage ensemble voting)"));
         for (LlmProvider p : LlmProvider.values()) {
             JCheckBox enabled = new JCheckBox(p.label());
-            JTextField model = new JTextField(p.defaultModel(), 16);
+            JTextField model = new JTextField(p.configuredModel(System::getenv), 16);
+            model.setToolTipText("Initial value from $" + p.modelEnvVar() + " or the built-in default; enter a model available to your account.");
             JPasswordField key = new JPasswordField(18);
             key.setToolTipText("Leave blank to use $" + p.envVar() + "; kept in memory only, never saved.");
             JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT));
             row.add(enabled);
             row.add(new JLabel("Model:")); row.add(model);
-            row.add(new JLabel("Key:")); row.add(key);
+            row.add(new JLabel("Key ($" + p.envVar() + "):")); row.add(key);
             providersPanel.add(row);
             rows.add(new CredentialRow(p, enabled, model, key));
         }
         this.credentialRows = rows;
+        this.aiReview = new AiAnalysisPanel(this::enabledCredentials, controller::reviewEvidence);
+        javax.swing.event.DocumentListener credentialChanges = new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { aiReview.credentialsChanged(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { aiReview.credentialsChanged(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { aiReview.credentialsChanged(); }
+        };
+        for (var row : rows) {
+            row.enabled().addActionListener(e -> aiReview.credentialsChanged());
+            row.model().getDocument().addDocumentListener(credentialChanges);
+            row.key().getDocument().addDocumentListener(credentialChanges);
+        }
 
         JPanel top = new JPanel(new BorderLayout(4, 4));
         top.add(providersPanel, BorderLayout.CENTER);
         JPanel topButtons = new JPanel(new FlowLayout(FlowLayout.LEFT));
         topButtons.add(analyze);
-        topButtons.add(clearKeys);
-        top.add(topButtons, BorderLayout.SOUTH);
+        JPanel keyControls = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        keyControls.add(clearKeys);
+        keyControls.add(new JLabel("Blank key fields use the named environment variables. Keys are never saved."));
+        top.add(keyControls, BorderLayout.SOUTH);
 
         JPanel jsBar = new JPanel(new FlowLayout(FlowLayout.LEFT));
         jsBar.add(new JLabel("Automated JS bug-hunt — files/run:"));
@@ -519,9 +546,6 @@ final class ReconPanel extends JPanel {
         input.setToolTipText("Paste JavaScript, recovered source, a response, or a finding to analyze.");
         JTextArea output = new JTextArea(14, 80);
         output.setEditable(false); output.setLineWrap(true); output.setWrapStyleWord(true);
-        this.aiSystem = system;
-        this.aiInput = input;
-        this.aiOutput = output;
 
         JPanel prompts = new JPanel(new GridLayout(0, 1, 4, 4));
         prompts.add(new JLabel("System prompt:"));
@@ -532,17 +556,28 @@ final class ReconPanel extends JPanel {
         JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, prompts, new JScrollPane(output));
         split.setResizeWeight(0.6);
 
+        JPanel promptTools = new JPanel(new BorderLayout(4, 4));
+        JPanel existingTools = new JPanel(new GridLayout(0, 1));
+        existingTools.add(jsBar); existingTools.add(topButtons);
+        existingTools.add(new JLabel("These tools send raw input to the selected providers."));
+        promptTools.add(existingTools, BorderLayout.NORTH); promptTools.add(split);
+        aiModes = new JTabbedPane();
+        aiModes.addTab("Evidence review", aiReview);
+        aiModes.addTab("Prompt tools (raw input)", promptTools);
+
         JLabel privacy = new JLabel("Nothing is sent until you click a button. Data leaves Burp to the selected third-party LLM — authorized data only.");
 
         JPanel north = new JPanel();
         north.setLayout(new BoxLayout(north, BoxLayout.Y_AXIS));
         north.add(top);
-        north.add(jsBar);
         panel.add(north, BorderLayout.NORTH);
-        panel.add(split, BorderLayout.CENTER);
+        panel.add(aiModes, BorderLayout.CENTER);
         panel.add(privacy, BorderLayout.SOUTH);
 
-        clearKeys.addActionListener(e -> { for (CredentialRow row : rows) row.key().setText(""); });
+        clearKeys.addActionListener(e -> {
+            aiReview.credentialsChanged();
+            for (CredentialRow row : rows) row.key().setText("");
+        });
         analyzeJs.addActionListener(e -> {
             List<LlmClient.LlmCredential> creds = enabledCredentials();
             if (creds.isEmpty()) { output.setText("[enable an LLM provider and set its key above]"); return; }

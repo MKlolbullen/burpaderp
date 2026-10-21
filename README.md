@@ -325,6 +325,14 @@ scattering that record across half a dozen tabs.
 The **AI analysis** tab sends content you choose (recovered JavaScript, source maps, responses, or a
 finding) to the enabled providers for review.
 
+- **Evidence review workspace.** Stage captured HTTP pairs, paste text, or import UTF-8 JavaScript,
+  source maps, API specs and other text files. Preview the redacted outbound messages and recipients,
+  then explicitly send the same snapshot to one or more providers. Candidate findings include exact
+  source excerpts, source hashes, model confidence, assumptions, suggested manual PoCs and remediation.
+  Suggested PoCs are never executed and these candidates are not automatically filed as Burp issues.
+  See [setup, limits and verification](docs/AI_EVIDENCE_REVIEW.md), including the empty key/model
+  variables in [`.env.example`](.env.example). The existing tools are under **Prompt tools (raw input)**
+  and retain their existing raw-input behavior.
 - **On-demand, nothing auto-fires.** Nothing is sent until you click a button.
 - **Automated JS bug-hunt → native issues.** **Analyze in-scope JS** collects in-scope JavaScript
   (deduplicated, skipping files already reviewed) up to a per-run *file budget*, asks the LLM for
@@ -344,8 +352,9 @@ finding) to the enabled providers for review.
   requests can be governed. AI template generation and typed JSONL result import remain available.
   `PdcpClient` retains read-only status/result API support; scan creation cannot send an API request.
 - **Right-click integration.** Any request/response in Proxy history, the site map, or Repeater has a
-  **Recon Hound: AI analysis** submenu — *explain & attack surface*, *find vulnerabilities*, and
-  *suggest exploitation & chaining* — plus selection-only variants when text is highlighted.
+  **Recon Hound: AI analysis** submenu to stage selected exchanges for attack-surface review,
+  vulnerability review or manual PoC/chain suggestions, plus highlighted-text variants.
+  Right-click actions stage locally; review the preview and click **Analyze preview** to send.
 
 Whatever you run here also shows up in the [AI feed](#ai-feed--watch-the-models-work).
 

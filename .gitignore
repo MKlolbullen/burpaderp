@@ -3,6 +3,9 @@ build/
 /dist/*.jar
 *.iml
 .idea/
+.env
+.env.*
+!.env.example
 
 # Python runtime-verification tools
 __pycache__/

@@ -5,6 +5,12 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.io.ByteArrayOutputStream;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.Flow;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -15,14 +21,15 @@ import java.util.Map;
  * and returns the assistant's text. Calls go direct (respecting any system proxy) rather than through
  * Burp, so API keys never appear in the proxy history or trip the extension's own secret scanner.
  *
- * <p>Response parsing is a targeted JSON string read for the provider's answer field — good enough for
- * a single completion without pulling in a JSON dependency, and it degrades to a readable error string
- * on non-200 responses.
+ * <p>Provider envelopes are parsed by their documented assistant paths, excluding reasoning and
+ * truncated completions. Redirects are disabled; response buffers and request duration are bounded.
  */
 final class LlmClient {
 
     /** A configured, ready-to-use provider + model + resolved API key (UI field or $ENV already applied). */
-    record LlmCredential(LlmProvider provider, String model, String apiKey) {}
+    record LlmCredential(LlmProvider provider, String model, String apiKey) {
+        @Override public String toString() { return provider + "/" + model + " [key redacted]"; }
+    }
 
     static final String DEFAULT_JS_SYSTEM_PROMPT =
             "You are a senior application-security reviewer assisting an authorised bug-bounty tester. "
@@ -221,10 +228,45 @@ final class LlmClient {
                 + input.length() + " characters (" + droppedLines + " line(s)) omitted ...]";
     }
 
-    private final HttpClient http = HttpClient.newBuilder()
+    record Reply(int status, String body) {}
+    @FunctionalInterface interface Transport { Reply send(HttpRequest request) throws Exception; }
+    private final Transport transport;
+    LlmClient() { this(null); }
+    LlmClient(Transport transport) {
+        if (transport != null) { this.transport = transport; return; }
+        HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(20))
+            .followRedirects(HttpClient.Redirect.NEVER)
             .proxy(ProxySelector.getDefault())
             .build();
+        this.transport = request -> {
+            HttpResponse<String> response = http.send(request, info -> new LimitedBody());
+            return new Reply(response.statusCode(), response.body());
+        };
+    }
+
+    /** Cancel oversized provider responses before buffering more than 1 MiB. */
+    static final class LimitedBody implements HttpResponse.BodySubscriber<String> {
+        static final int LIMIT = 1_048_576;
+        private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        private final CompletableFuture<String> result = new CompletableFuture<>();
+        private Flow.Subscription subscription;
+        public CompletionStage<String> getBody() { return result; }
+        public void onSubscribe(Flow.Subscription s) { subscription = s; s.request(1); }
+        public void onNext(List<ByteBuffer> buffers) {
+            for (ByteBuffer buffer : buffers) {
+                if (buffer.remaining() > LIMIT - bytes.size()) {
+                    subscription.cancel();
+                    result.completeExceptionally(new IllegalArgumentException("Provider response too large"));
+                    return;
+                }
+                byte[] chunk = new byte[buffer.remaining()]; buffer.get(chunk); bytes.writeBytes(chunk);
+            }
+            subscription.request(1);
+        }
+        public void onError(Throwable error) { result.completeExceptionally(error); }
+        public void onComplete() { result.complete(bytes.toString(StandardCharsets.UTF_8)); }
+    }
 
     String complete(LlmProvider provider, String model, String apiKey, String system, String prompt) {
         if (provider == null) return "[error] No provider selected.";
@@ -233,6 +275,7 @@ final class LlmClient {
         }
         String usedModel = model == null || model.isBlank() ? provider.defaultModel() : model.trim();
         String input = budgetInput(prompt == null ? "" : prompt, MAX_INPUT_CHARS);
+        if (Thread.currentThread().isInterrupted()) return "[error] Cancelled.";
 
         try {
             HttpRequest.Builder builder = HttpRequest.newBuilder()
@@ -244,15 +287,18 @@ final class LlmClient {
                 builder.header(header[0], header[1]);
             }
 
-            HttpResponse<String> response = http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
-            String body = response.body();
-            if (response.statusCode() != 200) {
-                return "[HTTP " + response.statusCode() + "] " + snippet(body);
+            Reply response = transport.send(builder.build());
+            if (response.status() != 200) {
+                // Provider errors can echo prompts or credentials. Do not display their bodies.
+                return "[HTTP " + response.status() + "] Provider request failed; check the model and credentials.";
             }
-            String text = extractString(body, provider.responseField());
-            return text != null ? text : "[warning] Could not parse response:\n" + snippet(body);
+            String text = provider.assistantText(response.body());
+            return text != null ? text : "[warning] No complete assistant text in provider response.";
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "[error] Cancelled.";
         } catch (Exception e) {
-            return "[error] Request failed: " + e.getMessage();
+            return "[error] Provider request or response failed (" + e.getClass().getSimpleName() + ").";
         }
     }
 

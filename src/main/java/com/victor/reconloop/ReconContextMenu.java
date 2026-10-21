@@ -15,34 +15,38 @@ import java.util.Optional;
 /**
  * Adds a "Recon Hound: AI analysis" submenu to Burp's right-click menu (Proxy history, site map,
  * Repeater, etc.). Each item ships the selected request/response into the extension's AI analysis tab
- * with a task-specific system prompt and runs it — no copy-paste.
+ * for local preview. The user explicitly selects providers and sends from the tab.
  */
 final class ReconContextMenu implements ContextMenuItemsProvider {
 
-    private static final int MAX_MESSAGE_CHARS = 60_000;
+    private static final int MAX_MESSAGE_CHARS = 23_000;
 
-    private final ReconPanel panel;
+    private final java.util.function.BiConsumer<List<AiAnalysis.Source>, String> stage;
 
     ReconContextMenu(ReconPanel panel) {
-        this.panel = panel;
+        this(panel::stageAiSources);
+    }
+
+    ReconContextMenu(java.util.function.BiConsumer<List<AiAnalysis.Source>, String> stage) {
+        this.stage = stage;
     }
 
     @Override
     public List<Component> provideMenuItems(ContextMenuEvent event) {
         String selection = selectedText(event);
-        HttpRequestResponse selected = selected(event);
-        if (selection == null && selected == null) return null;
+        List<HttpRequestResponse> selected = selected(event);
+        if (selection == null && selected.isEmpty()) return null;
 
         JMenu menu = new JMenu("Recon Hound: AI analysis");
         if (selection != null) {
-            menu.add(fixedItem("Analyze selected text", selection, LlmClient.DEFAULT_JS_SYSTEM_PROMPT));
-            menu.add(fixedItem("Selected text: suggest exploitation & chaining", selection, LlmClient.CHAIN_SYSTEM_PROMPT));
-            if (selected != null) menu.addSeparator();
+            menu.add(fixedItem("Stage selected text for review", trim(selection), "Review this selected text for potential vulnerabilities."));
+            menu.add(fixedItem("Stage selected text: PoC / chain suggestions", trim(selection), "Suggest manual PoCs and possible chains, stating assumptions."));
+            if (!selected.isEmpty()) menu.addSeparator();
         }
-        if (selected != null) {
-            menu.add(item("Explain request/response & attack surface", selected, LlmClient.REQUEST_ANALYSIS_SYSTEM_PROMPT));
-            menu.add(item("Find vulnerabilities", selected, LlmClient.DEFAULT_JS_SYSTEM_PROMPT));
-            menu.add(item("Suggest exploitation & chaining", selected, LlmClient.CHAIN_SYSTEM_PROMPT));
+        if (!selected.isEmpty()) {
+            menu.add(item("Stage exchanges: explain attack surface", selected, "Explain the endpoints and attacker-controlled fields; distinguish observations from assumptions."));
+            menu.add(item("Stage exchanges: find vulnerabilities", selected, "Review for vulnerabilities including XSS, CSRF, SSRF, secrets, access control and injection."));
+            menu.add(item("Stage exchanges: suggest manual PoCs / chains", selected, "Suggest manual PoCs and possible chains, stating preconditions and missing evidence."));
         }
 
         List<Component> items = new ArrayList<>();
@@ -50,15 +54,26 @@ final class ReconContextMenu implements ContextMenuItemsProvider {
         return items;
     }
 
-    private JMenuItem item(String label, HttpRequestResponse rr, String systemPreset) {
+    private JMenuItem item(String label, List<HttpRequestResponse> exchanges, String systemPreset) {
         JMenuItem menuItem = new JMenuItem(label);
-        menuItem.addActionListener(e -> panel.sendToAi(format(rr), systemPreset));
+        menuItem.setEnabled(exchanges.size() <= AiAnalysis.MAX_SOURCES);
+        menuItem.setToolTipText("Stage captured traffic locally; select at most 12 exchanges. Nothing is sent to a provider yet.");
+        menuItem.addActionListener(e -> {
+            List<AiAnalysis.Source> sources = new ArrayList<>();
+            for (var rr : exchanges) {
+                String name = rr.request() == null ? "Captured exchange" : rr.request().url();
+                if (name.length() > 300) name = name.substring(0, 300);
+                sources.add(new AiAnalysis.Source("s" + (sources.size() + 1), AiAnalysis.Kind.HTTP_EXCHANGE, name, format(rr)));
+            }
+            stage.accept(sources, systemPreset);
+        });
         return menuItem;
     }
 
     private JMenuItem fixedItem(String label, String text, String systemPreset) {
         JMenuItem menuItem = new JMenuItem(label);
-        menuItem.addActionListener(e -> panel.sendToAi(text, systemPreset));
+        menuItem.addActionListener(e -> stage.accept(List.of(
+                new AiAnalysis.Source("s1", AiAnalysis.Kind.TEXT, "Selected text", text)), systemPreset));
         return menuItem;
     }
 
@@ -72,26 +87,26 @@ final class ReconContextMenu implements ContextMenuItemsProvider {
 
         boolean response = editorRr.selectionContext() == MessageEditorHttpRequestResponse.SelectionContext.RESPONSE;
         HttpRequestResponse rr = editorRr.requestResponse();
-        String message = response
-                ? (rr.hasResponse() && rr.response() != null ? rr.response().toString() : null)
-                : (rr.request() != null ? rr.request().toString() : null);
+        byte[] message = response
+                ? (rr.hasResponse() && rr.response() != null ? rr.response().toByteArray().getBytes() : null)
+                : (rr.request() != null ? rr.request().toByteArray().getBytes() : null);
         if (message == null) return null;
 
         int start = Math.max(0, range.get().startIndexInclusive());
-        int end = Math.min(message.length(), range.get().endIndexExclusive());
+        int end = Math.min(message.length, range.get().endIndexExclusive());
         if (end <= start) return null;
-        return message.substring(start, end);
+        return trim(new String(message, start, end - start, java.nio.charset.StandardCharsets.UTF_8).replace('\0', ' '));
     }
 
-    private static HttpRequestResponse selected(ContextMenuEvent event) {
+    private static List<HttpRequestResponse> selected(ContextMenuEvent event) {
         if (event.messageEditorRequestResponse().isPresent()) {
-            return event.messageEditorRequestResponse().get().requestResponse();
+            return List.of(event.messageEditorRequestResponse().get().requestResponse());
         }
         List<HttpRequestResponse> selected = event.selectedRequestResponses();
-        return selected.isEmpty() ? null : selected.get(0);
+        return List.copyOf(selected);
     }
 
-    private static String format(HttpRequestResponse rr) {
+    static String format(HttpRequestResponse rr) {
         StringBuilder builder = new StringBuilder();
         if (rr.request() != null) {
             builder.append("=== REQUEST ===\n").append(trim(rr.request().toString())).append("\n\n");
@@ -99,7 +114,7 @@ final class ReconContextMenu implements ContextMenuItemsProvider {
         if (rr.hasResponse() && rr.response() != null) {
             builder.append("=== RESPONSE ===\n").append(trim(rr.response().toString()));
         }
-        return builder.toString();
+        return builder.toString().replace('\0', ' ');
     }
 
     private static String trim(String value) {

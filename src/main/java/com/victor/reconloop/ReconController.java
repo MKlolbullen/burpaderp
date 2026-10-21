@@ -43,7 +43,7 @@ final class ReconController implements HttpHandler {
     private final XssReflectionEngine xssReflectionEngine = new XssReflectionEngine();
     private final WebHygieneEngine webHygiene = new WebHygieneEngine();
     private final DependencyVulnEngine scaEngine = new DependencyVulnEngine();
-    private final LlmClient llmClient = new LlmClient();
+    private final LlmClient llmClient;
     /** Global AI-activity feed: capped, in-memory, EDT-confined (every read/write is marshalled). */
     private final AiFeed.Store aiFeed = new AiFeed.Store();
     private volatile java.util.function.Consumer<AiFeed.Event> aiFeedListener;
@@ -171,6 +171,16 @@ final class ReconController implements HttpHandler {
                     ReconModel.ReflectionTableModel reflectionModel, ReconModel.ActiveTableModel activeModel,
                     ReconModel.AssetTableModel assetModel, ExecutorService activeWorker, boolean startBackgroundWorkers,
                     DestinationGuard destinations) {
+        this(api, findingModel, discoveryModel, parameterModel, reflectionModel, activeModel, assetModel,
+                activeWorker, startBackgroundWorkers, destinations, new LlmClient());
+    }
+
+    ReconController(MontoyaApi api, ReconModel.FindingTableModel findingModel,
+                    ReconModel.DiscoveryTableModel discoveryModel, ReconModel.ParameterTableModel parameterModel,
+                    ReconModel.ReflectionTableModel reflectionModel, ReconModel.ActiveTableModel activeModel,
+                    ReconModel.AssetTableModel assetModel, ExecutorService activeWorker, boolean startBackgroundWorkers,
+                    DestinationGuard destinations, LlmClient llmClient) {
+        this.llmClient = Objects.requireNonNull(llmClient);
         this.activeWorker = Objects.requireNonNull(activeWorker, "activeWorker");
         this.api = api;
         this.targetTransport = new MontoyaTargetTransport(api, destinations);
@@ -1905,6 +1915,33 @@ final class ReconController implements HttpHandler {
         } catch (Exception e) {
             api.logging().logToError("API spec ingestion failed for " + url, e);
         }
+    }
+
+    /** One explicit, cancellable call per selected provider; no target transport or issue publisher. */
+    Future<?> reviewEvidence(List<LlmClient.LlmCredential> credentials, AiAnalysis.Snapshot snapshot,
+                             Consumer<AiAnalysis.ProviderReport> onReport, Runnable onDone) {
+        List<LlmClient.LlmCredential> selected = List.copyOf(credentials);
+        if (selected.isEmpty() || selected.size() > LlmProvider.values().length
+                || selected.stream().map(LlmClient.LlmCredential::provider).distinct().count() != selected.size())
+            throw new IllegalArgumentException("Select at most one model per provider.");
+        return llmWorker.submit(() -> {
+            try {
+                for (var credential : selected) {
+                    if (Thread.currentThread().isInterrupted()) break;
+                    String raw = llmClient.complete(credential.provider(), credential.model(), credential.apiKey(),
+                            AiAnalysis.SYSTEM, snapshot.prompt());
+                    if (Thread.currentThread().isInterrupted()) break;
+                    AiAnalysis.Report report = AiAnalysis.parse(raw, snapshot);
+                    emitAiFeed(AiFeed.Kind.EVIDENCE_REVIEW, credential.provider(), credential.model(),
+                            report.error() == null ? AiFeed.Outcome.OK : AiFeed.Outcome.ERROR,
+                            AgentActivity.estimateTokens(AiAnalysis.SYSTEM + snapshot.prompt()),
+                            AgentActivity.estimateTokens(raw), "Selected evidence review",
+                            report.findings().size() + " unverified candidate(s); " + report.rejected() + " rejected entry/entries.");
+                    SwingUtilities.invokeLater(() -> onReport.accept(
+                            new AiAnalysis.ProviderReport(credential.provider(), credential.model(), report)));
+                }
+            } finally { SwingUtilities.invokeLater(onDone); }
+        });
     }
 
     /** On-demand, manual LLM analysis. Runs off the EDT against the already-resolved credential. */

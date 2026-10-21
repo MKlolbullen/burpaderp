@@ -28,6 +28,7 @@ final class AiFeed {
     enum Kind {
         TRIAGE("Triage"),
         JS_REVIEW("JS review"),
+        EVIDENCE_REVIEW("Evidence review"),
         CHAIN_ANALYSIS("Chain analysis"),
         NUCLEI_TEMPLATE("Nuclei template"),
         AGENT_ROUND("Agent round"),
