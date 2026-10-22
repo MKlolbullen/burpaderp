@@ -105,7 +105,7 @@ func RunProfile(ctx context.Context, scope Scope, toolName string, inputs []Reco
 			_ = quarantineProcessError(rejectEnc, spec.Name, err, result.Stderr)
 		}
 
-	case InputPerTarget:
+	case InputPerTarget, InputPositional:
 		for _, record := range validated {
 			rendered, err := RenderToolInput(socket, record)
 			if err != nil {
@@ -114,7 +114,10 @@ func RunProfile(ctx context.Context, scope Scope, toolName string, inputs []Reco
 			}
 			target := strings.TrimSpace(rendered)
 			args := append([]string(nil), profile.Args...)
-			args = append(args, profile.TargetFlag, target)
+			if profile.InputMode == InputPerTarget {
+				args = append(args, profile.TargetFlag)
+			}
+			args = append(args, target)
 			records, stats, result, err := executeOnce(ctx, socket, profile, args, nil, quarantine)
 			summary.Executions++
 			summary.OutputAccepted += stats.Accepted
@@ -143,8 +146,8 @@ func executeOnce(ctx context.Context, socket ContractSocket, profile CommandProf
 		Stdin: stdin,
 		Limits: ExecLimits{
 			Timeout:        profile.Timeout,
-			MaxStdoutBytes: DefaultExecLimits().MaxStdoutBytes,
-			MaxStderrBytes: DefaultExecLimits().MaxStderrBytes,
+			MaxStdoutBytes: profile.MaxStdoutBytes,
+			MaxStderrBytes: profile.MaxStderrBytes,
 		},
 	})
 

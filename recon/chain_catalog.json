@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "state": "PLAN_ONLY",
+  "rules": [
+    "This manifest describes dependencies, not permission to execute arbitrary commands.",
+    "Only the three ENUMERATION_JOB tools run from the domain form. CLI_ONLY stages are separate manual typed stages; the entire DAG is not an executable runner.",
+    "Every boundary canonicalises, deduplicates and filters to the exact domain or its subdomains; archive URLs are candidates, not evidence of a live service.",
+    "Preserve query strings and source/run provenance; remove fragments. Keep DNS names as targets, without implicitly authorising their IPs or CNAME destinations.",
+    "All target HTTP producers require governed egress (#44), including redirects, retries and auxiliary connections. Installation or a proxy flag cannot unlock them.",
+    "Newly discovered domains and URLs do not expand Burp scope. Import requires a separate current-scope check. AI findings remain unverified candidates."
+  ],
+  "stages": [
+    {"id":"seed","depends_on":[],"input":"bare domain","output":"domain","artifact":"target.json","tools":[]},
+    {"id":"enumerate","depends_on":["seed"],"input":"domain","output":"hostname","artifact":"subs.txt + sorted_subs.txt + hosts.jsonl","tools":[
+      {"name":"subfinder","mode":"ENUMERATION_JOB","source":"https://github.com/projectdiscovery/subfinder","detail":"All sources supporting recursive queries; bounded provider profile."},
+      {"name":"assetfinder","mode":"ENUMERATION_JOB","source":"https://github.com/tomnomnom/assetfinder","detail":"Subdomains only; positional domain argument."},
+      {"name":"chaos-client (chaos)","mode":"ENUMERATION_JOB","source":"https://github.com/projectdiscovery/chaos-client","detail":"Chaos dataset; installed executable is chaos; PDCP_API_KEY/config."},
+      {"name":"amass","mode":"PROFILE_REQUIRED","source":"https://github.com/owasp-amass/amass","detail":"Pin a version, verify passive-only behaviour and adapt structured output before execution; do not assume historical flags match installed versions."}
+    ]},
+    {"id":"dns","depends_on":["enumerate"],"input":"hostname","output":"resolved_host","artifact":"dns.jsonl (planned)","tools":[
+      {"name":"dnsx","mode":"CLI_ONLY","source":"https://github.com/projectdiscovery/dnsx","detail":"Existing typed reconctl run profile: A/AAAA/CNAME, no implicit IP scanning. Not launched by this form."}
+    ]},
+    {"id":"probe","depends_on":["dns"],"input":"resolved_host -> hostname (explicit projection)","output":"http_target","artifact":"httpx.jsonl (planned); httpx-plan.json records blocked argv","tools":[
+      {"name":"httpx","mode":"BLOCKED_TARGET_HTTP","source":"https://github.com/projectdiscovery/httpx","detail":"IP, technology, CNAME, TLS, server, title, status, length, location, timing; no automatic redirects or target-expanding TLS/CSP probing in saved plan."}
+    ]},
+    {"id":"fingerprint","depends_on":["probe"],"input":"http_target","output":"technology metadata","artifact":"whatweb.json (planned)","tools":[
+      {"name":"whatweb","mode":"BLOCKED_TARGET_HTTP","source":"https://github.com/urbanadventurer/WhatWeb","detail":"Complementary fingerprinting; even aggression level 1 sends target HTTP and follows redirects. Needs governed transport plus report adapter."}
+    ]},
+    {"id":"archives","depends_on":["seed"],"input":"domain","output":"url","artifact":"archive-urls.jsonl (planned)","tools":[
+      {"name":"Waybackpy","mode":"PROFILE_REQUIRED","source":"https://github.com/akamhy/waybackpy","detail":"CDX/availability reads only. Exclude SavePageNow: requesting a new capture can cause target fetching."},
+      {"name":"waybackurls","mode":"PROFILE_REQUIRED","source":"https://github.com/tomnomnom/waybackurls","detail":"Historical URLs from providers; pin invocation, provider access and URL adapter."},
+      {"name":"urlfinder","mode":"PROFILE_REQUIRED","source":"https://github.com/projectdiscovery/urlfinder","detail":"Passive multi-source URL discovery; pin profile, provider limits and JSONL adapter."}
+    ]},
+    {"id":"crawl","depends_on":["probe"],"input":"http_target","output":"url","artifact":"crawl-urls.jsonl (planned)","tools":[
+      {"name":"katana","mode":"BLOCKED_TARGET_HTTP","source":"https://github.com/projectdiscovery/katana","detail":"Active crawler; existing output adapter/profile remains blocked at process boundary."},
+      {"name":"gospider","mode":"BLOCKED_TARGET_HTTP","source":"https://github.com/jaeles-project/gospider","detail":"Active crawler with JavaScript/link discovery; archive-source options do not make subsequent requests passive. Needs output adapter."},
+      {"name":"cariddi","mode":"BLOCKED_TARGET_HTTP","source":"https://github.com/edoardottt/cariddi","detail":"Crawler/endpoint/secret discovery; never execute through a provider-only exception."}
+    ]},
+    {"id":"merge_urls","depends_on":["archives","crawl"],"input":"url","output":"url","artifact":"urls.jsonl + javascript-candidates.txt (planned)","tools":[
+      {"name":"local canonicalise / dedupe","mode":"PLANNED_LOCAL","source":"","detail":"Merge as a union, allowing archive-only candidates when live stages are blocked; preserve queries and provenance, filter scope before any later fetch."}
+    ]},
+    {"id":"javascript","depends_on":["merge_urls"],"input":"url","output":"url + unverified finding candidates","artifact":"js-endpoints.jsonl (planned)","tools":[
+      {"name":"JSFinder","mode":"BLOCKED_TARGET_HTTP","source":"https://github.com/Threezh1/JSFinder","detail":"Live URL/JavaScript retrieval requires governed transport and a pinned endpoint adapter. Existing captured JS can instead be reviewed locally in AI analysis."}
+    ]},
+    {"id":"review","depends_on":["fingerprint","javascript","merge_urls"],"input":"explicitly selected captured request/response/JS evidence","output":"unverified candidate report + manual PoC suggestions","artifact":"AI analysis / five-agent report (separate workflow)","tools":[
+      {"name":"existing five-agent evidence review","mode":"SEPARATE_REVIEW","source":"","detail":"Select/redact evidence and preview provider sharing in AI analysis/Agent team; no automatic provider submission or PoC execution from recon."}
+    ]}
+  ]
+}

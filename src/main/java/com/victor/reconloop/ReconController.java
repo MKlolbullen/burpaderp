@@ -87,6 +87,10 @@ final class ReconController implements HttpHandler {
 
     private final ExecutorService activeWorker;
 
+    private final ExecutorService domainReconWorker = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "Burp-Recon-Hound-Domain"); t.setDaemon(true); return t;
+    });
+
     private static ExecutorService newActiveWorker() {
         return Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "Burp-Recon-Hound-Active");
@@ -471,10 +475,18 @@ final class ReconController implements HttpHandler {
         });
     }
 
+    /** Separate worker for the fixed passive sidecar; it never occupies the target request queue. */
+    Future<?> enumerateDomain(DomainReconProcess.Plan plan, Consumer<DomainReconProcess.Event> events,
+                              Consumer<DomainReconProcess.Outcome> completion) {
+        return domainReconWorker.submit(() -> {
+            var outcome = new DomainReconProcess().run(plan, event -> SwingUtilities.invokeLater(() -> events.accept(event)));
+            SwingUtilities.invokeLater(() -> completion.accept(outcome));
+        });
+    }
+
     /**
      * Imports already-normalized Go-sidecar JSONL without launching any process or sending target
-     * traffic.  Every line is parsed, bounded, and checked against the current Burp scope again;
-     * rejected records are counted and logged instead of being silently accepted.
+     * traffic. Every line is bounded and checked against the current Burp scope again.
      */
     void importSidecarJsonl(Path path, Consumer<String> completion) {
         if (path == null) {
@@ -1123,6 +1135,7 @@ final class ReconController implements HttpHandler {
         worker.shutdownNow();
         activeWorker.shutdownNow();
         llmWorker.shutdownNow();
+        domainReconWorker.shutdownNow();
     }
 
     /** Synchronous save for extension unload, when the async EDT task might not run in time. */
