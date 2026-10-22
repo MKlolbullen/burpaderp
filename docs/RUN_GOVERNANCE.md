@@ -26,6 +26,7 @@ This avoids reimplementing Burp in Go while avoiding shell-pipe orchestration in
 | Go process start | The sole runner resolves the canonical binary/profile and blocks target HTTP egress before command construction, regardless of risk opt-ins. Provider/DNS profiles and opt-in TCP connect scans remain separate capabilities. |
 | Go tool input/output | `ToolSpec` plus `ContractSocket` validates kinds, schema, scope, size limits, and quarantines rejected JSONL. |
 | Go execution identity | `reconctl run` emits a UUID `run_id` on every accepted output record and in its run summary. |
+| Java → passive sidecar | Only `DomainReconProcess.launch` may call `ProcessBuilder.start`, with the fixed `reconctl enumerate` argument vector. No shell, pipeline, arbitrary tool arguments or native target producer is enabled. Java validates the domain, bounds, UUID and returned protocol; interruption/unload cleans up observed processes. |
 | Burp safe HTTP paths | Discovery crawl/redirects, parameter discovery, JWT read-only replay, and subdomain-takeover checks run through `ScanRun` + `RequestPolicy` + `ActiveRequestGateway`; only in-scope `GET`/`HEAD`/`OPTIONS` requests can dispatch, and each logical run has one atomic request budget. |
 | Go → Burp import | The importer bounds line/record count, parses only canonical record kinds, re-checks current Burp scope, and rejects payload/CIDR records that have no safe Burp-side materialisation. Importing never launches a process, adds scope, queues a crawl, or sends traffic. |
 | Evidence lifecycle | `SIGNAL`, `CANDIDATE`, `REPRODUCED`, `CONFIRMED`, `EXPLOITABLE`, and `REJECTED` replace a lossy boolean. Legacy `true` maps conservatively to `REPRODUCED`. |
@@ -232,16 +233,26 @@ lowest production entry point, with no opt-in bypass.
 | Producer / prior direct sink | Enforced boundary and retained behavior | Regression evidence |
 | --- | --- | --- |
 | `ReconHoundCli.main` → JDK `HttpClient.send`, automatic `NORMAL` redirects | No HTTP client or target sender remains. `run(args, err)` returns 3 for live inputs before writing a report, including `--fail-on none`. `--body-file` analyzes one saved response with an HTTP(S) metadata URL, without DNS or HTTP. | `ReconHoundCliTest`: local listener stays untouched, existing report preserved, offline SARIF/severity exits and invalid input. CLI JAR smoke runs without Montoya on the classpath. |
-| `SqlmapClient.run` / `isAvailable` → `ProcessBuilder.start` | Neither scan execution nor `--version` can start a process. `run` returns `started=false` with a block reason. Pure argument/output helpers remain. `ReconController.runSqlmap` blocks before queuing; UI execution controls are removed. | `ExternalTargetEgressIntegrationTest`: executable marker remains absent with unsafe arguments; controller calls stay blocked with native grants enabled or disabled. Java architecture test forbids process starts/references. |
+| `SqlmapClient.run` / `isAvailable` → `ProcessBuilder.start` | Neither scan execution nor `--version` can start a process. `run` returns `started=false` with a block reason. Pure argument/output helpers remain. `ReconController.runSqlmap` blocks before queuing; UI execution controls are removed. | `ExternalTargetEgressIntegrationTest`: executable marker remains absent with unsafe arguments; controller calls stay blocked with native grants enabled or disabled. Java architecture test rejects starts/references outside the single fixed passive-sidecar launcher; pipelines and `Runtime.exec` remain forbidden everywhere. |
 | `PdcpClient.createScan` → `POST /v1/scans` → remote Nuclei target requests | Returns a block reason without HTTP. Controller blocks before resolving credentials or scheduling work. Read-only existing status/results stay fixed to `https://api.projectdiscovery.io` with GET and `Redirect.NEVER`. There is no create/poll loop or launch button. | `PdcpClientEgressTest`: no creation transport calls, GET-only fixed-origin reads and redirecting client rejection. Controller integration checks completion/error callback and no native sends. |
 | `recon.RunProfile` → `RunExternal` → `exec.CommandContext` for `httpx`, `katana`, `nuclei` | `CheckProfileEgress` rejects their canonical `target_http_unsupported` profiles regardless of every risk flag. The private `runExternal` repeats the check at process start and resolves the binary internally; it accepts no binary override. Unknown/unprofiled tools cannot execute. Existing output adapters, `socket`, `render`, `adapt`, `plan` and import stay offline. | `egress_test.go`: all flags granted, zero executions and no executable marker via either entry point. `process_invariant_test.go` resolves import aliases and function references; only the runner may construct processes. |
 
-Go profiles retained for execution are explicitly `subfinder`/`gau` (provider queries), `puredns`/`dnsx`
+Go profiles retained for execution are explicitly `assetfinder`/`subfinder`/`chaos`/`gau` (provider queries), `puredns`/`dnsx`
 (DNS), and `naabu` (TCP connect, still requires `--allow-network` and network scope). These do not share
 native HTTP quotas. The contract trusts installed binaries and their pinned invocation semantics; it
 is not an operating-system network sandbox against replaced binaries, configuration or tool changes.
 `doctor` exposes execution-block reasons and `plan` exposes each profile's egress class. New tools
 need an explicit profile/egress review; the regression allowlist prevents silent new capabilities.
+
+The **Recon chain** form previews an exportable staged dependency plan and executes only the three
+passive enumerators through the Go runner. The shared catalog distinguishes runnable enumeration,
+separate CLI DNS enrichment, missing profiles/adapters and blocked target HTTP stages. It is never
+interpreted as arbitrary commands. `httpx-plan.json` describes metadata flags without launching
+httpx. Versioned events, exclusive UUID output directories, deduped host files, partial states and
+current-scope import are covered by Go fixtures, Java protocol/UI checks and an offline sidecar
+round trip. Cancellation tests include a real child holding the stdout pipe. The trust assumption
+for installed tools/configuration remains; process lifecycle controls do not establish controlled
+network egress. See [the workflow](../recon/README.md#domain-form-and-chained-recon-plan).
 
 This slice deliberately reduces functionality instead of asserting that a process-level permission
 can govern downstream sends. Restoring CLI fetching needs a policy-bound one-hop JDK transport,

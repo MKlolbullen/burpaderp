@@ -70,6 +70,7 @@ func runExternal(parent context.Context, request ExecRequest) (ExecResult, error
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, spec.Binary, request.Args...)
+	cmd.WaitDelay = time.Second
 	cmd.Stdin = bytes.NewReader(request.Stdin)
 	if request.Dir != "" {
 		cmd.Dir = request.Dir
@@ -94,7 +95,7 @@ func runExternal(parent context.Context, request ExecRequest) (ExecResult, error
 	}
 
 	if ctx.Err() == context.DeadlineExceeded {
-		return result, fmt.Errorf("%s timed out after %s", spec.Binary, limits.Timeout)
+		return result, fmt.Errorf("%s timed out after %s: %w", spec.Binary, limits.Timeout, ctx.Err())
 	}
 	if err != nil {
 		return result, fmt.Errorf("%s exited with code %d: %w", spec.Binary, result.ExitCode, err)

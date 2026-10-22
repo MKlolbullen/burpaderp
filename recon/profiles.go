@@ -10,8 +10,9 @@ import (
 type InputMode string
 
 const (
-	InputStdin     InputMode = "stdin"
-	InputPerTarget InputMode = "per_target_argument"
+	InputStdin      InputMode = "stdin"
+	InputPerTarget  InputMode = "per_target_argument"
+	InputPositional InputMode = "per_target_positional"
 )
 
 // EgressClass describes the pinned invocation, independently of the operator's risk opt-ins.
@@ -28,21 +29,36 @@ const (
 // tested for. ToolSpec says *what types* may cross a boundary; CommandProfile
 // says *how this version-independent CLI surface is invoked*.
 type CommandProfile struct {
-	Tool        string        `json:"tool"`
-	Egress      EgressClass   `json:"egress"`
-	InputMode   InputMode     `json:"input_mode"`
-	Args        []string      `json:"args"`
-	TargetFlag  string        `json:"target_flag,omitempty"`
-	Timeout     time.Duration `json:"timeout"`
-	Description string        `json:"description,omitempty"`
+	Tool           string        `json:"tool"`
+	Egress         EgressClass   `json:"egress"`
+	InputMode      InputMode     `json:"input_mode"`
+	Args           []string      `json:"args"`
+	TargetFlag     string        `json:"target_flag,omitempty"`
+	Timeout        time.Duration `json:"timeout"`
+	MaxStdoutBytes int64         `json:"max_stdout_bytes,omitempty"`
+	MaxStderrBytes int64         `json:"max_stderr_bytes,omitempty"`
+	Description    string        `json:"description,omitempty"`
 }
 
 func DefaultCommandProfiles() map[string]CommandProfile {
 	profiles := []CommandProfile{
 		{
 			Tool: "subfinder", Egress: EgressProvider, InputMode: InputPerTarget, TargetFlag: "-d",
-			Args: []string{"-silent", "-json", "-disable-update-check"}, Timeout: 12 * time.Minute,
+			Args: []string{"-silent", "-json", "-all", "-recursive", "-disable-update-check"}, Timeout: 12 * time.Minute,
+			MaxStdoutBytes: 8 << 20, MaxStderrBytes: 32 << 10,
 			Description: "passive enum, one scoped domain per process target argument",
+		},
+		{
+			Tool: "assetfinder", Egress: EgressProvider, InputMode: InputPositional,
+			Args: []string{"--subs-only"}, Timeout: 5 * time.Minute,
+			MaxStdoutBytes: 8 << 20, MaxStderrBytes: 32 << 10,
+			Description: "passive provider queries; positional scoped domain, subdomains only",
+		},
+		{
+			Tool: "chaos", Egress: EgressProvider, InputMode: InputPerTarget, TargetFlag: "-d",
+			Args: []string{"-silent", "-disable-update-check"}, Timeout: 5 * time.Minute,
+			MaxStdoutBytes: 8 << 20, MaxStderrBytes: 32 << 10,
+			Description: "Chaos dataset query; PDCP_API_KEY stays in the environment/config, never argv",
 		},
 		{
 			Tool: "puredns", Egress: EgressDNS, InputMode: InputStdin,
@@ -61,7 +77,7 @@ func DefaultCommandProfiles() map[string]CommandProfile {
 		},
 		{
 			Tool: "httpx", Egress: EgressTargetHTTP, InputMode: InputStdin,
-			Args: []string{"-json", "-silent", "-status-code", "-rate-limit", "50", "-threads", "20", "-follow-host-redirects", "-max-redirects", "5", "-disable-update-check"}, Timeout: 15 * time.Minute,
+			Args: []string{"-json", "-silent", "-ip", "-td", "-cname", "-tls-grab", "-server", "-title", "-status-code", "-content-length", "-location", "-response-time", "-rate-limit", "10", "-threads", "5", "-retries", "0", "-disable-update-check"}, Timeout: 15 * time.Minute,
 			Description: "HTTP probe; execution disabled pending governed egress (#44)",
 		},
 		{
@@ -112,7 +128,7 @@ func ValidateCommandProfile(profile CommandProfile, registry ToolRegistry) error
 	default:
 		return fmt.Errorf("%s profile must declare a known egress class", profile.Tool)
 	}
-	if profile.InputMode != InputStdin && profile.InputMode != InputPerTarget {
+	if profile.InputMode != InputStdin && profile.InputMode != InputPerTarget && profile.InputMode != InputPositional {
 		return fmt.Errorf("%s has unsupported input mode %q", profile.Tool, profile.InputMode)
 	}
 	if profile.InputMode == InputPerTarget && profile.TargetFlag == "" {

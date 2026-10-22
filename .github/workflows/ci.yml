@@ -42,11 +42,21 @@ jobs:
         run: |
           go test ./...
           go vet ./...
+          go build -trimpath -o /tmp/reconctl ./cmd/reconctl
 
       # Build via the checked-in Gradle wrapper directly. gradle-wrapper.properties is the single
       # source of truth for the Gradle version and distribution checksum.
       - name: Build and test
+        env:
+          RECONCTL_TEST_BINARY: /tmp/reconctl
         run: ./gradlew clean build --no-daemon --stacktrace
+
+      - name: Package and smoke-check passive recon sidecar
+        run: |
+          mkdir -p build/recon
+          cp /tmp/reconctl build/recon/reconctl-linux-amd64
+          /tmp/reconctl enumerate --help
+          /tmp/reconctl chain --domain example.com > build/recon/example-chain.json
 
       - name: Test runtime verification receiver and offline comparison
         run: python3 -m unittest discover -s tools/runtime-verification/tests -v
@@ -86,5 +96,6 @@ jobs:
           path: |
             build/libs/*.jar
             build/runtime-verification/*.jar
+            build/recon/*
           if-no-files-found: error
           retention-days: 14

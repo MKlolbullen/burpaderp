@@ -35,6 +35,10 @@ func main() {
 		err = runAdapt(os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
 	case "run":
 		err = runTool(os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
+	case "enumerate":
+		err = runEnumerate(os.Args[2:], os.Stdout, os.Stderr)
+	case "chain":
+		err = runChain(os.Args[2:], os.Stdout)
 	case "help", "-h", "--help":
 		usage(os.Stdout)
 		return
@@ -55,6 +59,11 @@ Usage:
   reconctl doctor
   reconctl plan
   reconctl edge --from httpx --to katana
+  reconctl chain --domain example.com  # full staged planning manifest; launches nothing
+
+  # passive assetfinder -> subfinder -> chaos; per-run deduped files + JSONL GUI events
+  reconctl enumerate --domain example.com --output-dir ./recon-runs
+  # httpx metadata plan is saved, but target HTTP execution remains blocked (#44)
 
   # normalized Record JSONL -> canonical records
   reconctl socket --tool <name> --direction input|output --scope-domain example.com

@@ -151,9 +151,120 @@ cat dnsx.records.jsonl | ./reconctl socket \
 
 `socket` deliberately does not execute the tool. Execution, output parsing, and contract validation are separate layers so one bad parser or process cannot bypass scope policy by accident.
 
+## Domain form and chained recon plan
+
+The plugin's **Recon chain** tab accepts a bare ASCII/punycode domain, a trusted `reconctl`
+executable and an output directory. **Preview recon chain** launches nothing: it shows dependencies,
+tool support and the exact fixed argument vector. The manifest can be exported as JSON. The same
+catalog, `chain_catalog.json`, is embedded into Go and packaged in the extension JAR.
+
+| Stage | Tools | Current support |
+| --- | --- | --- |
+| Subdomains | assetfinder, subfinder, chaos-client (`chaos`) | Runnable together from the form or `enumerate` |
+| Additional subdomains | Amass | Plan only; version/passive semantics and output profile must be pinned |
+| DNS enrichment | dnsx | Existing separate typed CLI stage; not launched by the form |
+| HTTP metadata | httpx, WhatWeb | Target execution blocked (#44); WhatWeb also needs its report adapter |
+| Archive URLs | Waybackpy, waybackurls, urlfinder | Plan only; provider profiles/adapters need implementation |
+| Live crawl | Katana, GoSpider, Cariddi | Target execution blocked (#44); missing adapters still need implementation |
+| JavaScript endpoints | JSFinder | Live retrieval blocked (#44); pinned output adapter still needed |
+| Evidence review | Existing AI analysis / five-agent jobs | Separate manual selection, redaction and provider preview |
+
+Archive collection branches directly from the seed domain. It does not depend on a live HTTP
+response. Merge archive and crawl candidates as a scoped union; retain query strings and provenance,
+drop fragments, and never equate an archived URL with a currently live service. DNS CNAMEs/IPs do not
+expand scope. The `resolved_host -> hostname` projection before probing must be explicit; the
+existing `dnsx -> httpx` edge is intentionally not a direct typed pipe. The full DAG is a **planning
+manifest**, not an implemented all-tool scheduler. Planned artifacts are labelled in the catalog.
+
+```mermaid
+flowchart TD
+  seed[Domain] --> enumerate[Subdomains]
+  enumerate --> dns[DNS enrichment]
+  dns --> probe[HTTP probe]
+  probe --> crawl[Live crawl]
+  probe --> fingerprint[Fingerprint]
+  seed --> archive[Archive URLs]
+  archive --> merge[Scoped URL union]
+  crawl --> merge
+  merge --> javascript[JavaScript endpoints]
+  javascript --> review[Evidence review]
+  fingerprint --> review
+  merge --> review
+```
+
+```bash
+# Offline planning only: no tool installation or network required.
+./reconctl chain --domain example.com > recon-chain.json
+
+# Provider queries: requires installed assetfinder, subfinder and chaos on PATH.
+# Set PDCP_API_KEY through your environment/config for Chaos; never put it in command arguments.
+./reconctl enumerate --domain example.com --output-dir ./recon-runs \
+  --max-hosts 5000 --tool-timeout-seconds 300
+```
+
+**Run passive enumeration** starts the existing Go runner with a fixed argument vector, without a
+shell or Python dependency. Go invokes assetfinder (`--subs-only`), subfinder
+(`-silent -json -all -recursive -disable-update-check`) and chaos
+(`-silent -disable-update-check -d`) sequentially through `RunProfile` and both typed sockets.
+Subfinder's `-recursive` restricts sources to those supporting recursive queries; it is not an
+active recursive brute-force stage. Provider binaries/configuration are trusted and not sandboxed.
+Unrelated LLM key environment variables are removed from the Java-launched sidecar; provider
+configuration is retained. Raw stderr is never displayed in Burp or copied to the summary.
+
+Each run exclusively creates `<output-dir>/<canonical-domain>/<UUID>/`, never overwriting another
+run. Files are private to the current OS user where supported:
+
+- `target.json`: canonical target, run UUID and limits.
+- `subs.txt`: newly accepted hosts in collection order, once each (built-in `anew` equivalent).
+- `sorted_subs.txt`: sorted unique hosts, atomically finalised, including after handled cancellation.
+- `hosts.jsonl`: ordinary typed records with run UUID and first-source provenance, suitable for the existing importer.
+- `summary.json`: per-tool accepted/rejected counts, failure/timeout/truncation states and host-limit status.
+- `chain-plan.json`: complete staged planning manifest with execution support states.
+- `httpx-plan.json`: **BLOCKED** metadata argument plan; no `httpx.jsonl` is collected.
+
+The httpx plan includes `-ip -td -cname -tls-grab -server -title` plus status, length, location and
+timing fields. `-title` is the actual page-title option; there is no `-name` option. No automatic
+redirect following, TLS/CSP target expansion or execution bypass is enabled. WhatWeb's lowest
+aggression level still sends target HTTP and follows redirects. Waybackpy's future provider profile
+must use CDX/availability reads and exclude SavePageNow, which can trigger a target fetch.
+
+Defaults: 5,000 unique hosts and 300 seconds per tool; configurable ranges 1–25,000 hosts and
+5–1,200 seconds. Each enumerator captures at most 8 MiB stdout and 32 KiB stderr. Host rows arrive
+after each tool completes; all updates carry the same UUID/domain. Missing tools, failed providers,
+truncated output or the host cap produce explicit partial/failed states; other tools continue.
+No results is distinct from all tools failing. `PARTIAL` returns exit 0 with its explicit terminal
+state; `FAILED`/`CANCELLED` return nonzero. A broken event consumer stops further launches.
+
+**Cancel job** interrupts the worker, signals the sidecar and terminates its observed descendants,
+then forcefully cleans up remaining observed processes. CLI SIGINT/SIGTERM is handled via context
+cancellation. Force termination, process escape/reparenting and crashes cannot guarantee complete
+final files; this is process lifecycle management, not an OS egress sandbox. Partial `subs.txt` and
+`hosts.jsonl` may remain. The UI rejects malformed, oversized, miscorrelated or incomplete event
+streams and contradictory terminal/exit statuses. Stale events from cancelled runs are ignored.
+
+**Import hosts into Burp** is a separate action that rechecks the current Burp scope through the
+existing bounded JSONL importer. Enumeration neither adds domains to Burp scope nor starts a crawl,
+AI provider call or PoC. Completed partial runs can be imported when they contain hosts.
+
+Build `reconctl` for the machine running Burp (`go build -o reconctl ./cmd/reconctl`, or
+`reconctl.exe` on Windows). CI also includes a Linux amd64 binary beside the JAR; after extracting,
+restore its executable bit with `chmod +x reconctl-linux-amd64` if needed. Install provider tools
+separately from their official releases. No automatic package installation or update runs.
+
+Tool references: [Subfinder](https://github.com/projectdiscovery/subfinder),
+[assetfinder](https://github.com/tomnomnom/assetfinder),
+[Chaos](https://github.com/projectdiscovery/chaos-client),
+[httpx](https://github.com/projectdiscovery/httpx),
+[WhatWeb](https://github.com/urbanadventurer/WhatWeb),
+[Waybackpy](https://github.com/akamhy/waybackpy).
+
 ## Next integration boundary
 
-The Java/Montoya JSONL importer already feeds validated asset/finding events into the existing models and `IssueReporter` without starting tools. A future execution bridge must preserve the egress restrictions below and attach the explicit scan run. Burp message mutation and evidence markers remain in the extension.
+The Java/Montoya JSONL importer feeds validated asset/finding events into the existing models and
+`IssueReporter` without starting tools. The separate domain form launches only the fixed passive
+enumeration subcommand; extending it to the planned downstream stages must preserve the egress
+restrictions below and attach the explicit scan run. Burp message mutation and evidence markers
+remain in the extension.
 
 ## Target HTTP execution is paused (#44)
 
@@ -163,7 +274,7 @@ and the private process-start boundary reject canonical unsupported egress befor
 Unknown/unprofiled tools are blocked too. `doctor` reports the execution block; `plan` includes egress
 classes. Existing `adapt`, `socket`, `render` and Burp JSONL import stay available without execution.
 
-Provider-only `subfinder`/`gau`, DNS `puredns`/`dnsx`, and explicitly opted-in TCP `naabu` profiles remain
+Provider-only `assetfinder`/`subfinder`/`chaos`/`gau`, DNS `puredns`/`dnsx`, and explicitly opted-in TCP `naabu` profiles remain
 available. Their installed binaries and pinned invocation semantics are trusted; this is not a network
 sandbox and their traffic is not charged to a native HTTP run. Restoring target-HTTP profiles requires
 an enforceable per-request egress adapter covering scope, redirects, quotas, permissions and

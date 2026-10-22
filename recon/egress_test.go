@@ -43,7 +43,7 @@ func TestTargetHTTPProfilesCannotRunWithAllPermissions(t *testing.T) {
 }
 
 func TestOnlyExplicitNonTargetHTTPProfilesCanExecute(t *testing.T) {
-	allowed := map[string]EgressClass{"subfinder": EgressProvider, "gau": EgressProvider, "puredns": EgressDNS, "dnsx": EgressDNS, "naabu": EgressTCP}
+	allowed := map[string]EgressClass{"assetfinder": EgressProvider, "chaos": EgressProvider, "subfinder": EgressProvider, "gau": EgressProvider, "puredns": EgressDNS, "dnsx": EgressDNS, "naabu": EgressTCP}
 	for _, spec := range DefaultToolRegistry().List() {
 		err := CheckProfileEgress(spec.Name)
 		want, ok := allowed[spec.Name]

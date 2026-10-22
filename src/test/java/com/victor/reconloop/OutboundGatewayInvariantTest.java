@@ -4,6 +4,7 @@ import burp.api.montoya.MontoyaApi;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.MemberReferenceTree;
 import com.sun.source.tree.MethodInvocationTree;
+import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.NewClassTree;
 import com.sun.source.util.JavacTask;
 import com.sun.source.util.TreePath;
@@ -116,6 +117,18 @@ public class OutboundGatewayInvariantTest {
         }
     }
 
+    @Test public void passiveLauncherExceptionIsLimitedToItsOneStartMethod() throws Exception {
+        for (String body : List.of("new ProcessBuilder(\"sqlmap\").start();",
+                "java.util.concurrent.Callable<Process> start = new ProcessBuilder(\"httpx\")::start;")) {
+            JavaFileObject source = new SimpleJavaFileObject(URI.create("string:///DomainReconProcess.java"), JavaFileObject.Kind.SOURCE) {
+                @Override public CharSequence getCharContent(boolean ignored) {
+                    return "package com.victor.reconloop; class DomainReconProcess { void other() throws Exception { " + body + " } }";
+                }
+            };
+            assertFalse(body, violations(List.of(source)).isEmpty());
+        }
+    }
+
     private static JavaFileObject fixture(String operation) {
         return new SimpleJavaFileObject(URI.create("string:///Bypass.java"), JavaFileObject.Kind.SOURCE) {
             @Override public CharSequence getCharContent(boolean ignoreEncodingErrors) {
@@ -153,7 +166,9 @@ public class OutboundGatewayInvariantTest {
                     boolean forbidden = false;
                     if ((type.equals("java.lang.ProcessBuilder") && Set.of("start", "startPipeline").contains(name))
                             || (type.equals("java.lang.Runtime") && name.equals("exec"))) {
-                        forbidden = true; // No Java external target processes, including version checks.
+                        // One fixed passive-sidecar launcher; no shells, pipelines or target-tool starts.
+                        forbidden = !(type.equals("java.lang.ProcessBuilder") && name.equals("start")
+                                && caller.equals(PACKAGE + "DomainReconProcess") && enclosingMethod().equals("launch"));
                     } else if (type.equals("burp.api.montoya.http.Http")) {
                         if (name.equals("sendRequest")) {
                             forbidden = !Set.of(PACKAGE + "MontoyaTargetTransport",
@@ -183,6 +198,12 @@ public class OutboundGatewayInvariantTest {
                         if (p.getLeaf() instanceof ClassTree && trees.getElement(p) instanceof TypeElement t) {
                             return t.getQualifiedName().toString();
                         }
+                    }
+                    return "";
+                }
+                private String enclosingMethod() {
+                    for (TreePath p = getCurrentPath(); p != null; p = p.getParentPath()) {
+                        if (p.getLeaf() instanceof MethodTree method) return method.getName().toString();
                     }
                     return "";
                 }

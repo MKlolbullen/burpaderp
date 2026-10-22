@@ -21,6 +21,7 @@ final class ReconPanel extends JPanel {
 
     private JTabbedPane tabs;
     private Component aiTab;
+    private Component domainReconTab;
     private List<CredentialRow> credentialRows;
     private AiAnalysisPanel aiReview;
     private JTabbedPane aiModes;
@@ -310,6 +311,8 @@ final class ReconPanel extends JPanel {
         activeResults.add(viewEvidence, BorderLayout.SOUTH);
         tabs.addTab("Active tests", activeResults);
         tabs.addTab("Hosts / IPs", buildAssetPanel(controller, assetTable, assetModel));
+        domainReconTab = new DomainReconPanel(controller::enumerateDomain, controller::importSidecarJsonl);
+        tabs.addTab("Recon chain", domainReconTab);
         tabs.addTab("XSS vector library", new JScrollPane(vectorTable));
         aiTab = buildAiPanel(controller);
         tabs.addTab("AI analysis", aiTab);
@@ -318,7 +321,8 @@ final class ReconPanel extends JPanel {
         tabs.addTab("AI feed", buildAiFeedPanel(controller));
         tabs.addTab("Nuclei templates (AI)", buildNucleiPanel(controller));
         tabs.addChangeListener(e -> {
-            boolean show = tabs.getSelectedComponent() != aiTab && tabs.getSelectedComponent() != agentTeamTab;
+            boolean show = tabs.getSelectedComponent() != aiTab && tabs.getSelectedComponent() != agentTeamTab
+                    && tabs.getSelectedComponent() != domainReconTab;
             scanControls.setSelected(show); controls.setVisible(show);
             scanControls.setText(show ? "Hide scan controls" : "Show scan controls");
             revalidate();
