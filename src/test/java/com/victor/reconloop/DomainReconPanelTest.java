@@ -9,6 +9,15 @@ import java.util.function.Consumer;
 import static org.junit.Assert.*;
 
 public class DomainReconPanelTest {
+    @Test public void nativeChoiceAndQuotaChangesMustBePreviewedAgain()throws Exception{
+        SwingUtilities.invokeAndWait(()->{
+            AtomicReference<DomainReconProcess.Plan> launched=new AtomicReference<>();
+            var panel=new DomainReconPanel((plan,events,done)->{launched.set(plan);return new CompletableFuture<Void>();},(path,done)->fail("auto import"));
+            panel.target.setText("example.com");panel.output.setText("output");panel.preparePlan();assertTrue(panel.start.isEnabled());assertFalse(panel.live.isSelected());
+            panel.live.doClick();assertFalse(panel.start.isEnabled());panel.perHost.setValue(12);panel.preparePlan();assertTrue(panel.preview.getText().contains("per host 12"));
+            assertTrue(panel.preview.getText().contains("at most 100 total GET"));panel.start();assertEquals(12,launched.get().perHost());assertTrue(launched.get().workflow());panel.cancel();
+        });
+    }
     @Test public void previewRunsNothingAndChangesInvalidatePlan() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             var panel = new DomainReconPanel((plan,events,done) -> { fail("preview launched process");return null; }, (path, done) -> fail("preview imported"));

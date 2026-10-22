@@ -33,12 +33,16 @@ func main() {
 		err = runRender(os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
 	case "adapt":
 		err = runAdapt(os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
+	case "adapt-report":
+		err = runReport(os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
 	case "run":
 		err = runTool(os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
 	case "enumerate":
 		err = runEnumerate(os.Args[2:], os.Stdout, os.Stderr)
 	case "chain":
 		err = runChain(os.Args[2:], os.Stdout)
+	case "workflow":
+		err = runWorkflow(os.Args[2:], os.Stdout, os.Stderr)
 	case "help", "-h", "--help":
 		usage(os.Stdout)
 		return
@@ -60,6 +64,7 @@ Usage:
   reconctl plan
   reconctl edge --from httpx --to katana
   reconctl chain --domain example.com  # full staged planning manifest; launches nothing
+  reconctl workflow --domain example.com --output-dir ./recon-runs  # provider + DNS + archive chain
 
   # passive assetfinder -> subfinder -> chaos; per-run deduped files + JSONL GUI events
   reconctl enumerate --domain example.com --output-dir ./recon-runs
@@ -73,6 +78,8 @@ Usage:
 
   # actual machine-readable/raw tool stdout -> normalized Record JSONL
   reconctl adapt --tool dnsx --scope-domain example.com
+  reconctl adapt-report --tool whatweb --scope-domain example.com < whatweb.json
+  # JSFinder -ou URL exports: reconctl adapt --tool jsfinder --scope-domain example.com < urls.txt
 
   # execute a pinned command profile between both contract sockets
   reconctl run --tool subfinder --scope-domain example.com < domains.jsonl

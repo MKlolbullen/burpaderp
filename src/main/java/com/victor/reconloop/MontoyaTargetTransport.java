@@ -14,12 +14,19 @@ import java.util.Objects;
 final class MontoyaTargetTransport implements ActiveRequestGateway.PreparedSender {
     private final MontoyaApi api;
     private final DestinationGuard destinations;
+    private final long responseTimeout;
 
     MontoyaTargetTransport(MontoyaApi api) { this(api, DestinationGuard.system()); }
 
     MontoyaTargetTransport(MontoyaApi api, DestinationGuard destinations) {
+        this(api,destinations,0);
+    }
+
+    MontoyaTargetTransport(MontoyaApi api, DestinationGuard destinations,long responseTimeout) {
         this.api = Objects.requireNonNull(api, "api");
         this.destinations = Objects.requireNonNull(destinations, "destinations");
+        if(responseTimeout<0||responseTimeout>60000)throw new IllegalArgumentException("invalid response deadline");
+        this.responseTimeout=responseTimeout;
     }
 
     @Override public ActiveRequestGateway.Dispatch prepare(HttpRequest request) throws Exception {
@@ -31,6 +38,7 @@ final class MontoyaTargetTransport implements ActiveRequestGateway.PreparedSende
         HttpRequest pinned = request.withService(HttpService.httpService(destination.address(), port, secure));
         verify(pinned, destination.address(), port, secure, bytes);
         RequestOptions options = RequestOptions.requestOptions().withRedirectionMode(RedirectionMode.NEVER);
+        if(responseTimeout>0)options=options.withResponseTimeout(responseTimeout);
         if (secure && !destination.serverName().isEmpty()) options = options.withServerNameIndicator(destination.serverName());
         RequestOptions boundOptions = Objects.requireNonNull(options);
         return () -> {

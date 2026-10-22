@@ -440,14 +440,13 @@ the checkout and its metadata URL; it performs no target download.
 
 ## Run governance & the `reconctl` sidecar
 
-The **Recon chain** tab previews and exports a dependency plan covering subfinder, assetfinder,
-chaos-client, Amass, dnsx, httpx, WhatWeb, Katana, GoSpider, Cariddi, JSFinder, Waybackpy,
-waybackurls and urlfinder. Its first runnable stage accepts a domain and runs bounded passive
-assetfinder/subfinder/chaos queries through the Go sidecar, producing deduplicated `subs.txt`,
-`sorted_subs.txt`, typed `hosts.jsonl` and per-tool status files. Import is a separate action that
-rechecks current Burp scope. The complete chain is a planning manifest: additional adapters remain
-planned, and target HTTP tools remain blocked by #44. See the
-[domain workflow and tool-support table](recon/README.md#domain-form-and-chained-recon-plan).
+The **Recon chain** tab runs a bounded provider/DNS/archive workflow using subfinder, assetfinder,
+chaos-client, pinned passive Amass, dnsx, waybackurls, urlfinder and Waybackpy. Its optional native
+HTTP phase probes, fingerprints, crawls and extracts JavaScript endpoints through the shared Burp
+gateway with one quota ledger. Captured requests/responses and JS can be staged locally for the
+existing AI/five-agent review. The original httpx, WhatWeb, Katana, GoSpider, Cariddi and JSFinder
+processes remain blocked pending governed egress; offline report adapters are available. See the
+[runnable chain, limits and tool-support table](recon/README.md#runnable-recon-chain).
 
 Active behaviour is governed by an explicit control plane: a per-run request policy and hard request
 **budget** gate every native Montoya target dispatch. Each active run carries a scope snapshot.

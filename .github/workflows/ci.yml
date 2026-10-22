@@ -56,6 +56,7 @@ jobs:
           mkdir -p build/recon
           cp /tmp/reconctl build/recon/reconctl-linux-amd64
           /tmp/reconctl enumerate --help
+          /tmp/reconctl workflow --help
           /tmp/reconctl chain --domain example.com > build/recon/example-chain.json
 
       - name: Test runtime verification receiver and offline comparison

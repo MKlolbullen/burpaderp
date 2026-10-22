@@ -90,6 +90,9 @@ final class ReconController implements HttpHandler {
     private final ExecutorService domainReconWorker = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "Burp-Recon-Hound-Domain"); t.setDaemon(true); return t;
     });
+    private final ExecutorService assetWorker = Executors.newSingleThreadExecutor(r -> {
+        Thread t=new Thread(r,"Burp-Recon-Hound-Assets");t.setDaemon(true);return t;
+    });
 
     private static ExecutorService newActiveWorker() {
         return Executors.newSingleThreadExecutor(r -> {
@@ -118,9 +121,11 @@ final class ReconController implements HttpHandler {
 
     private final NativeRunRegistry activeRuns = new NativeRunRegistry(false);
     private final NativeRunRegistry crawlRuns = new NativeRunRegistry(true);
+    private final NativeRunRegistry domainRuns = new NativeRunRegistry(true);
     private ScanRun crawlRun; // guarded by crawlRuns
     private int previousCrawlUsage; // retired sessions; pause/resume never refills the crawl cap
     private final ActiveRequestGateway.Sender targetTransport;
+    private final DestinationGuard targetDestinations;
 
     private final AtomicBoolean running = new AtomicBoolean(true);
     private final AtomicBoolean crawlEnabled = new AtomicBoolean(true);
@@ -188,6 +193,7 @@ final class ReconController implements HttpHandler {
         this.activeWorker = Objects.requireNonNull(activeWorker, "activeWorker");
         this.api = api;
         this.targetTransport = new MontoyaTargetTransport(api, destinations);
+        this.targetDestinations=destinations;
         this.reporter = new IssueReporter(api);
         this.findingModel = findingModel;
         this.discoveryModel = discoveryModel;
@@ -478,9 +484,32 @@ final class ReconController implements HttpHandler {
     /** Separate worker for the fixed passive sidecar; it never occupies the target request queue. */
     Future<?> enumerateDomain(DomainReconProcess.Plan plan, Consumer<DomainReconProcess.Event> events,
                               Consumer<DomainReconProcess.Outcome> completion) {
+        NativeRunRegistry.Ticket ticket=domainRuns.ticket();
         return domainReconWorker.submit(() -> {
             var outcome = new DomainReconProcess().run(plan, event -> SwingUtilities.invokeLater(() -> events.accept(event)));
-            SwingUtilities.invokeLater(() -> completion.accept(outcome));
+            String sidecarState=outcome.state(),nativeState="SKIPPED";int nativeDispatches=0;
+            if(plan.workflow()&&plan.httpBudget()>0&&Set.of("SUCCESS","PARTIAL").contains(outcome.state())) {
+                ScanRun run=domainRuns.begin(ticket,ScanProfile.DISCOVERY,new ScopeSnapshot(Set.of(plan.domain()),Set.of()),
+                        new ScanRun.RequestLimits(plan.httpBudget(),plan.perHost(),3,plan.httpBudget()));
+                try {
+                    var inputs=ReconWorkflowInputs.load(plan);
+                    var gateway=new ActiveRequestGateway(RequestPolicy.safeDefault(url -> NativeReconChain.canonical(url,plan.domain())!=null&&api.scope().isInScope(url)),
+                            new MontoyaTargetTransport(api,targetDestinations,15000));
+                    var nativeResult=new NativeReconChain(gateway,url->httpRequestFromUrl(url).withMethod("GET")).run(plan,inputs,run,
+                            event->SwingUtilities.invokeLater(()->events.accept(event)));
+                    String state=nativeResult.state().equals("SUCCESS")?outcome.state():nativeResult.state().equals("FAILED")?"PARTIAL":nativeResult.state();
+                    nativeState=nativeResult.state();nativeDispatches=nativeResult.dispatched();
+                    outcome=new DomainReconProcess.Outcome(state,outcome.count(),outcome.detail()+" Native phase: "+nativeResult.dispatched()+" dispatches; "+nativeResult.responses()+" responses. "+nativeResult.detail());
+                } catch(Exception e){run.fail("workflow inputs or native phase failed");nativeState="FAILED";outcome=new DomainReconProcess.Outcome("PARTIAL",outcome.count(),"Native inputs or HTTP phase failed validation; provider artifacts remain available.");}
+                finally {domainRuns.finish(ticket);}
+            }
+            boolean interrupted=Thread.interrupted();
+            try {
+                if(Files.isDirectory(plan.runDir(),java.nio.file.LinkOption.NOFOLLOW_LINKS))NativeReconChain.writeJson(plan.runDir().resolve("chain-result.json"),Map.of("schema_version",1,"workflow_run_id",plan.runId(),"state",outcome.state(),"sidecar_state",sidecarState,"native_state",nativeState,"native_dispatches",nativeDispatches,"host_candidates",outcome.count(),"native_http_enabled",plan.httpBudget()>0));
+            }catch(IOException e){outcome=new DomainReconProcess.Outcome("FAILED",outcome.count(),"Could not save the overall chain result; partial phase artifacts remain.");}
+            finally {if(interrupted)Thread.currentThread().interrupt();}
+            var finished=outcome;
+            SwingUtilities.invokeLater(() -> completion.accept(finished));
         });
     }
 
@@ -493,7 +522,7 @@ final class ReconController implements HttpHandler {
             deliverImportCompletion(completion, "[error] Choose a reconctl JSONL file first.");
             return;
         }
-        worker.submit(() -> {
+        assetWorker.submit(() -> {
             ScanRun run = ScanRun.begin(ScanProfile.EXTERNAL_TOOL, ScopeSnapshot.empty(), 0);
             try (Reader reader = Files.newBufferedReader(path)) {
                 SidecarEventImporter.ImportResult result = SidecarEventImporter.importJsonl(reader,
@@ -1068,7 +1097,7 @@ final class ReconController implements HttpHandler {
     }
 
     void queueCurrentInScopeSiteMap() {
-        worker.submit(() -> {
+        assetWorker.submit(() -> {
             api.siteMap().requestResponses().stream()
                     .map(HttpRequestResponse::request)
                     .filter(Objects::nonNull)
@@ -1091,6 +1120,7 @@ final class ReconController implements HttpHandler {
     void reset() {
         stateGeneration.incrementAndGet();
         activeRuns.invalidate();
+        domainRuns.invalidate();
         synchronized (crawlRuns) {
             crawlRuns.invalidate();
             crawlRun = null;
@@ -1129,6 +1159,7 @@ final class ReconController implements HttpHandler {
         running.set(false);
         activeRuns.close();
         crawlRuns.close();
+        domainRuns.close();
         // Stop the periodic saver first so it can't race the final blocking save on the PersistedObject.
         oobPoller.shutdownNow();
         saveStateBlocking();
@@ -1136,6 +1167,7 @@ final class ReconController implements HttpHandler {
         activeWorker.shutdownNow();
         llmWorker.shutdownNow();
         domainReconWorker.shutdownNow();
+        assetWorker.shutdownNow();
     }
 
     /** Synchronous save for extension unload, when the async EDT task might not run in time. */

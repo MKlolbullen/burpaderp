@@ -26,7 +26,7 @@ This avoids reimplementing Burp in Go while avoiding shell-pipe orchestration in
 | Go process start | The sole runner resolves the canonical binary/profile and blocks target HTTP egress before command construction, regardless of risk opt-ins. Provider/DNS profiles and opt-in TCP connect scans remain separate capabilities. |
 | Go tool input/output | `ToolSpec` plus `ContractSocket` validates kinds, schema, scope, size limits, and quarantines rejected JSONL. |
 | Go execution identity | `reconctl run` emits a UUID `run_id` on every accepted output record and in its run summary. |
-| Java → passive sidecar | Only `DomainReconProcess.launch` may call `ProcessBuilder.start`, with the fixed `reconctl enumerate` argument vector. No shell, pipeline, arbitrary tool arguments or native target producer is enabled. Java validates the domain, bounds, UUID and returned protocol; interruption/unload cleans up observed processes. |
+| Java → provider/DNS sidecar | Only `DomainReconProcess.launch` may call `ProcessBuilder.start`, with fixed `reconctl enumerate` or `workflow` arguments. No shell, pipeline or arbitrary tool arguments are enabled. The Go boundary still rejects all target-HTTP CLI profiles. Java validates the domain, bounds, UUID and versioned event stream; interruption/unload cleans up observed processes. |
 | Burp safe HTTP paths | Discovery crawl/redirects, parameter discovery, JWT read-only replay, and subdomain-takeover checks run through `ScanRun` + `RequestPolicy` + `ActiveRequestGateway`; only in-scope `GET`/`HEAD`/`OPTIONS` requests can dispatch, and each logical run has one atomic request budget. |
 | Go → Burp import | The importer bounds line/record count, parses only canonical record kinds, re-checks current Burp scope, and rejects payload/CIDR records that have no safe Burp-side materialisation. Importing never launches a process, adds scope, queues a crawl, or sends traffic. |
 | Evidence lifecycle | `SIGNAL`, `CANDIDATE`, `REPRODUCED`, `CONFIRMED`, `EXPLOITABLE`, and `REJECTED` replace a lossy boolean. Legacy `true` maps conservatively to `REPRODUCED`. |
@@ -237,22 +237,31 @@ lowest production entry point, with no opt-in bypass.
 | `PdcpClient.createScan` → `POST /v1/scans` → remote Nuclei target requests | Returns a block reason without HTTP. Controller blocks before resolving credentials or scheduling work. Read-only existing status/results stay fixed to `https://api.projectdiscovery.io` with GET and `Redirect.NEVER`. There is no create/poll loop or launch button. | `PdcpClientEgressTest`: no creation transport calls, GET-only fixed-origin reads and redirecting client rejection. Controller integration checks completion/error callback and no native sends. |
 | `recon.RunProfile` → `RunExternal` → `exec.CommandContext` for `httpx`, `katana`, `nuclei` | `CheckProfileEgress` rejects their canonical `target_http_unsupported` profiles regardless of every risk flag. The private `runExternal` repeats the check at process start and resolves the binary internally; it accepts no binary override. Unknown/unprofiled tools cannot execute. Existing output adapters, `socket`, `render`, `adapt`, `plan` and import stay offline. | `egress_test.go`: all flags granted, zero executions and no executable marker via either entry point. `process_invariant_test.go` resolves import aliases and function references; only the runner may construct processes. |
 
-Go profiles retained for execution are explicitly `assetfinder`/`subfinder`/`chaos`/`gau` (provider queries), `puredns`/`dnsx`
+Go profiles retained for execution are explicitly `assetfinder`/`subfinder`/`chaos`/version-guarded `amass`/`waybackurls`/`urlfinder`/`waybackpy`/`gau` (provider queries), `puredns`/`dnsx`
 (DNS), and `naabu` (TCP connect, still requires `--allow-network` and network scope). These do not share
 native HTTP quotas. The contract trusts installed binaries and their pinned invocation semantics; it
 is not an operating-system network sandbox against replaced binaries, configuration or tool changes.
 `doctor` exposes execution-block reasons and `plan` exposes each profile's egress class. New tools
 need an explicit profile/egress review; the regression allowlist prevents silent new capabilities.
 
-The **Recon chain** form previews an exportable staged dependency plan and executes only the three
-passive enumerators through the Go runner. The shared catalog distinguishes runnable enumeration,
-separate CLI DNS enrichment, missing profiles/adapters and blocked target HTTP stages. It is never
-interpreted as arbitrary commands. `httpx-plan.json` describes metadata flags without launching
-httpx. Versioned events, exclusive UUID output directories, deduped host files, partial states and
-current-scope import are covered by Go fixtures, Java protocol/UI checks and an offline sidecar
-round trip. Cancellation tests include a real child holding the stdout pipe. The trust assumption
-for installed tools/configuration remains; process lifecycle controls do not establish controlled
-network egress. See [the workflow](../recon/README.md#domain-form-and-chained-recon-plan).
+The **Recon chain** form now runs eight fixed provider/DNS/archive profiles and a local URL union.
+Amass is guarded by exact v3.23.3 output before passive enumeration; Waybackpy only uses CDX reads.
+All original HTTP CLI profiles, including WhatWeb/GoSpider/Cariddi/JSFinder, remain blocked with no
+opt-in bypass; offline report adapters are separate. The optional native GET probe/fingerprint/crawl/
+JS phase uses the existing `ActiveRequestGateway`, numeric service binding and current Burp scope.
+One `ScanRun` ledger covers initial roots, archives, HTTPS transport fallbacks, redirects and extracted
+links. The preview discloses global/host/endpoint/probe quotas, URL/depth/rate/deadline bounds and
+anonymous request behavior. Native registry invalidation and thread interruption prevent a fresh
+send after reset/cancellation; an in-flight call may finish until its 15-second response timeout.
+
+Provider artifacts are reparsed and correlated before any native candidate can dispatch. Versioned
+exchange evidence is retained with linked workflow/native run IDs and explicit byte omissions;
+observations are `SIGNAL`, never automatic vulnerability confirmation. Local staging of captured
+requests/responses/JS does not call a provider or run a PoC. Native transport/fingerprinting is a
+basic role implementation, not scanner equivalence or physical socket/TLS attestation. The existing
+physical Burp release gate remains. `chain-result.json` records the overall sidecar/native result;
+per-phase files remain separate. A dedicated asset worker avoids importer starvation behind the
+crawler's long-running loop. See [the runnable workflow](../recon/README.md#runnable-recon-chain).
 
 This slice deliberately reduces functionality instead of asserting that a process-level permission
 can govern downstream sends. Restoring CLI fetching needs a policy-bound one-hop JDK transport,

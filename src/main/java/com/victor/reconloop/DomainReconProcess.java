@@ -10,8 +10,16 @@ import java.util.function.Consumer;
 /** The only Java process launcher: a fixed passive reconctl subcommand, never a shell/tool override. */
 final class DomainReconProcess {
     static final List<String> TOOLS = List.of("assetfinder", "subfinder", "chaos");
+    static final List<String> WORKFLOW_TOOLS = List.of("assetfinder", "subfinder", "chaos", "amass", "dnsx", "waybackurls", "urlfinder", "waybackpy");
     static final Set<String> LLM_KEYS = Set.of("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "VENICE_API_KEY");
-    record Plan(String domain, String executable, Path outputDir, String runId, int maxHosts, int toolSeconds) {
+    record Plan(String domain, String executable, Path outputDir, String runId, int maxHosts, int toolSeconds,
+                boolean workflow, int maxUrls, int httpBudget, int depth,int perHost) {
+        Plan(String domain,String executable,Path outputDir,String runId,int maxHosts,int toolSeconds) {
+            this(domain,executable,outputDir,runId,maxHosts,toolSeconds,false,10000,0,2,50);
+        }
+        Plan(String domain,String executable,Path outputDir,String runId,int maxHosts,int toolSeconds,boolean workflow,int maxUrls,int httpBudget,int depth){
+            this(domain,executable,outputDir,runId,maxHosts,toolSeconds,workflow,maxUrls,httpBudget,depth,50);
+        }
         Plan {
             domain = DomainReconProcess.domain(domain);
             if (executable == null || executable.isBlank() || executable.indexOf('\0') >= 0 || executable.contains("\n"))
@@ -22,13 +30,38 @@ final class DomainReconProcess {
                 throw new IllegalArgumentException("Invalid run UUID.");
             if (maxHosts < 1 || maxHosts > 25000 || toolSeconds < 5 || toolSeconds > 1200)
                 throw new IllegalArgumentException("Hosts must be 1..25000; tool deadline 5..1200 seconds.");
+            if (maxUrls<1 || maxUrls>25000 || httpBudget<0 || httpBudget>10000 || depth<0 || depth>5 || perHost<1||perHost>10000||(!workflow && httpBudget>0))
+                throw new IllegalArgumentException("Invalid workflow URL, HTTP budget or depth limit.");
         }
         List<String> command() {
-            return List.of(executable, "enumerate", "--domain", domain, "--output-dir", outputDir.toString(),
-                    "--run-id", runId, "--max-hosts", Integer.toString(maxHosts), "--tool-timeout-seconds", Integer.toString(toolSeconds));
+            var command = new ArrayList<>(List.of(executable, workflow ? "workflow" : "enumerate", "--domain", domain, "--output-dir", outputDir.toString(),
+                    "--run-id", runId, "--max-hosts", Integer.toString(maxHosts), "--tool-timeout-seconds", Integer.toString(toolSeconds)));
+            if (workflow) {command.add("--max-urls");command.add(Integer.toString(maxUrls));}
+            return List.copyOf(command);
         }
         Path runDir() { return outputDir.resolve(domain).resolve(runId); }
         String preview() {
+            if (workflow) return "Workflow " + runId + " · " + domain + "\nOutput: " + runDir()
+                    + "\n\nProvider enumeration: assetfinder, subfinder, chaos, Amass (exact v3.23.3 required)."
+                    + "\nDNS enrichment: dnsx. Independent archive branch: waybackurls, urlfinder, Waybackpy CDX reads."
+                    + "\nMissing tools/providers/unsupported Amass versions produce explicit partial states."
+                    + "\nLimits: " + maxHosts + " hosts; " + maxUrls + " URLs; " + toolSeconds + " seconds per tool."
+                    + "\nTrusted installed binaries/configuration; no shell or OS network sandbox. Chaos uses PDCP_API_KEY/config."
+                    + "\nURL merge preserves escaped paths and query ordering. Archive candidates do not prove liveness."
+                    + "\nImport is separate and rechecks Burp scope. No automatic scope expansion or AI provider submission."
+                    + "\n\n" + (httpBudget==0 ? "Native HTTP phase: DISABLED."
+                    : "Native HTTP/crawl/JS phase: ENABLED, at most " + httpBudget + " total GET dispatches, depth " + depth
+                    + ".\nCurrent Burp scope and destination checks on every request/redirect; one global/host/endpoint/probe ledger."
+                    + "\nQuotas: global " + httpBudget + ", per host " + Math.min(perHost,httpBudget) + ", per endpoint " + Math.min(3,httpBudget) + ", per probe " + httpBudget + ". URL candidates capped at " + maxUrls + "."
+                    + "\nStarts from bounded discovered roots and archive URLs; later links, JS and redirects are conditional."
+                    + "\nRoots, archives and crawl follow-ups are scheduled round-robin; at most 10 dispatches/sec, 10,000 pending URLs and 200 extracted links/response."
+                    + "\nThe native phase has a " + toolSeconds + " second overall deadline; an admitted send may finish after cancellation/deadline (15 second transport timeout)."
+                    + "\nNo captured authentication headers are copied; no forms/PoCs or external crawler processes run."
+                    + "\nHTTPS roots may fall back to HTTP only after transport failure, charging the same budget."
+                    + "\nEach response gets fingerprint signals and bounded request/response evidence; physical peer/TLS details are not attested.")
+                    + "\n\nExternal httpx/WhatWeb/Katana/GoSpider/Cariddi/JSFinder execution remains BLOCKED (#44)."
+                    + "\nNative stages implement their basic probing/crawl/extraction roles through the shared gateway."
+                    + "\n\nExact sidecar argument vector (JSON):\n" + Json.write(command());
             return "Domain: " + domain + "\nRun: " + runId + "\nOutput: " + runDir()
                     + "\n\nPassive provider queries: assetfinder --subs-only; subfinder -all -recursive; chaos -d."
                     + "\nTools must be installed on PATH; Chaos reads PDCP_API_KEY/config. No API keys in argv."
@@ -77,10 +110,11 @@ final class DomainReconProcess {
         if (Thread.currentThread().isInterrupted()) return new Outcome("CANCELLED", 0, "Cancelled before launch.");
         Process process;
         try { process = launcher.start(plan.command()); }
-        catch (IOException e) { return new Outcome("FAILED", 0, "Could not launch reconctl. Check executable and permissions."); }
+        catch (IOException | RuntimeException e) { return new Outcome("FAILED", 0, "Could not launch reconctl. Check executable and permissions."); }
         Set<ProcessHandle> descendants = new HashSet<>();
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3L * plan.toolSeconds() + 15);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos((plan.workflow()?8L:3L) * plan.toolSeconds() + 20);
         Protocol protocol = new Protocol(plan);
+        ReconWorkflowProtocol workflowProtocol = plan.workflow() ? new ReconWorkflowProtocol(plan) : null;
         try (InputStream input = process.getInputStream()) {
             process.getOutputStream().close();
             long bytes = 0;
@@ -89,7 +123,7 @@ final class DomainReconProcess {
             byte[] chunk = new byte[8192];
             while (true) {
                 if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
-                if (System.nanoTime() > deadline) return new Outcome("TIMEOUT", protocol.count(), "Overall deadline reached; partial files may remain.");
+                if (System.nanoTime() > deadline) return new Outcome("TIMEOUT", workflowProtocol==null?protocol.count():workflowProtocol.hosts(), "Overall deadline reached; partial files may remain.");
                 captureChildren(process, descendants);
                 int available = input.available();
                 if (available == 0) {
@@ -102,22 +136,22 @@ final class DomainReconProcess {
                 if (size < 0) break;
                 for (int i = 0; i < size; i++) {
                     int next = Byte.toUnsignedInt(chunk[i]);
-                    if (++bytes > (32L << 20) || line.size() >= (16 << 10)) throw new IOException("protocol output limit");
+                    if (++bytes > ((plan.workflow()?128L:32L) << 20) || line.size() >= (32 << 10)) throw new IOException("protocol output limit");
                     if (next != '\n') { line.write(next); continue; }
-                    if (++lines > plan.maxHosts() + 5) throw new IOException("event limit");
-                    Event event = protocol.accept(line.toString(StandardCharsets.UTF_8)); line.reset();
+                    if (++lines > (plan.workflow()?2*plan.maxHosts()+plan.maxUrls()+10:plan.maxHosts()+5)) throw new IOException("event limit");
+                    Event event = workflowProtocol==null ? protocol.accept(line.toString(StandardCharsets.UTF_8)) : workflowProtocol.accept(line.toString(StandardCharsets.UTF_8)); line.reset();
                     events.accept(event);
                 }
             }
             if (line.size() != 0) throw new IOException("incomplete event");
             if (!process.waitFor(2, TimeUnit.SECONDS)) throw new IOException("sidecar did not exit");
-            return protocol.finish(process.exitValue());
+            return workflowProtocol==null ? protocol.finish(process.exitValue()) : workflowProtocol.finish(process.exitValue());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return new Outcome("CANCELLED", protocol.count(), "Cancelled; partial files may be available.");
+            return new Outcome("CANCELLED", workflowProtocol==null?protocol.count():workflowProtocol.hosts(), "Cancelled; partial files may be available.");
         } catch (IOException | RuntimeException e) {
             boolean cancelled = Thread.currentThread().isInterrupted();
-            return new Outcome(cancelled ? "CANCELLED" : "FAILED", protocol.count(),
+            return new Outcome(cancelled ? "CANCELLED" : "FAILED", workflowProtocol==null?protocol.count():workflowProtocol.hosts(),
                     cancelled ? "Job stopped; partial files may be available."
                             : "Sidecar output failed validation or was incomplete. Check summary.json; raw stderr is not displayed.");
         } finally {

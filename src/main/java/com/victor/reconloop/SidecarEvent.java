@@ -160,7 +160,7 @@ final class SidecarEvent {
                     || !("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))) {
                 throw new IllegalArgumentException("URL must be absolute HTTP(S) without userinfo");
             }
-            return uri.normalize().toString();
+            return uri.toString(); // Preserve the candidate request target, including escaped path/query ordering.
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException("invalid HTTP(S) URL");
         }

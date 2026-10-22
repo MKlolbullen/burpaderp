@@ -34,6 +34,8 @@ final class FakeMontoya implements AutoCloseable {
     final List<String> serverNames = new CopyOnWriteArrayList<>();
     private final Map<RequestOptions, String> sni = Collections.synchronizedMap(new IdentityHashMap<>());
     final List<RedirectionMode> redirectModes = new CopyOnWriteArrayList<>();
+    final List<Long> responseTimeouts=new CopyOnWriteArrayList<>();
+    private final Map<RequestOptions,Long> timeouts=Collections.synchronizedMap(new IdentityHashMap<>());
     final List<HttpRequestResponse> siteMap = new CopyOnWriteArrayList<>();
     final List<String> scopeChanges = new CopyOnWriteArrayList<>();
     final List<String> apiAccesses = new CopyOnWriteArrayList<>();
@@ -70,6 +72,7 @@ final class FakeMontoya implements AutoCloseable {
             case "requestOptions" -> proxy(RequestOptions.class, (value, call, parameters) -> {
                 if (call.getName().equals("withRedirectionMode")) options.put((RequestOptions) value, (RedirectionMode) parameters[0]);
                 if (call.getName().equals("withServerNameIndicator")) sni.put((RequestOptions) value, (String) parameters[0]);
+                if (call.getName().equals("withResponseTimeout")) timeouts.put((RequestOptions)value,(Long)parameters[0]);
                 return value;
             });
             default -> empty(method.getReturnType());
@@ -88,6 +91,7 @@ final class FakeMontoya implements AutoCloseable {
                 sent.add(request);
                 redirectModes.add(mode);
                 serverNames.add(sni.getOrDefault(supplied, ""));
+                responseTimeouts.add(timeouts.getOrDefault(supplied,0L));
                 onSend.accept(request);
                 return pair(request, responder.apply(request));
             });
@@ -169,6 +173,7 @@ final class FakeMontoya implements AutoCloseable {
         return proxy(HttpResponse.class, (self, method, args) -> switch (method.getName()) {
             case "statusCode" -> (short) status;
             case "bodyToString" -> body;
+            case "body" -> bytes(body);
             case "headerValue" -> getHeader(headers, (String) args[0]);
             case "hasHeader" -> getHeader(headers, (String) args[0]) != null;
             case "headers" -> headers.entrySet().stream().map(e -> header(e.getKey(), e.getValue())).toList();
@@ -263,6 +268,7 @@ final class FakeMontoya implements AutoCloseable {
         byte[] data = text.getBytes(StandardCharsets.UTF_8);
         return proxy(ByteArray.class, (self, method, args) -> switch (method.getName()) {
             case "getBytes" -> data.clone();
+            case "getByte" -> data[(int)args[0]];
             case "length" -> data.length;
             case "toString" -> text;
             default -> empty(method.getReturnType());

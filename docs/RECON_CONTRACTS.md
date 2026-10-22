@@ -4,6 +4,10 @@ Current execution status: target-HTTP Go profiles, external sqlmap, PDCP scan cr
 fetching are disabled pending governed egress (#44). Graphs and planned compositions below describe
 contracts, not permission to execute. See [run governance](RUN_GOVERNANCE.md) for the enforced boundary.
 
+The **Recon chain** coordinator now executes fixed provider/DNS/archive profiles, followed optionally
+by native GET probing, fingerprinting, crawling and static JS extraction through the mandatory Burp
+gateway. It does not enable the original HTTP tool processes. See the [runnable workflow](../recon/README.md#runnable-recon-chain).
+
 
 The newer contract-first diagram is the stronger architecture. The older diagram described a useful *sequence of tools*; this one defines what each stage is allowed to consume and produce, which is what makes the sequence reliable enough to become a real orchestration engine.
 
@@ -12,7 +16,7 @@ The newer contract-first diagram is the stronger architecture. The older diagram
 | Pipeline concern | Existing Recon Hound | Contract-sidecar change |
 | --- | --- | --- |
 | Scope / URL normalization | Burp scope checks, URL normalization in discovery/CLI | First-class typed scope at every external boundary |
-| Passive subdomains | crt.sh client | Tool contracts for subfinder/amass/assetfinder/chaos/findomain |
+| Passive subdomains | crt.sh client plus runnable domain workflow | Pinned subfinder/assetfinder/chaos and exact-version passive Amass profiles; findomain remains contract-only |
 | DNS | host/IP inventory from observed traffic | `resolved_host` with A/AAAA/CNAME and explicit DNS adapters |
 | Active permutations | not a first-class stage | alterx/dnsgen/mksub `hostname -> hostname` contracts |
 | Ports/services | not modeled as a pipeline stage | explicit `ip|cidr -> service` contract for naabu/masscan |
@@ -100,10 +104,12 @@ its canonical JSONL through a bounded, scope-rechecking **Import reconctl JSONLâ
 findings flow into the existing `IssueReporter` as tentative native issues; imports never send target
 traffic or silently add scope.
 
-The contract module intentionally fails closed for output formats that are not yet machine-stable in the adapter layer. The next implementation tranche should add, in order:
+The contract module intentionally fails closed for unsupported output formats. Fixed run-scoped
+provider/DNS/archive orchestration, linked run IDs and the native gateway continuation are implemented.
+WhatWeb documents, GoSpider JSON and JSFinder URL exports now have offline adapters. Remaining work:
 
-1. launch sidecar stages directly from a run-scoped Burp coordinator (the current handoff deliberately imports an operator-selected JSONL artifact);
-2. a run-scoped DAG compositor over the existing subfinder -> puredns -> dnsx -> httpx -> katana/gau -> Nuclei command profiles;
+1. enforceable egress for original external HTTP processes; installation, a risk flag or proxy option cannot authorise those sends;
+2. a general user-editable DAG executor with explicit typed transforms; the current workflow is a fixed bounded composition, not arbitrary manifest execution;
 3. masscan document parser and rate/policy controls;
 4. Dalfox/Corsy/CRLFuzz machine-output adapters only after their exact supported formats are pinned/tested;
 5. durable per-run quarantine, assets, services, and findings imported into the existing Recon Hound models;

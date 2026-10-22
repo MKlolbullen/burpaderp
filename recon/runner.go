@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -68,6 +69,18 @@ func runExternal(parent context.Context, request ExecRequest) (ExecResult, error
 
 	ctx, cancel := context.WithTimeout(parent, limits.Timeout)
 	defer cancel()
+	profile, _ := CommandProfileFor(request.Tool)
+	if profile.ExactVersion != "" {
+		versionCtx, versionCancel := context.WithTimeout(ctx, 5*time.Second)
+		defer versionCancel()
+		check := exec.CommandContext(versionCtx, spec.Binary, profile.VersionArgs...)
+		check.WaitDelay = time.Second
+		versionOut, versionErr := newCappedBuffer(4096), newCappedBuffer(4096)
+		check.Stdout, check.Stderr = versionOut, versionErr
+		if err := check.Run(); err != nil || versionOut.Truncated() || versionErr.Truncated() || strings.TrimSpace(string(versionOut.Bytes())+string(versionErr.Bytes())) != profile.ExactVersion {
+			return ExecResult{}, fmt.Errorf("%s requires exact version %s; enumeration was not started", spec.Binary, profile.ExactVersion)
+		}
+	}
 
 	cmd := exec.CommandContext(ctx, spec.Binary, request.Args...)
 	cmd.WaitDelay = time.Second
