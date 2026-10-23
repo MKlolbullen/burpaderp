@@ -112,6 +112,37 @@ public class RunHistoryIntegrationTest {
         assertEquals(3, restored.get(next.id().toString()).findings().size());
         assertEquals(RunStatus.COMPLETED, restored.get(next.id().toString()).status());
     }
+    @Test public void inFlightDispatchIsDurableBeforeTransportReturnsOrCancellation() {
+        try (var fake = new FakeMontoya()) {
+            var run = run(1); var request = fake.request(URL);
+            var gateway = new ActiveRequestGateway(RequestPolicy.safeDefault(u -> true), message -> {
+                run.cancel(); var snapshot = run.snapshot();
+                assertEquals(1, snapshot.metrics().attempts()); assertEquals(1, snapshot.metrics().dispatched());
+                assertEquals(1, snapshot.metrics().inFlight()); assertEquals(0, snapshot.metrics().responses());
+                assertTrue(snapshot.audit().stream().anyMatch(e -> e.kind().equals("DISPATCH")));
+                assertEquals(RunHistoryCodec.Status.CURRENT, RunHistoryCodec.decode(RunHistoryCodec.encode(List.of(snapshot))).status());
+                return FakeMontoya.pair(message, FakeMontoya.response(200, "", Map.of()));
+            });
+            assertTrue(gateway.send(run, RequestPlan.safe(request, "probe"), request).dispatched());
+            assertEquals(RunStatus.CANCELLED, run.status()); assertEquals(0, run.snapshot().metrics().inFlight());
+            assertEquals(1, run.snapshot().metrics().responses());
+        }
+    }
+
+    @Test public void retentionNeverEvictsALiveRunAndTypedValidationDoesNotTrustChecksumAlone() {
+        var history = new RunHistory();
+        for (int i = 0; i < RunRecord.MAX_RUNS; i++) history.register(run(1));
+        var overflow = run(1); history.register(overflow);
+        assertEquals(RunStatus.CANCELLED, overflow.status()); assertNull(history.get(overflow.id().toString()));
+        var old = history.snapshot().getLast(); history.control(old.id(), "cancel");
+        var next = run(1); history.register(next); assertNotNull(history.get(next.id().toString())); assertNull(history.get(old.id()));
+        var object = RunHistoryCodec.map(next.snapshot());
+        Json.asObject(object.get("metrics")).put("attempts", "-1");
+        String payload = Json.write(object);
+        String forged = Json.write(Map.of("version", 1, "count", 1, "sha256", FindingEvidence.digest(payload))) + "\n" + payload;
+        assertEquals(RunHistoryCodec.Status.CORRUPT, RunHistoryCodec.decode(forged).status());
+    }
+
     static ReconModel.ActiveRow evidenceInRun(ReconModel.ActiveRow row, ScanRun run, String url) {
         return new ReconModel.ActiveRow(row.severity(), row.testClass(), row.parameter(), row.status(), row.evidence(), url, withRun(row.evidenceRecord(), run.id().toString()));
     }

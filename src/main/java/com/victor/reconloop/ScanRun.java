@@ -56,6 +56,8 @@ final class ScanRun {
         }
     }
 
+    private Runnable onChange = () -> {};
+    synchronized void onChange(Runnable listener) { onChange = listener; }
     private String parentId = "";
     private long attempts, dispatched, responses, errors, denied, transportNanos, omittedEvents, omittedProbes, omittedFindings;
     private final List<RunRecord.Event> audit = new ArrayList<>();
@@ -229,7 +231,7 @@ final class ScanRun {
     boolean isRunning() { return status() == RunStatus.RUNNING; }
     boolean isActive() { return isRunning() || status() == RunStatus.PAUSED; }
     boolean isCancelled() { return status() == RunStatus.CANCELLED; }
-    synchronized void parent(String id) { parentId = id == null ? "" : id; }
+    synchronized void parent(String id) { parentId = id == null ? "" : id; onChange.run(); }
 
     synchronized void dispatching(RequestPlan plan) {
         attempts++; dispatched++;
@@ -272,6 +274,7 @@ final class ScanRun {
         if (audit.size() == RunRecord.MAX_EVENTS) { audit.removeFirst(); omittedEvents++; }
         audit.add(new RunRecord.Event(UUID.randomUUID().toString(), Instant.now().toString(), kind,
                 probe.length() > 128 ? probe.substring(0, 128) : probe, target, hash, decision, sent, elapsed, detail));
+        onChange.run();
     }
     synchronized RunRecord snapshot() {
         // Ledger map keys are hashes in durable history; full URLs and query values are not retained.

@@ -9,6 +9,8 @@ final class RunHistory {
         RunRecord snapshot() { return live == null ? saved : live.snapshot(); }
     }
     record Diff(Set<String> added, Set<String> shared, Set<String> notObserved, boolean complete) {}
+    private volatile Runnable onChange = () -> {};
+    void onChange(Runnable listener) { onChange = listener; }
     private final Map<String, Entry> entries = new ConcurrentHashMap<>();
 
     synchronized void register(ScanRun run) {
@@ -19,6 +21,7 @@ final class RunHistory {
             entries.remove(oldest.snapshot().id());
         }
         entries.put(run.id().toString(), new Entry(run, null));
+        run.onChange(() -> onChange.run()); onChange.run();
     }
     synchronized void restore(List<RunRecord> records) {
         entries.clear();
@@ -49,7 +52,7 @@ final class RunHistory {
         if (runId == null || runId.isEmpty()) return;
         entries.computeIfPresent(runId, (id, entry) -> {
             if (entry.live() != null) { entry.live().finding(finding, kind, detector); return entry; }
-            return new Entry(null, entry.saved().withFinding(finding, kind, detector));
+            var saved = new Entry(null, entry.saved().withFinding(finding, kind, detector)); onChange.run(); return saved;
         });
     }
     Diff diff(String baseline, String current) {

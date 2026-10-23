@@ -89,7 +89,7 @@ final class RunHistoryPanel extends JPanel {
         var keys = controller.runHistory().diff(old == null ? "" : old, selected == null ? "" : selected).added();
         passiveSorter.setRowFilter(new RowFilter<>() {
             @Override public boolean include(Entry<? extends ReconModel.FindingTableModel, ? extends Integer> entry) {
-                var row = passive.snapshot().get(entry.getIdentifier());
+                var row = passive.row(entry.getIdentifier());
                 return row.runId().equals(selected) && keys.contains(RunRecord.passiveFinding(row).key());
             }
         });

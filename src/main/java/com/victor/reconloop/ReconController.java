@@ -214,6 +214,7 @@ final class ReconController implements HttpHandler {
         } catch (Exception e) {
             api.logging().logToError("Persisted-state restore skipped", e);
         }
+        runHistory.onChange(this::scheduleRunSave);
         this.sqlmapClient = new SqlmapClient(null);
         if (startBackgroundWorkers) {
             worker.submit(this::workerLoop);
@@ -273,6 +274,14 @@ final class ReconController implements HttpHandler {
         });
         api.logging().logToOutput("[Recon Hound] Restored " + findings.size() + " finding(s) and "
                 + (assetHosts.size() + assetIps.size()) + " asset(s) from the Burp project.");
+    }
+
+    private final AtomicBoolean runSavePending = new AtomicBoolean();
+    private void scheduleRunSave() {
+        if (!running.get() || store == null || !runSavePending.compareAndSet(false, true)) return;
+        try {
+            oobPoller.schedule(() -> { runSavePending.set(false); saveState(); }, 250, TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.RejectedExecutionException unloading) { runSavePending.set(false); }
     }
 
     /** Only copy model references on the EDT; encoding/writes use the existing background saver. */
@@ -1341,7 +1350,7 @@ final class ReconController implements HttpHandler {
             if (!running.get() || !crawlEnabled.get()) return;
             if (crawlRun == null) {
                 int remaining = Math.max(0, maxRequests.get() - previousCrawlUsage);
-                crawlRun = crawlRuns.begin(crawlRuns.ticket(), ScanProfile.DISCOVERY, ScopeSnapshot.forTargetUrl(item.uri().toString()),
+                crawlRun = crawlRuns.begin(crawlRuns.ticket(), ScanProfile.DISCOVERY, ScopeSnapshot.forTargets(java.util.stream.Stream.concat(java.util.stream.Stream.of(item.uri().toString()), queue.stream().map(q -> q.uri().toString())).toList()),
                         ScanRun.RequestLimits.globalOnly(remaining));
             }
             run = crawlRun;

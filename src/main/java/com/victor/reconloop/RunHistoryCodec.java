@@ -50,7 +50,7 @@ final class RunHistoryCodec {
     static Map<String, Object> map(RunRecord r) {
         var m = r.metrics();
         return obj("id", r.id(), "parent", r.parentId(), "started", r.startedAt(), "finished", r.finishedAt(), "status", r.status().name(),
-                "profile", r.profile().name(), "domains", r.scope().domains().stream().sorted().toList(), "cidrs", r.scope().cidrs().stream().sorted().toList(),
+                "profile", r.profile().name(), "domains", r.scope().domains().stream().sorted().toList(), "cidrs", r.scope().cidrs().stream().sorted().toList(), "scopeTruncated", r.scope().truncated(),
                 "limits", List.of(r.limits().global(), r.limits().perHost(), r.limits().perEndpoint(), r.limits().perProbe()),
                 "metrics", obj("attempts", str(m.attempts()), "admitted", m.admitted(), "dispatched", str(m.dispatched()), "responses", str(m.responses()),
                         "errors", str(m.errors()), "denied", str(m.denied()), "transportNanos", str(m.transportNanos()), "hosts", m.hosts(), "endpoints", m.endpoints(), "probes", m.probes()),
@@ -62,7 +62,7 @@ final class RunHistoryCodec {
                 "omittedFindings", str(r.omittedFindings()));
     }
     private static RunRecord read(Map<String, Object> r) {
-        keys(r, "id,parent,started,finished,status,profile,domains,cidrs,limits,metrics,audit,omittedEvents,probes,omittedProbes,findings,omittedFindings");
+        keys(r, "id,parent,started,finished,status,profile,domains,cidrs,scopeTruncated,limits,metrics,audit,omittedEvents,probes,omittedProbes,findings,omittedFindings");
         String id = uuid(r, "id", false), parent = uuid(r, "parent", true); if (id.equals(parent)) throw invalid();
         String started = time(r, "started", false), finished = time(r, "finished", true);
         RunStatus status = RunStatus.valueOf(text(r, "status", 32));
@@ -100,8 +100,9 @@ final class RunHistoryCodec {
             var f = object(value); keys(f, "id,key,state"); String fid = uuid(f, "id", false); if (!ids.add(fid)) throw invalid();
             findings.add(new RunRecord.Finding(fid, hash(f, "key", false), VerificationState.valueOf(text(f, "state", 32))));
         }
+        if (!(r.get("scopeTruncated") instanceof Boolean scopeTruncated)) throw invalid();
         return new RunRecord(id, parent, started, finished, status, ScanProfile.valueOf(text(r, "profile", 32)),
-                new ScopeSnapshot(strings(r, "domains"), strings(r, "cidrs")), limits, metrics, audit, decimal(r, "omittedEvents"),
+                new ScopeSnapshot(strings(r, "domains"), strings(r, "cidrs"), scopeTruncated), limits, metrics, audit, decimal(r, "omittedEvents"),
                 probes, decimal(r, "omittedProbes"), findings, decimal(r, "omittedFindings"));
     }
     private static Set<String> strings(Map<String, Object> map, String key) {

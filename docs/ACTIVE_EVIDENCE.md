@@ -115,7 +115,7 @@ callback distinctions, late association and deduplication after restore. All exi
 quota, preview, lifecycle and external-egress architecture tests remain in the normal suite.
 
 Before v1.0, complete actual Burp connection-path verification/control and review the remaining #44
-contracts against supported configurations. Durable full-run audit/approval artifacts, complete
+contracts against supported configurations. [Bounded native run history](SCAN_RUNS.md) now records gateway decisions and metrics. Persisted approval artifacts, complete
 passive evidence migration, evidence export/redaction, archival/retention controls and restoring
 disabled external HTTP producers are separate slices. Finding persistence does not establish those
 contracts or permit the disabled producers to execute.

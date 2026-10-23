@@ -50,6 +50,7 @@ final class ReconModel {
         }
         void add(FindingRow row) { rows.add(0, row); fireTableRowsInserted(0, 0); }
         void clear() { int n = rows.size(); rows.clear(); if (n > 0) fireTableDataChanged(); }
+        FindingRow row(int index) { return rows.get(index); }
         List<FindingRow> snapshot() { return new ArrayList<>(rows); }
 
         /** Rows not yet triaged, oldest-added first (stable order for building a numbered batch prompt). */

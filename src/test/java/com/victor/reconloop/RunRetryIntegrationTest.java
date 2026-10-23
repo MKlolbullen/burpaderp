@@ -65,7 +65,7 @@ public class RunRetryIntegrationTest {
                 SwingUtilities.invokeAndWait(() -> {}); restoredExecutor.runAll();
                 assertEquals(sent, fake.sent.size()); assertEquals(record.id(), restored.runHistory().snapshot().getFirst().id());
                 assertFalse(restored.controlRun(record.id(), "resume")); assertFalse(restored.retryFailedProbes(record.id()));
-                restored.setActiveTestsEnabled(true); restored.setActiveRequestBudget(1); 
+                restored.setActiveTestsEnabled(true); restored.setActiveRequestBudget(1);
                 fake.onSend = ignored -> {}; assertTrue(restored.retryFailedProbes(record.id())); restoredExecutor.runAll();
                 assertEquals(sent + 1, fake.sent.size()); assertTrue(restored.runHistory().snapshot().stream().anyMatch(r -> r.parentId().equals(record.id())));
             } finally { restored.shutdown(); }

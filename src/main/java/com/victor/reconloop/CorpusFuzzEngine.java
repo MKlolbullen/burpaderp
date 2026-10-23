@@ -94,6 +94,7 @@ final class CorpusFuzzEngine {
                 if (categoryBudget.exhausted() || run.requestBudget().exhausted() || !run.isActive()) break;
                 if (isDestructive(rawPayload)) continue;
 
+                if (!run.awaitReady()) break;
                 EvidenceCapture prototype = new EvidenceCapture(run, base, "CORPUS", "corpus-fuzz:" + category);
                 String callbackHost = null;
                 boolean oastPayload = findCallbackHost(rawPayload).isPresent();

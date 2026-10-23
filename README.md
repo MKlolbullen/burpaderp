@@ -577,3 +577,5 @@ recon/                             # typed Go `reconctl` sidecar (contracts, rou
 payloads/                          # xss / sqli / ssti / lfi / rce corpora (never auto-fired)
 docs/                              # RUN_GOVERNANCE.md, RECON_CONTRACTS.md, SAFETY_ROADMAP.md, img/
 ```
+
+Native scan history, lifecycle controls, comparisons and selective retries: [Scan runs](docs/SCAN_RUNS.md).

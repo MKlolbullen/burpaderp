@@ -128,6 +128,8 @@ final class ActiveRequestGateway {
         if (!decision.allowed()) return decision;
         ScanRun.Allocation allocation = run.tryAcquire(planned);
         if (!allocation.allowed()) {
+            if (!run.isRunning()) return RequestPolicy.Decision.deny(run.isCancelled()
+                    ? RequestPolicy.DecisionCode.CANCELLED : RequestPolicy.DecisionCode.RUN_NOT_ACTIVE, "run stopped during admission");
             RequestPolicy.DecisionCode code = switch (allocation.exhaustedQuota()) {
                 case HOST -> RequestPolicy.DecisionCode.HOST_BUDGET_EXHAUSTED;
                 case ENDPOINT -> RequestPolicy.DecisionCode.ENDPOINT_BUDGET_EXHAUSTED;

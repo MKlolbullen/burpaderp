@@ -136,7 +136,7 @@ name; it is not a record of an already established connection.
 
 `LogicalRequestResponse` restores the logical service association for findings/caches while retaining
 Burp's actual returned request bytes, response, timing, annotations and marker transformations. This
-association does not attest a physical peer or replace a future persisted dispatch audit record.
+association does not attest a physical peer. [Run history](SCAN_RUNS.md) records API dispatch attempts; it does not attest physical egress.
 Every redirect re-enters the same preparation/admission sequence. Dry-run stays entirely offline;
 its policy/quota counts do not approve DNS results or guarantee numeric-service binding will succeed.
 
@@ -287,7 +287,7 @@ beyond v1.0; re-enabling them without equivalent enforcement cannot.
 Bounded [versioned finding evidence](ACTIVE_EVIDENCE.md) now persists typed native/corpus/helper and
 OOB observations. Issue #44 still requires verification/control of the actual Burp connection path
 beyond the checked numeric API destination. Native plans remain in-memory dispatch bindings, not
-persisted approval artifacts or complete run audit trails. TCP/DNS/provider process traffic is explicitly outside the
+persisted approval artifacts. [Native run history](SCAN_RUNS.md) adds bounded audit trails and exact quota totals; it does not establish physical egress. TCP/DNS/provider process traffic is explicitly outside the
 native HTTP dispatch ledger. Full-product wire-level isolation is not established by these gates.
 Do not interpret passing native/external-boundary tests as closing #44 or approving v1.0.
 
