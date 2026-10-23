@@ -46,6 +46,9 @@ contain raw secrets; native findings and report text instead redact matched sens
 | `rh-network` | IPv4/CIDR, compressed/IPv4-mapped/scoped IPv6, hostnames and email candidates. Java validators reject malformed IPs and numeric-only hostname candidates without DNS. |
 | `rh-hints` | Interesting variable names and parameter names for manual investigation. |
 
+Native inventory retains a full mapped/mixed IPv6 literal and suppresses its nested dotted IPv4
+suffix. Separately written IPv4 values still appear, including the same address elsewhere in the input.
+
 **Interpretation:** all GF matches are passive SIGNALs, not confirmation of credential validity,
 permissions, endpoint exposure or exploitability. Native issues use tentative confidence. Public
 identifiers/resource locations have INFO severity and follow the UI's information-finding toggle.

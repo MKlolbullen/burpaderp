@@ -91,6 +91,8 @@ final class GfPatternLoader {
                     int start = matcher.start(rule.capture), end = matcher.end(rule.capture);
                     cursor = Math.max(cursor + 1, end < 0 ? matcher.end() : end);
                     if (value == null || value.isBlank() || !valid(rule.validator, value)) continue;
+                    if (rule.validator.equals("ipv4") && rule.category.equals("network")
+                            && embeddedIpv4Suffix(text, start, end)) continue;
                     if (rule.entropy > 0 && (RegexHound.isPlaceholder(value)
                             || RegexHound.shannonEntropy(value) < rule.entropy)) continue;
                     if (!seen.add(pack.name + "\0" + rule.id + "\0" + value)) continue;
@@ -103,6 +105,21 @@ final class GfPatternLoader {
             }
         }
         return List.copyOf(out);
+    }
+
+    /** Keep a mapped/mixed IPv6 literal as one inventory value, without hiding standalone IPv4. */
+    private static boolean embeddedIpv4Suffix(String text, int start, int end) {
+        if (start == 0 || text.charAt(start - 1) != ':') return false;
+        int left = start - 1;
+        while (left > 0 && end - left < 64 && ipv6Character(text.charAt(left - 1))) left--;
+        // Do not accept a truncated enclosure or an IPv4 value followed by another address group.
+        if ((left > 0 && ipv6Character(text.charAt(left - 1)))
+                || (end < text.length() && ipv6Character(text.charAt(end)))) return false;
+        return RegexHound.validIpv6(text.substring(left, end));
+    }
+    private static boolean ipv6Character(char c) {
+        return c == ':' || c == '.' || c >= '0' && c <= '9'
+                || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F';
     }
 
     private static List<Path> defaultDirectories() {

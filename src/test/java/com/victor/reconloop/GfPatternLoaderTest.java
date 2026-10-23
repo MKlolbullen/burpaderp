@@ -110,4 +110,13 @@ public class GfPatternLoaderTest {
         }
         assertFalse(RegexHound.validIpv6("::ffff:999.1.1.1"));
     }
+    @Test public void standaloneIpv4RemainsVisibleAfterAnEqualMappedLiteral() {
+        var loader = new GfPatternLoader(List.of(), true);
+        String text = "[::ffff:8.8.8.8] plain=8.8.8.8 ip:127.0.0.1 http://8.8.4.4:443";
+        var matches = loader.scan(text).stream().filter(m -> m.ruleId().equals("ipv4")).toList();
+        assertEquals(List.of("8.8.8.8", "127.0.0.1", "8.8.4.4"),
+                matches.stream().map(GfPatternLoader.GfMatch::value).toList());
+        assertEquals(text.indexOf("plain=") + "plain=".length(), matches.get(0).start());
+        for (var match : matches) assertEquals(match.value(), text.substring(match.start(), match.end()));
+    }
 }
