@@ -49,7 +49,10 @@ public class NativeRiskPermissionIntegrationTest {
                             + "Content-Type: image/jpeg\r\n\r\nfile\r\n--boundary--\r\n");
             EnumSet<RequestPolicy.Permission> grants = EnumSet.of(RequestPolicy.Permission.UNSAFE_HTTP_METHOD,
                     RequestPolicy.Permission.STATE_CHANGING);
-            assertEquals(0, exercise(fake, upload, grants).probeRequests("file-upload"));
+            ScanRun denied = exercise(fake, upload, grants);
+            assertEquals(0, denied.probeRequests("file-upload"));
+            assertTrue("No other probe may replay the captured multipart file without UPLOAD", fake.sent.isEmpty());
+            assertEquals(0, denied.requestBudget().used());
             grants.add(RequestPolicy.Permission.UPLOAD);
             ScanRun allowed = exercise(fake, upload, grants);
             assertTrue(allowed.probeRequests("file-upload") > 0);

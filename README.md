@@ -161,6 +161,8 @@ tests cancels current native runs and invalidates queued jobs. Blind-XSS beacons
 **Allow OAST / Collaborator callbacks** and **Allow persistent / stored browser payloads**, including
 on GET requests. Neither grant implies the other. A dispatched payload may be stored and execute in a
 browser later; revoking permission stops further dispatches, not a payload already stored by a target.
+Every `multipart/*` replay also needs **Allow upload mutations**, even when a different probe carries
+an unchanged captured file or the request uses GET. Mutating-method permission alone is insufficient.
 
 Use the **Preview…** actions for native probes, corpus fuzzing, JWT, access-control, takeover, crawl
 seeds/queue, parameters and GraphQL before enabling traffic. Previews send nothing and spend no live
