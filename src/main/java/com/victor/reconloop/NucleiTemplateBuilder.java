@@ -16,6 +16,12 @@ import java.util.Optional;
  * host-header) need Nuclei's interactsh support, and header/path/JSON insertion points need a raw
  * request — both are follow-ups, so {@link #fromActiveFinding} returns empty for them rather than
  * emitting a template that wouldn't actually reproduce the finding.
+ *
+ * <p>Which confirmation a PoC can reproduce is decided from the structured {@link ConfirmationVector}, not
+ * from the human-readable evidence prose, so rewording a finding's description can never change which PoCs
+ * are emitted. The payload fired is the exact one that confirmed the finding (the engine records it), and
+ * the matcher is sourced from {@link DetectionSignatures} — the same signatures the engine confirmed with —
+ * so a generated PoC matches on precisely what proved the issue.
  */
 final class NucleiTemplateBuilder {
 
@@ -39,19 +45,22 @@ final class NucleiTemplateBuilder {
      * @param url            the finding URL (the request that was probed)
      * @param injectionPoint the insertion-point label (a bare parameter name here; {@code header:}/
      *                       {@code path[}/{@code json:} labels are not query params and return empty)
-     * @param evidence       the finding's evidence text, used to gate classes with several confirmation
-     *                       vectors (SQLi, SSTI) so a template is only emitted when the fixed payload
-     *                       and matcher actually reproduce the vector that confirmed <em>this</em> finding
+     * @param vector         the structured {@link ConfirmationVector} naming how the finding was confirmed;
+     *                       for classes confirmed by several vectors (SQLi, SSTI) only the in-band-
+     *                       reproducible vectors produce a template, so the PoC never fails to reproduce.
+     *                       {@code null} for classes that do not carry one (handled by {@code testClass}).
+     * @param confirmingPayload the exact payload that confirmed the finding, fired by the PoC so it
+     *                          reproduces the same vector with the same input rather than a fixed guess
      */
     static Optional<PocSpec> fromActiveFinding(String testClass, String severity, String url,
-                                               String injectionPoint, String evidence) {
+                                               String injectionPoint, ConfirmationVector vector,
+                                               String confirmingPayload) {
         if (testClass == null || url == null || injectionPoint == null) return Optional.empty();
         // Only bare query/body parameter names are handled in this slice.
         if (injectionPoint.startsWith("header:") || injectionPoint.startsWith("path[")
                 || injectionPoint.startsWith("json:") || injectionPoint.isBlank()) {
             return Optional.empty();
         }
-        String ev = evidence == null ? "" : evidence;
 
         String payload;
         MatcherKind kind;
@@ -59,22 +68,25 @@ final class NucleiTemplateBuilder {
         String matcher;
         switch (testClass) {
             case "SQLi" -> {
-                // Only error-based SQLi is reproduced by an error-signature body matcher; a
-                // boolean- or time-based confirmation is not, so don't emit a template that would fail.
-                if (!ev.toLowerCase(Locale.ROOT).contains("error signature")) return Optional.empty();
-                payload = "'"; kind = MatcherKind.REGEX; part = "body";
-                matcher = "(?i)sql syntax|mysql_fetch|ORA-[0-9]{4,5}|PostgreSQL.*ERROR|SQLite/JDBCDriver|"
-                        + "Unclosed quotation mark|quoted string not properly terminated";
+                // Only error-based SQLi is reproduced by an error-signature body matcher; a boolean- or
+                // time-based confirmation is not, so those vectors produce no template.
+                if (vector != ConfirmationVector.SQL_ERROR) return Optional.empty();
+                payload = payloadOr(confirmingPayload, "'"); kind = MatcherKind.REGEX; part = "body";
+                // Match on the SAME signature set the engine confirmed with — not a narrower copy.
+                matcher = DetectionSignatures.SQL_ERROR_REGEX;
             }
             case "NoSQLi" -> {
-                payload = "'\""; kind = MatcherKind.REGEX; part = "body";
-                matcher = "(?i)MongoError|MongoServerError|BSON|E11000 duplicate key|Cast to ObjectId failed|\\$where";
+                if (vector != ConfirmationVector.NOSQL_ERROR) return Optional.empty();
+                // Fire the exact probe that errored (the engine tries several), and match the full
+                // signature set the engine confirms on — both from the shared source, so nothing drifts.
+                payload = payloadOr(confirmingPayload, "'\""); kind = MatcherKind.REGEX; part = "body";
+                matcher = DetectionSignatures.NOSQL_ERROR_REGEX;
             }
             case "SSTI" -> {
-                // The {{7*777}} payload only reproduces the brace family; a ${...}/#{...}/<%=%> engine
-                // (named in the evidence) would not evaluate it, so gate on the confirmed family.
-                if (!ev.contains("{{")) return Optional.empty();
-                payload = "rhs{{7*777}}she"; kind = MatcherKind.WORD; part = "body";
+                // Only the Jinja2/Twig {{...}} family is reproduced by a {{7*777}} payload; a ${...}/
+                // #{...}/<%=%>/nested-${{...}} engine would not evaluate it, so those vectors emit nothing.
+                if (vector != ConfirmationVector.SSTI_BRACE) return Optional.empty();
+                payload = payloadOr(confirmingPayload, "rhs{{7*777}}she"); kind = MatcherKind.WORD; part = "body";
                 matcher = "rhs5439she"; // the distinctive product marker ActiveTestEngine confirms on
             }
             case "PathTraversal" -> {
@@ -161,6 +173,11 @@ final class NucleiTemplateBuilder {
             rebuilt.append(param).append('=').append(enc);
         }
         return path + "?" + rebuilt + fragment;
+    }
+
+    /** The recorded confirming payload, or a class default when the finding did not carry one. */
+    private static String payloadOr(String payload, String fallback) {
+        return payload == null || payload.isBlank() ? fallback : payload;
     }
 
     private static String urlEncode(String value) {

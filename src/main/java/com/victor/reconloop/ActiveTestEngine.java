@@ -33,13 +33,19 @@ final class ActiveTestEngine {
      */
     record ActiveFinding(String severity, String testClass, String parameter,
                          String evidence, VerificationState verificationState, String url,
-                         FindingEvidence evidenceRecord, List<HttpRequestResponse> httpEvidence) {
+                         FindingEvidence evidenceRecord, List<HttpRequestResponse> httpEvidence,
+                         Confirmation confirmation) {
         ActiveFinding { httpEvidence = List.copyOf(httpEvidence); }
         ActiveFinding(String severity, String testClass, String parameter, String evidence, VerificationState state, String url) {
-            this(severity, testClass, parameter, evidence, state, url, null, List.of());
+            this(severity, testClass, parameter, evidence, state, url, null, List.of(), null);
+        }
+        /** For a confirmed finding whose exact vector and payload are recorded for faithful PoC generation. */
+        ActiveFinding(String severity, String testClass, String parameter, String evidence, VerificationState state,
+                      String url, Confirmation confirmation) {
+            this(severity, testClass, parameter, evidence, state, url, null, List.of(), confirmation);
         }
         ActiveFinding withEvidence(FindingEvidence record, List<HttpRequestResponse> messages) {
-            return new ActiveFinding(severity, testClass, parameter, evidence, verificationState, url, record, messages);
+            return new ActiveFinding(severity, testClass, parameter, evidence, verificationState, url, record, messages, confirmation);
         }
         ActiveFinding(String severity, String testClass, String parameter,
                       String evidence, boolean legacyConfirmed, String url) {
@@ -52,6 +58,13 @@ final class ActiveTestEngine {
             return verificationState != null && verificationState.isReportable();
         }
     }
+
+    /**
+     * The structured confirmation of a finding: the {@link ConfirmationVector} that names how it was proven,
+     * and the exact payload that proved it. The Nuclei PoC builder gates on the vector and fires the payload,
+     * so a generated PoC reproduces the same vector with the same input rather than a fixed guess.
+     */
+    record Confirmation(ConfirmationVector vector, String payload) {}
 
     // Server-side template injection: distinctive product avoids coincidental "49" matches.
     static final long SSTI_A = 7, SSTI_B = 777, SSTI_PRODUCT = SSTI_A * SSTI_B; // 5439
@@ -71,14 +84,9 @@ final class ActiveTestEngine {
     private static final String WAF_PROBE = "<script>alert(1)</script>";
 
     // SQL injection: error-based, boolean-based blind, and time-based blind (MySQL/PostgreSQL/MSSQL).
-    private static final Pattern SQL_ERROR = Pattern.compile(
-            "sql syntax|unclosed quotation mark|quoted string not properly terminated|"
-                    + "mysql_fetch|mysqli|you have an error in your sql syntax|warning: mysql|"
-                    + "valid mysql result|check the manual that corresponds to your (mysql|mariadb) server|"
-                    + "ora-\\d{5}|pg_query\\(\\)|postgresql.*error|sqlstate\\[|sqlite3?\\.(operationalerror|error)|"
-                    + "microsoft ole db provider for odbc drivers|incorrect syntax near|"
-                    + "unterminated quoted string|System\\.Data\\.SqlClient\\.SqlException",
-            Pattern.CASE_INSENSITIVE);
+    // The signature source is shared with the Nuclei PoC matcher via DetectionSignatures so the two cannot
+    // drift (the regex carries an inline (?i) rather than a compile-time flag the PoC side cannot see).
+    private static final Pattern SQL_ERROR = Pattern.compile(DetectionSignatures.SQL_ERROR_REGEX);
     private static final String SQLI_ERROR_PAYLOAD = "'";
     private static final String SQLI_TRUE_PAYLOAD = "' OR '1'='1'-- -";
     private static final String SQLI_FALSE_PAYLOAD = "' AND '1'='2'-- -";
@@ -100,11 +108,7 @@ final class ActiveTestEngine {
             "{\"$gt\":\"\"}",              // operator object supplied where a scalar is expected
             "[$ne]",                        // bracket-operator key fragment
             "\\");                          // trailing backslash: unterminated escape
-    private static final Pattern NOSQL_ERROR = Pattern.compile(
-            "(?i)mongoerror|mongonetworkerror|mongoserverror|mongoose|bsonerror|\\bbson\\b|"
-                    + "e11000 duplicate key|cast to objectid failed|casterror|"
-                    + "\\$where|\\$regex|unterminated string|couchdberror|"
-                    + "unexpected token .* in json|error parsing (bson|json)");
+    private static final Pattern NOSQL_ERROR = Pattern.compile(DetectionSignatures.NOSQL_ERROR_REGEX);
 
     // Path traversal / LFI: read a well-known OS file through the parameter, across depth, separator,
     // and encoding variants that defeat naive filters. A hit is confirmed only when a file's canary
@@ -401,7 +405,8 @@ final class ActiveTestEngine {
             if (engine.isPresent()) {
                 out.add(new ActiveFinding("HIGH", "SSTI", point.label(),
                         "Template arithmetic evaluated (" + SSTI_A + "*" + SSTI_B + "=" + SSTI_PRODUCT
-                                + ") via " + engine.get(), VerificationState.CONFIRMED, base.url()));
+                                + ") via " + engine.get(), VerificationState.CONFIRMED, base.url(),
+                        new Confirmation(sstiVector(payload), payload)));
                 break;
             }
         }
@@ -489,8 +494,10 @@ final class ActiveTestEngine {
         HttpResponse errorResponse = sendMutated(base, point, SQLI_ERROR_PAYLOAD);
         if (errorResponse != null && containsSqlError(errorResponse.bodyToString()) && !containsSqlError(baselineBody)) {
             out.add(new ActiveFinding("HIGH", "SQLi", point.label(),
-                    "Injecting a single quote produced a database error signature not present in the baseline response",
-                    VerificationState.REPRODUCED, base.url()));
+                    "Injecting a single quote produced a " + DetectionSignatures.SQL_ERROR_EVIDENCE
+                            + " not present in the baseline response",
+                    VerificationState.REPRODUCED, base.url(),
+                    new Confirmation(ConfirmationVector.SQL_ERROR, SQLI_ERROR_PAYLOAD)));
             return budgetUsed() - before;
         }
         if (budgetExhausted()) return budgetUsed() - before;
@@ -502,7 +509,8 @@ final class ActiveTestEngine {
                 && looksBooleanBased(baselineBody, trueResponse.bodyToString(), falseResponse.bodyToString())) {
             out.add(new ActiveFinding("HIGH", "SQLi", point.label(),
                     "Boolean-based blind: the always-true condition matches the baseline response while the "
-                            + "always-false condition diverges from both", VerificationState.REPRODUCED, base.url()));
+                            + "always-false condition diverges from both", VerificationState.REPRODUCED, base.url(),
+                    new Confirmation(ConfirmationVector.SQL_BOOLEAN, SQLI_TRUE_PAYLOAD)));
             return budgetUsed() - before;
         }
         if (budgetExhausted()) return budgetUsed() - before;
@@ -526,7 +534,8 @@ final class ActiveTestEngine {
                                 + "ms), delta=" + timing.medianDeltaMillis() + "ms across "
                                 + timing.consistentDelayedSamples() + "/" + payloadTimings.size()
                                 + " consistently delayed samples. This reproduces a timing signal; interpreter execution and impact remain unproven.",
-                        VerificationState.REPRODUCED, base.url()));
+                        VerificationState.REPRODUCED, base.url(),
+                        new Confirmation(ConfirmationVector.SQL_TIME, payload)));
                 break;
             }
         }
@@ -551,7 +560,8 @@ final class ActiveTestEngine {
             if (containsNoSqlError(response.bodyToString())) {
                 out.add(new ActiveFinding("HIGH", "NoSQLi", point.label(),
                         "Injecting " + payload + " produced a NoSQL datastore error signature not present "
-                                + "in the baseline response", VerificationState.REPRODUCED, base.url()));
+                                + "in the baseline response", VerificationState.REPRODUCED, base.url(),
+                        new Confirmation(ConfirmationVector.NOSQL_ERROR, payload)));
                 break;
             }
         }
@@ -927,13 +937,24 @@ final class ActiveTestEngine {
     static Optional<String> detectSstiEval(String body, String payload) {
         if (body == null || !body.contains(SSTI_HIT)) return Optional.empty();
         String family;
-        if (payload.contains("{{")) family = "Jinja2/Twig-style {{...}}";
-        else if (payload.contains("${{")) family = "nested ${{...}}";
+        if (payload.contains("${{")) family = "nested ${{...}}";
+        else if (payload.contains("{{")) family = DetectionSignatures.SSTI_JINJA_FAMILY;
         else if (payload.contains("${")) family = "EL/Freemarker ${...}";
         else if (payload.contains("#{")) family = "Ruby/JSF #{...}";
         else if (payload.contains("<%=")) family = "ERB/EJS <%=...%>";
         else family = "brace {...}";
         return Optional.of(family);
+    }
+
+    /**
+     * The confirmation vector for an SSTI payload: {@link ConfirmationVector#SSTI_BRACE} only for the
+     * Jinja2/Twig {@code {{...}}} family (which the {@code {{7*777}}} PoC payload reproduces), else
+     * {@link ConfirmationVector#SSTI_OTHER}. The nested {@code ${{...}}} family also contains {@code {{},
+     * so it is excluded explicitly rather than by a loose substring test.
+     */
+    static ConfirmationVector sstiVector(String payload) {
+        boolean brace = payload != null && payload.contains("{{") && !payload.contains("${{");
+        return brace ? ConfirmationVector.SSTI_BRACE : ConfirmationVector.SSTI_OTHER;
     }
 
     /** Of {@code < > " '}, which appear literally in the body immediately after {@code token}. */

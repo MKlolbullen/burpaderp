@@ -34,6 +34,17 @@ public class ActiveTestEngineTest {
         assertTrue(ActiveTestEngine.detectSstiEval(null, "rhs{{7*777}}she").isEmpty());
     }
 
+    @Test
+    public void sstiVectorIsBraceOnlyForTheJinjaFamily() {
+        assertEquals(ConfirmationVector.SSTI_BRACE, ActiveTestEngine.sstiVector("rhs{{7*777}}she"));
+        // The nested ${{...}} family contains "{{" but its engine does not evaluate the plain {{7*777}}.
+        assertEquals(ConfirmationVector.SSTI_OTHER, ActiveTestEngine.sstiVector("rhs${{7*777}}she"));
+        assertEquals(ConfirmationVector.SSTI_OTHER, ActiveTestEngine.sstiVector("rhs${7*777}she"));
+        assertEquals(ConfirmationVector.SSTI_OTHER, ActiveTestEngine.sstiVector("rhs#{7*777}she"));
+        assertEquals(ConfirmationVector.SSTI_OTHER, ActiveTestEngine.sstiVector("rhs<%=7*777%>she"));
+        assertEquals(ConfirmationVector.SSTI_OTHER, ActiveTestEngine.sstiVector("rhs{7*777}she"));
+    }
+
     // ---- survivingXssChars ----
 
     @Test
