@@ -47,7 +47,7 @@ final class ParameterDiscoveryEngine {
      * is checked against the exact same scope, method, cancellation, and budget policy.
      */
     List<Discovered> discover(HttpRequest base, ScanRun run, ActiveRequestGateway gateway, long throttleMillis) {
-        if (base == null || run == null || gateway == null || !run.isRunning()) return List.of();
+        if (base == null || run == null || gateway == null || !run.isActive()) return List.of();
         Iterator<Probe> probes = probes(base).iterator();
         Probe baselineProbe = probes.next();
         String url = baselineProbe.step().request().url();
@@ -58,7 +58,7 @@ final class ParameterDiscoveryEngine {
         short baselineStatus = baseline.response().statusCode();
         List<Discovered> discovered = new ArrayList<>();
         Set<String> reported = new HashSet<>();
-        while (!run.requestBudget().exhausted() && run.isRunning() && probes.hasNext()) {
+        while (!run.requestBudget().exhausted() && run.isActive() && probes.hasNext()) {
             Probe probe = probes.next();
             ActiveRequestGateway.Result result = send(probe.step(), run, gateway);
             HttpRequestResponse rr = result.response();

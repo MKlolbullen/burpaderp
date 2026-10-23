@@ -12,13 +12,19 @@ final class NativeRunRegistry implements AutoCloseable {
     record Ticket(long generation, long sequence) {}
 
     private final Map<ScanRun, Ticket> runs = new HashMap<>();
+    private final java.util.function.Consumer<ScanRun> onBegin;
     private boolean enabled;
     private boolean closed;
     private long generation;
     private long sequence;
 
     NativeRunRegistry(boolean enabled) {
+        this(enabled, run -> {});
+    }
+
+    NativeRunRegistry(boolean enabled, java.util.function.Consumer<ScanRun> onBegin) {
         this.enabled = enabled;
+        this.onBegin = onBegin;
     }
 
     synchronized Ticket ticket() {
@@ -34,12 +40,17 @@ final class NativeRunRegistry implements AutoCloseable {
         ScanRun run = ScanRun.begin(profile, scope, limits);
         if (isCurrent(ticket)) runs.put(run, ticket);
         else run.cancel();
+        onBegin.accept(run);
         return run;
     }
 
     synchronized boolean ownsCurrentRun(String id) {
         return runs.entrySet().stream().anyMatch(entry -> entry.getKey().id().toString().equals(id)
-                && entry.getKey().isRunning() && isCurrent(entry.getValue()));
+                && entry.getKey().isActive() && isCurrent(entry.getValue()));
+    }
+
+    synchronized void fail(Ticket ticket) {
+        runs.forEach((run, owner) -> { if (owner.equals(ticket)) run.fail("worker failure"); });
     }
 
     synchronized void finish(Ticket ticket) {

@@ -33,7 +33,8 @@ public class ReconModelTest {
         ReconModel.FindingTableModel model = new ReconModel.FindingTableModel();
         model.add(new ReconModel.FindingRow("LOW", "p", "r1", "loc", "v1", "u1"));
 
-        assertEquals(7, model.getColumnCount());
+        assertEquals(8, model.getColumnCount());
+        assertEquals("Run ID", model.getColumnName(7));
         assertEquals("AI Triage", model.getColumnName(6));
         assertEquals("(not triaged)", model.getValueAt(0, 6));
     }

@@ -22,6 +22,12 @@ record ScopeSnapshot(Set<String> domains, Set<String> cidrs) {
         return new ScopeSnapshot(Set.of(), Set.of());
     }
 
+    static ScopeSnapshot forTargets(java.util.Collection<String> urls) {
+        Set<String> hosts = new LinkedHashSet<>();
+        for (String url : urls) hosts.addAll(forTargetUrl(url).domains());
+        return new ScopeSnapshot(hosts, Set.of());
+    }
+
     static ScopeSnapshot forTargetUrl(String targetUrl) {
         try {
             URI uri = URI.create(targetUrl == null ? "" : targetUrl.strip());

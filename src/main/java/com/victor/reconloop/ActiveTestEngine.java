@@ -162,6 +162,8 @@ final class ActiveTestEngine {
     private final ThreadLocal<EvidenceCapture> evidenceCapture = new ThreadLocal<>();
     private final ThreadLocal<List<ActiveFinding>> findingOutput = new ThreadLocal<>();
     private final ThreadLocal<HttpRequest> originalRequest = new ThreadLocal<>();
+    private final ThreadLocal<Set<String>> retryFilter = ThreadLocal.withInitial(Set::of);
+    private final ThreadLocal<String> pointIdentity = ThreadLocal.withInitial(() -> "");
     private volatile CollaboratorClient collaborator;
 
     ActiveTestEngine(MontoyaApi api, long throttleMillis) {
@@ -176,7 +178,12 @@ final class ActiveTestEngine {
      * consumes the same run-scoped budget through {@code gateway}; no private per-target budget exists.
      */
     List<ActiveFinding> test(HttpRequest base, ScanRun run, ActiveRequestGateway gateway) {
-        if (base == null || run == null || gateway == null || !run.isRunning()) return List.of();
+        return test(base, run, gateway, Set.of());
+    }
+
+    List<ActiveFinding> test(HttpRequest base, ScanRun run, ActiveRequestGateway gateway, Set<String> selectedProbeKeys) {
+        if (base == null || run == null || gateway == null || !run.isActive()) return List.of();
+        retryFilter.set(Set.copyOf(selectedProbeKeys));
         List<ActiveFinding> findings = new ArrayList<>();
         findingOutput.set(findings); originalRequest.set(base);
         scanRun.set(run);
@@ -190,6 +197,7 @@ final class ActiveTestEngine {
             for (InsertionPoint point : points) {
                 if (point == null || point.name() == null || point.name().isBlank()) continue;
                 if (budgetExhausted()) break;
+                pointIdentity.set(FindingEvidence.digest(point.label()));
 
                 if (!wafChecked && !budgetExhausted()) {
                     runProbe("waf", () -> testWaf(base, point, findings));
@@ -209,6 +217,7 @@ final class ActiveTestEngine {
                 if (!budgetExhausted()) runProbe("nosqli", () -> testNoSqlInjection(base, point, findings));
                 if (!budgetExhausted()) runProbe("path-traversal", () -> testPathTraversal(base, point, findings));
             }
+            pointIdentity.set("");
             if (!budgetExhausted()) runProbe("host-header", Set.of(RequestPolicy.Permission.OAST),
                     () -> testHostHeaderInjection(base, findings));
             if (!budgetExhausted()) runProbe("cors", () -> testCors(base, findings));
@@ -219,6 +228,7 @@ final class ActiveTestEngine {
             if (!budgetExhausted()) runProbe("xxe", () -> testXxe(base, findings));
             return findings;
         } finally {
+            retryFilter.remove(); pointIdentity.remove();
             findingOutput.remove(); originalRequest.remove(); evidenceCapture.remove();
             scanRun.remove();
             requestGateway.remove();
@@ -788,6 +798,10 @@ final class ActiveTestEngine {
     }
 
     private void runProbe(String probeId, Set<RequestPolicy.Permission> permissions, Runnable probe) {
+        HttpRequest original = originalRequest.get();
+        String key = RunRecord.probeKey("NATIVE_ACTIVE", probeId, RunRecord.target(original.method(), original.url()), pointIdentity.get(), "");
+        if (!retryFilter.get().isEmpty() && !retryFilter.get().contains(key)) return;
+        if (!scanRun.get().awaitReady()) return;
         String previousId = currentProbeId.get();
         Set<RequestPolicy.Permission> previousPermissions = currentProbePermissions.get();
         currentProbeId.set(probeId == null || probeId.isBlank() ? "active-probe" : probeId);
@@ -797,10 +811,13 @@ final class ActiveTestEngine {
         EvidenceCapture capture = new EvidenceCapture(scanRun.get(), originalRequest.get(), "NATIVE_ACTIVE", currentProbeId.get());
         evidenceCapture.set(capture);
         List<ActiveFinding> output = findingOutput.get(); int before = output.size();
+        boolean crashed = true;
         try {
-            probe.run();
+            probe.run(); crashed = false;
         } finally {
-            capture.attach(output, before); evidenceCapture.set(previous);
+            capture.attach(output, before);
+            capture.finishProbe(pointIdentity.get(), "", 0, output, before, crashed);
+            evidenceCapture.set(previous);
             currentProbeId.set(previousId);
             currentProbePermissions.set(previousPermissions);
         }
@@ -834,7 +851,7 @@ final class ActiveTestEngine {
         if (request == null) return null;
         ScanRun run = scanRun.get();
         ActiveRequestGateway gateway = requestGateway.get();
-        if (run == null || gateway == null || !run.isRunning()) return null;
+        if (run == null || gateway == null || !run.isActive()) return null;
 
         EnumSet<RequestPolicy.Permission> permissions = EnumSet.noneOf(RequestPolicy.Permission.class);
         Set<RequestPolicy.Permission> probePermissions = currentProbePermissions.get();
@@ -859,7 +876,7 @@ final class ActiveTestEngine {
 
     private boolean budgetExhausted() {
         ScanRun run = scanRun.get();
-        return run == null || !run.isRunning() || run.requestBudget().exhausted();
+        return run == null || !run.isActive() || run.requestBudget().exhausted();
     }
 
     private int budgetUsed() {

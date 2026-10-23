@@ -315,6 +315,7 @@ final class ReconPanel extends JPanel {
         });
         activeResults.add(viewEvidence, BorderLayout.SOUTH);
         tabs.addTab("Active tests", activeResults);
+        tabs.addTab("Scan runs", new RunHistoryPanel(controller, activeTable, activeModel, findings, findingModel));
         tabs.addTab("Hosts / IPs", buildAssetPanel(controller, assetTable, assetModel));
         domainReconTab = new DomainReconPanel(controller::enumerateDomain, controller::importSidecarJsonl,
                 sources->stageAiSources(sources,"Review the captured recon requests/responses and JavaScript for source-anchored vulnerability candidates and manual PoC suggestions."));

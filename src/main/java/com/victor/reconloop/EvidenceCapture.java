@@ -12,23 +12,26 @@ import java.util.function.Supplier;
 /** One probe/insertion point or corpus variant. Never infers a mutation from detector prose. */
 final class EvidenceCapture {
     final String captureId;
-    private final String runId, source, probeId, targetUrl;
+    private final String runId, source, probeId, targetUrl, targetMethod;
     private final FindingEvidence.Bytes original;
     private final List<FindingEvidence.Exchange> exchanges = new ArrayList<>();
     private final List<HttpRequestResponse> messages = new ArrayList<>();
     private final List<FindingEvidence.OastToken> tokens = new ArrayList<>();
     private int attempted, retained;
+    private ScanRun owner;
+    private boolean failed, blocked, responded;
 
     EvidenceCapture(ScanRun run, HttpRequest base, String source, String probeId) {
         this(run == null ? "" : run.id().toString(), base, source, probeId, UUID.randomUUID().toString());
+        owner = run;
     }
     private EvidenceCapture(String runId, HttpRequest base, String source, String probeId, String captureId) {
         this.runId = runId; this.source = source; this.probeId = probeId; this.captureId = captureId;
-        targetUrl = base.url();
+        targetUrl = base.url(); targetMethod = base.method();
         original = bytes(() -> base.toByteArray().getBytes()); retained = original.retainedBytes();
     }
     EvidenceCapture variant(HttpRequest base) {
-        EvidenceCapture next = new EvidenceCapture(runId, base, source, probeId, captureId); next.tokens.addAll(tokens); return next;
+        EvidenceCapture next = new EvidenceCapture(runId, base, source, probeId, captureId); next.tokens.addAll(tokens); next.owner = owner; return next;
     }
     String correlation() { return "AC2|" + captureId; }
     void issued(CollaboratorPayload payload, String testClass, String parameter) {
@@ -41,6 +44,14 @@ final class EvidenceCapture {
     void record(ActiveRequestGateway.Result result) { record(result, false); }
     void record(ActiveRequestGateway.Result result, boolean oastPayload) {
         attempted++;
+        if (result == null || !result.dispatched()) blocked = true;
+        else {
+            boolean response = false;
+            try { response = result.response() != null && result.response().hasResponse() && result.response().response() != null; }
+            catch (RuntimeException ignored) { }
+            responded |= response;
+            failed |= result.error() != null || !response;
+        }
         if (oastPayload && result != null && result.dispatched())
             tokens.replaceAll(t -> new FindingEvidence.OastToken(t.payloadId(), t.testClass(), t.parameter(), true));
         if (result == null || result.exchange() == null) return;
@@ -69,6 +80,16 @@ final class EvidenceCapture {
             var finding = findings.get(i);
             findings.set(i, finding.withEvidence(snapshot(finding.verificationState(), finding.evidence()), messages));
         }
+    }
+    void finishProbe(String parameter, String encoding, int localLimit, List<ActiveTestEngine.ActiveFinding> output, int from, boolean crashed) {
+        if (owner == null || attempted == 0 && !crashed) return;
+        boolean inconclusive = blocked || !responded || output.subList(from, output.size()).stream()
+                .anyMatch(f -> f.verificationState() == VerificationState.SIGNAL || f.verificationState() == VerificationState.CANDIDATE);
+        var status = failed || crashed ? RunRecord.ProbeStatus.FAILED : inconclusive ? RunRecord.ProbeStatus.INCONCLUSIVE
+                : output.size() > from ? RunRecord.ProbeStatus.FINDING : RunRecord.ProbeStatus.CHECKED;
+        String target = RunRecord.target(targetMethod, targetUrl);
+        owner.probe(new RunRecord.Probe(RunRecord.probeKey(source, probeId, target, parameter, encoding), source,
+                probeId, target, parameter, encoding, localLimit, status));
     }
     void recordWithTokens(ActiveRequestGateway.Result result, HttpRequest request) {
         boolean contains = false;
