@@ -67,6 +67,7 @@ jobs:
           grep -q -- '--fail-on' /tmp/recon-hound-help.txt
           jar tf "$JAR" >/tmp/recon-hound-jar.txt
           grep -q '^com/victor/reconloop/ReconLoopExtension.class$' /tmp/recon-hound-jar.txt
+          unzip -p "$JAR" gf-packs/GITLEAKS-LICENSE.txt | cmp - gf/GITLEAKS-LICENSE.txt
           sha256sum "$JAR" > "$JAR.sha256"
 
       - name: Publish GitHub Release

@@ -1,7 +1,7 @@
 {
   "flags": "-P",
   "patterns": [
-    "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+    "\\-\\-\\-\\-\\-BEGIN\\ PGP\\ PRIVATE\\ KEY\\ BLOCK\\-\\-\\-\\-\\-",
     "\\-\\-\\-\\-\\-BEGIN\\ DSA\\ PRIVATE\\ KEY\\-\\-\\-\\-\\-",
     "\\-\\-\\-\\-\\-BEGIN\\ EC\\ PRIVATE\\ KEY\\-\\-\\-\\-\\-",
     "\\-\\-\\-\\-\\-BEGIN\\ ENCRYPTED\\ PRIVATE\\ KEY\\-\\-\\-\\-\\-",
@@ -11,14 +11,14 @@
   ],
   "reconhound": {
     "schemaVersion": 1,
-    "catalogVersion": "1.0.0",
+    "catalogVersion": "1.0.1",
     "rules": [
       {
         "id": "pgp-private-key",
         "provider": "generic",
         "category": "private-key",
         "severity": "HIGH",
-        "pattern": "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+        "pattern": "\\-\\-\\-\\-\\-BEGIN\\ PGP\\ PRIVATE\\ KEY\\ BLOCK\\-\\-\\-\\-\\-",
         "capture": 0,
         "minEntropy": 0,
         "validator": "none",

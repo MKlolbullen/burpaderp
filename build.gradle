@@ -49,6 +49,7 @@ tasks.named('build') { dependsOn tasks.named('runtimeVerificationJar') }
 tasks.named('processResources') {
     from('recon') { include 'chain_catalog.json' }
     from('gf/packs') { into 'gf-packs' }
+    from('gf/GITLEAKS-LICENSE.txt') { into 'gf-packs' }
 }
 
 tasks.withType(JavaCompile).configureEach {

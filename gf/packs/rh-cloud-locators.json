@@ -21,7 +21,7 @@
   ],
   "reconhound": {
     "schemaVersion": 1,
-    "catalogVersion": "1.0.0",
+    "catalogVersion": "1.0.1",
     "rules": [
       {
         "id": "aws-api-gateway",

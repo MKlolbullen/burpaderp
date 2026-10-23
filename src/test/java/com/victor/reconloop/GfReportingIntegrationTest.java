@@ -8,6 +8,23 @@ import static org.junit.Assert.*;
 
 public class GfReportingIntegrationTest {
     private static String token() { return "amzn.mws." + "1234abcd-5678-90ab-cdef-1234567890ab"; }
+    @Test public void arnAccountResourcePairsAreNotTelegramFindingsInTheCombinedNativePipeline() throws Exception {
+        try (var fake = new FakeMontoya()) {
+            var findings = new ReconModel.FindingTableModel();
+            var controller = NativeEvidenceIntegrationTest.controller(fake, new ManualExecutor(), new ReconModel.ActiveTableModel(), findings);
+            try {
+                String arn = "arn:aws:sns:us-east-1:123456789012:my-application-notification-topic-prod";
+                var pair = FakeMontoya.pair(fake.request("https://example.test/"), FakeMontoya.response(200, arn, Map.of()));
+                var method = ReconController.class.getDeclaredMethod("scanMessage",String.class,String.class,String.class,
+                        burp.api.montoya.http.message.HttpRequestResponse.class);
+                method.setAccessible(true); method.invoke(controller,arn,"response",pair.request().url(),pair);
+                NativeEvidenceIntegrationTest.flush();
+                assertTrue(findings.snapshot().stream().noneMatch(f -> f.rule().contains("telegram")));
+                assertTrue(fake.issues.stream().map(AuditIssue.class::cast).noneMatch(i -> i.name().contains("Telegram")));
+                assertTrue(fake.sent.isEmpty()); assertTrue(fake.dnsLookups.isEmpty());
+            } finally { controller.shutdown(); }
+        }
+    }
     @Test public void nativePassivePipelineUsesGfWithoutTrafficAndNeverClaimsCredentialValidity() throws Exception {
         try (var fake = new FakeMontoya()) {
             var controller = NativeEvidenceIntegrationTest.controller(fake, new ManualExecutor(),

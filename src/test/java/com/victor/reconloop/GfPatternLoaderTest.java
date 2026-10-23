@@ -67,4 +67,56 @@ public class GfPatternLoaderTest {
         String notJson = "eyJub3QtanNvbiI" + "." + "bm90LWpzb24" + "." + "YWJjZGVmZ2hpamtsbW5vcA";
         assertTrue(loader.scan(notJson).stream().noneMatch(m -> m.ruleId().equals("jwt")));
     }
+    @Test public void awsArnsRemainInformationalWithoutFalseTelegramCredentials() {
+        var loader = new GfPatternLoader(List.of(), true);
+        String arnPrefix = "arn:aws:sns:us-east-1:123456789012:";
+        String tokenShapedResource = "Ab3dE6gH9jK2mN5pQ8" + "sT1vW4yZ7cF0iLrUo";
+        for (String resource : List.of("my-application-notification-topic-prod", tokenShapedResource)) {
+            String arn = arnPrefix + resource;
+            var matches = loader.scan(arn);
+            assertTrue(matches.stream().anyMatch(m -> m.ruleId().equals("aws-arn")
+                    && m.value().equals(arn) && m.severity().equals("INFO")));
+            assertTrue(matches.stream().noneMatch(m -> m.ruleId().equals("telegram-bot-token")));
+        }
+    }
+    @Test public void telegramBoundariesKeepAdjacentTokensAndApiUrlCaptureOffsets() {
+        var loader = new GfPatternLoader(List.of(), true);
+        String tail = "Ab3dE6gH9jK2mN5pQ8" + "sT1vW4yZ7cF0iLrU";
+        String first = "12345:" + tail + "-";
+        String second = "1234567890123456:" + tail + "_";
+        String text = "tokens=\"" + first + "," + second + "\"";
+        var matches = loader.scan(text).stream().filter(m -> m.ruleId().equals("telegram-bot-token")).toList();
+        assertEquals(List.of(first, second), matches.stream().map(GfPatternLoader.GfMatch::value).toList());
+        for (var match : matches) assertEquals(match.value(), text.substring(match.start(), match.end()));
+        String url = "https://api.telegram.org/bot" + first + "/getMe";
+        var urlMatch = loader.scan(url).stream().filter(m -> m.ruleId().equals("telegram-bot-token")).findFirst().orElseThrow();
+        assertEquals(first, urlMatch.value());
+        assertEquals(first, url.substring(urlMatch.start(), urlMatch.end()));
+    }
+    @Test public void mappedIpv6InventoryKeepsFullLiteralWithoutChangingDestinationClassification() {
+        var loader = new GfPatternLoader(List.of(), true);
+        for (String ipv4 : List.of("8.8.8.8", "127.0.0.1")) {
+            String literal = "::ffff:" + ipv4;
+            assertTrue(RegexHound.validIpv6(literal));
+            var address = DestinationAddress.inspect(literal);
+            assertEquals(ipv4, address.canonical());
+            assertEquals(ipv4.equals("8.8.8.8") ? DestinationAddress.Kind.PUBLIC
+                    : DestinationAddress.Kind.PROTECTED, address.kind());
+            var matches = loader.scan(literal).stream()
+                    .filter(m -> m.ruleId().equals("ipv4") || m.ruleId().equals("ipv6")).toList();
+            assertEquals(List.of(literal), matches.stream().map(GfPatternLoader.GfMatch::value).toList());
+            assertEquals("ipv6", matches.get(0).ruleId());
+            assertEquals("INFO", matches.get(0).severity());
+        }
+        assertFalse(RegexHound.validIpv6("::ffff:999.1.1.1"));
+    }
+    @Test public void standaloneIpv4RemainsVisibleAfterAnEqualMappedLiteral() {
+        var loader = new GfPatternLoader(List.of(), true);
+        String text = "[::ffff:8.8.8.8] plain=8.8.8.8 ip:127.0.0.1 http://8.8.4.4:443";
+        var matches = loader.scan(text).stream().filter(m -> m.ruleId().equals("ipv4")).toList();
+        assertEquals(List.of("8.8.8.8", "127.0.0.1", "8.8.4.4"),
+                matches.stream().map(GfPatternLoader.GfMatch::value).toList());
+        assertEquals(text.indexOf("plain=") + "plain=".length(), matches.get(0).start());
+        for (var match : matches) assertEquals(match.value(), text.substring(match.start(), match.end()));
+    }
 }

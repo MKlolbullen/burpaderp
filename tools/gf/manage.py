@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -69,25 +70,53 @@ def atomic_write(path, content):
 
 
 def install(files, target):
+    packs = {n: text.encode('utf-8') for n, text in files.items() if n.endswith('.json')}
+    selected = {'GITLEAKS-LICENSE.txt': (ROOT / 'gf/GITLEAKS-LICENSE.txt').read_bytes(), **packs}
     target = target.expanduser().absolute()
     if target.is_symlink():
         raise ValueError('Refusing a symlink as the installation directory')
     target.mkdir(parents=True, exist_ok=True)
-    selected = {n: text for n, text in files.items() if n.endswith('.json')}
-    for name, text in selected.items():
+    for name, content in selected.items():
         path = target / name
-        if path.is_symlink() or (path.exists() and path.read_text() != text):
-            raise ValueError('Existing pack preserved; move conflicting file first: ' + str(path))
-    for name, text in selected.items():
-        path = target / name
-        # Exclusive creation also preserves a file created after the preflight check.
-        try:
-            with path.open('x') as handle:
-                handle.write(text)
-        except FileExistsError:
-            if path.is_symlink() or path.read_text() != text:
-                raise ValueError('Concurrent change preserved: ' + str(path))
-    print(f'Installed {len(selected)} packs in {target}; existing unrelated files preserved.')
+        if path.is_symlink() or (path.exists() and not identical_regular_file(path, content)):
+            raise ValueError('Existing file preserved; move conflicting file first: ' + str(path))
+    created = []
+    try:
+        for name, content in selected.items():
+            path = target / name
+            # Exclusive creation also preserves a file created after the preflight check.
+            try:
+                handle = path.open('xb')
+            except FileExistsError:
+                if not identical_regular_file(path, content):
+                    raise ValueError('Concurrent change preserved: ' + str(path))
+                continue
+            with handle:
+                identity = os.fstat(handle.fileno())
+                created.append((path, identity.st_dev, identity.st_ino))
+                handle.write(content)
+    except BaseException:
+        for path, device, inode in reversed(created):
+            try:
+                current = path.lstat()
+                if stat.S_ISREG(current.st_mode) and (current.st_dev, current.st_ino) == (device, inode):
+                    path.unlink()
+            except OSError:
+                pass  # Preserve the original error and any replacement owned by another writer.
+        raise
+    print(f'Installed {len(packs)} packs and Gitleaks notice in {target}; existing unrelated files preserved.')
+
+
+def identical_regular_file(path, content):
+    if path.is_symlink():
+        return False
+    flags = os.O_RDONLY | getattr(os, 'O_NONBLOCK', 0) | getattr(os, 'O_NOFOLLOW', 0)
+    try:
+        descriptor = os.open(path, flags)
+        with os.fdopen(descriptor, 'rb') as handle:
+            return stat.S_ISREG(os.fstat(handle.fileno()).st_mode) and handle.read(len(content) + 1) == content
+    except OSError:
+        return False
 
 
 def verify_grep(catalog):
