@@ -284,12 +284,12 @@ final class RegexHound {
         return value.substring(0, 5) + "…" + value.substring(value.length() - 4);
     }
 
-    private static boolean isPlaceholder(String value) {
+    static boolean isPlaceholder(String value) {
         String lower = value.toLowerCase(Locale.ROOT);
         return PLACEHOLDERS.stream().anyMatch(lower::contains);
     }
 
-    private static double shannonEntropy(String value) {
+    static double shannonEntropy(String value) {
         if (value == null || value.isEmpty()) return 0;
         Map<Character, Integer> counts = new HashMap<>();
         for (char c : value.toCharArray()) counts.merge(c, 1, Integer::sum);
@@ -301,7 +301,7 @@ final class RegexHound {
         return entropy;
     }
 
-    private static boolean validIpv4(String value) {
+    static boolean validIpv4(String value) {
         String[] parts = value.split("\\.");
         if (parts.length != 4) return false;
         for (String part : parts) {
@@ -314,9 +314,9 @@ final class RegexHound {
         return true;
     }
 
-    private static boolean validIpv6(String value) {
+    static boolean validIpv6(String value) {
         DestinationAddress.Host address = DestinationAddress.inspect(value);
         return (address.kind() == DestinationAddress.Kind.PUBLIC || address.kind() == DestinationAddress.Kind.PROTECTED)
-                && address.canonical().contains(":");
+                && value.contains(":"); // IPv4-mapped IPv6 is normalized to dotted decimal by the destination guard.
     }
 }

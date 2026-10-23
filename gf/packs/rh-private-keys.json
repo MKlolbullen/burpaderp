@@ -1,0 +1,130 @@
+{
+  "flags": "-P",
+  "patterns": [
+    "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+    "\\-\\-\\-\\-\\-BEGIN\\ DSA\\ PRIVATE\\ KEY\\-\\-\\-\\-\\-",
+    "\\-\\-\\-\\-\\-BEGIN\\ EC\\ PRIVATE\\ KEY\\-\\-\\-\\-\\-",
+    "\\-\\-\\-\\-\\-BEGIN\\ ENCRYPTED\\ PRIVATE\\ KEY\\-\\-\\-\\-\\-",
+    "\\-\\-\\-\\-\\-BEGIN\\ OPENSSH\\ PRIVATE\\ KEY\\-\\-\\-\\-\\-",
+    "\\-\\-\\-\\-\\-BEGIN\\ PRIVATE\\ KEY\\-\\-\\-\\-\\-",
+    "\\-\\-\\-\\-\\-BEGIN\\ RSA\\ PRIVATE\\ KEY\\-\\-\\-\\-\\-"
+  ],
+  "reconhound": {
+    "schemaVersion": 1,
+    "catalogVersion": "1.0.0",
+    "rules": [
+      {
+        "id": "pgp-private-key",
+        "provider": "generic",
+        "category": "private-key",
+        "severity": "HIGH",
+        "pattern": "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+        "capture": 0,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [
+          "PRIVATE KEY"
+        ],
+        "sources": [
+          "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+        ]
+      },
+      {
+        "id": "private-key-dsa",
+        "provider": "generic",
+        "category": "private-key",
+        "severity": "HIGH",
+        "pattern": "\\-\\-\\-\\-\\-BEGIN\\ DSA\\ PRIVATE\\ KEY\\-\\-\\-\\-\\-",
+        "capture": 0,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [
+          "PRIVATE KEY"
+        ],
+        "sources": [
+          "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+        ]
+      },
+      {
+        "id": "private-key-ec",
+        "provider": "generic",
+        "category": "private-key",
+        "severity": "HIGH",
+        "pattern": "\\-\\-\\-\\-\\-BEGIN\\ EC\\ PRIVATE\\ KEY\\-\\-\\-\\-\\-",
+        "capture": 0,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [
+          "PRIVATE KEY"
+        ],
+        "sources": [
+          "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+        ]
+      },
+      {
+        "id": "private-key-encrypted",
+        "provider": "generic",
+        "category": "private-key",
+        "severity": "HIGH",
+        "pattern": "\\-\\-\\-\\-\\-BEGIN\\ ENCRYPTED\\ PRIVATE\\ KEY\\-\\-\\-\\-\\-",
+        "capture": 0,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [
+          "PRIVATE KEY"
+        ],
+        "sources": [
+          "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+        ]
+      },
+      {
+        "id": "private-key-openssh",
+        "provider": "generic",
+        "category": "private-key",
+        "severity": "HIGH",
+        "pattern": "\\-\\-\\-\\-\\-BEGIN\\ OPENSSH\\ PRIVATE\\ KEY\\-\\-\\-\\-\\-",
+        "capture": 0,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [
+          "PRIVATE KEY"
+        ],
+        "sources": [
+          "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+        ]
+      },
+      {
+        "id": "private-key-pkcs8",
+        "provider": "generic",
+        "category": "private-key",
+        "severity": "HIGH",
+        "pattern": "\\-\\-\\-\\-\\-BEGIN\\ PRIVATE\\ KEY\\-\\-\\-\\-\\-",
+        "capture": 0,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [
+          "PRIVATE KEY"
+        ],
+        "sources": [
+          "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+        ]
+      },
+      {
+        "id": "private-key-rsa",
+        "provider": "generic",
+        "category": "private-key",
+        "severity": "HIGH",
+        "pattern": "\\-\\-\\-\\-\\-BEGIN\\ RSA\\ PRIVATE\\ KEY\\-\\-\\-\\-\\-",
+        "capture": 0,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [
+          "PRIVATE KEY"
+        ],
+        "sources": [
+          "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+        ]
+      }
+    ]
+  }
+}

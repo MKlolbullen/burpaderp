@@ -67,6 +67,12 @@ public final class ReconHoundCli {
                     severity(f.rule().severity()), url,
                     "Provider " + f.rule().provider() + "; value " + RegexHound.redact(f.value())));
         }
+        for (var match : new GfPatternLoader().scan(body)) {
+            if (match.severity().equals("INFO")) continue;
+            findings.add(new Finding("gf-" + match.ruleId(), "GF " + match.category() + " candidate: " + match.ruleId(),
+                    match.severity(), match.displaySourceUrl(url), "Passive SIGNAL; validity/impact unverified. Provider " + match.provider()
+                    + "; value " + match.displayValue()));
+        }
         for (DependencyVulnEngine.LibIssue lib : sca.scan(url, body)) {
             findings.add(new Finding("sca-" + slug(lib.library()),
                     "Vulnerable dependency: " + lib.library() + " " + lib.version(),

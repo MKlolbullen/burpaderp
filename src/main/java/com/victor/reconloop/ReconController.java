@@ -1191,7 +1191,7 @@ final class ReconController implements HttpHandler {
                 + " | Reflections: " + reflectionDedupe.size()
                 + " | Active: " + activeDedupe.size()
                 + " | Assets: " + (assetHosts.size() + assetIps.size())
-                + " | GF packs: " + gfPatterns.packCount()
+                + " | GF packs/rules/warnings: " + gfPatterns.packCount() + "/" + gfPatterns.ruleCount() + "/" + gfPatterns.diagnostics().size()
                 + " | Payloads: " + payloadLibrary.totalPayloads();
     }
 
@@ -3048,21 +3048,12 @@ final class ReconController implements HttpHandler {
 
         if (scanGfPatterns.get()) {
             for (GfPatternLoader.GfMatch match : gfPatterns.scan(text)) {
-                String dedupe = "gf\0" + match.pack() + "\0" + match.value() + "\0" + url;
+                if (!includeGfMatch(match)) continue;
+                String dedupe = "gf\0" + match.pack() + "\0" + match.ruleId() + "\0" + match.value() + "\0" + url;
                 if (!issueDedupe.add(dedupe)) continue;
-                addSyntheticFinding("INFO", "gf", "gf:" + match.pack(), location, match.value(), url);
-                reporter.report("gf-issue\0" + match.pack() + "\0" + match.value() + "\0" + url,
-                        "gf pattern match (" + match.pack() + ")",
-                        "<b>gf pattern <code>" + escape(match.pack()) + "</code> matched</b><br>"
-                                + "Location: " + escape(location) + "<br>"
-                                + "Matched value: <code>" + escape(match.value()) + "</code><br><br>"
-                                + "gf packs flag parameters/patterns commonly associated with a vulnerability class "
-                                + "(SSRF, LFI, redirect, SQLi, XSS, etc.). This is an attack-surface hint, not a confirmed issue.",
-                        "Manually assess the flagged parameter/pattern for the associated vulnerability class.",
-                        url, AuditIssueSeverity.INFORMATION, AuditIssueConfidence.TENTATIVE,
-                        "Recon Hound scans in-scope traffic against community gf pattern packs to surface likely-vulnerable inputs.",
-                        "gf matches are heuristic attack-surface hints; confirm exploitability manually.",
-                        pair);
+                addSyntheticFinding(match.severity(), "gf:" + match.provider(), "gf:" + match.ruleId(),
+                        location, match.displayValue(), match.displaySourceUrl(url));
+                addToSiteMap(buildGfIssue(match, location, url, pair));
             }
         }
         publishStatus();
@@ -3233,6 +3224,27 @@ final class ReconController implements HttpHandler {
         )));
     }
 
+    private boolean includeGfMatch(GfPatternLoader.GfMatch match) {
+        return !"INFO".equals(match.severity()) || match.category().equals("unclassified") || includeInfoFindings.get();
+    }
+
+    private AuditIssue buildGfIssue(GfPatternLoader.GfMatch match, String location, String url, HttpRequestResponse pair) {
+        boolean sensitive = match.sensitive();
+        String detail = "<b>GF pattern candidate</b><br>Pack: <code>" + escape(match.pack())
+                + "</code><br>Rule: <code>" + escape(match.ruleId()) + "</code><br>Provider: " + escape(match.provider())
+                + "<br>Category: " + escape(match.category()) + "<br>Location: " + escape(location)
+                + "<br>Matched value: <code>" + escape(match.displayValue()) + "</code><br>"
+                + "Verification state: <b>SIGNAL</b>. This is a passive format/context match; credential validity, permissions "
+                + "and vulnerability impact have not been verified. Public identifiers and resource locations are inventory hints.";
+        return reporter.buildIfNew("gf-issue\0" + match.pack() + "\0" + match.ruleId() + "\0" + match.value() + "\0" + url,
+                "GF " + match.category() + " candidate (" + match.ruleId() + ")", detail,
+                sensitive ? "Review the original evidence; rotate and restrict a credential if its exposure is confirmed."
+                        : "Review the inventory/context before investigating the associated resource.",
+                match.displaySourceUrl(url), IssueReporter.severity(match.severity()), AuditIssueConfidence.TENTATIVE,
+                "Passive matching against local versioned GF patterns; no external engine or provider validation runs.",
+                "A pattern match does not establish a usable credential or a vulnerability.", pair);
+    }
+
     private void addAuditIssue(RegexHound.Finding finding, HttpRequestResponse pair) {
         addToSiteMap(buildRegexIssue(finding, pair));
     }
@@ -3331,6 +3343,12 @@ final class ReconController implements HttpHandler {
             }
             for (RegexHound.Finding f : regexHound.scan(request.toString(), "scan-request", url, includeInfoFindings.get())) {
                 addIfPresent(issues, buildRegexIssue(f, rr));
+            }
+            if (scanGfPatterns.get()) {
+                for (var match : gfPatterns.scan(response.toString())) if (includeGfMatch(match))
+                    addIfPresent(issues, buildGfIssue(match, "scan-response", url, rr));
+                for (var match : gfPatterns.scan(request.toString())) if (includeGfMatch(match))
+                    addIfPresent(issues, buildGfIssue(match, "scan-request", url, rr));
             }
             for (WebHygieneEngine.Note note : webHygiene.analyze(request, response)) {
                 addIfPresent(issues, buildHygieneIssue(note, url, rr));

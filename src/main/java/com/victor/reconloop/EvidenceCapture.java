@@ -52,7 +52,8 @@ final class EvidenceCapture {
     }
     FindingEvidence snapshot(VerificationState state, String rationale) {
         return new FindingEvidence(UUID.randomUUID().toString(), captureId, runId, source, probeId,
-                source.equals("CORPUS") || (source.equals("NATIVE_ACTIVE") && probeId.equals("sqli")) ? "2" : FindingEvidence.DETECTOR_VERSION,
+                source.equals("CORPUS") || (source.equals("NATIVE_ACTIVE")
+                        && (probeId.equals("sqli") || probeId.equals("file-upload"))) ? "2" : FindingEvidence.DETECTOR_VERSION,
                 state, Instant.now().toString(), rationale,
                 "Inspect the captured original and ordered request/response observations. Reproduce only with current scope and risk grants; refresh session credentials and OAST identifiers. Stored data never authorizes replay.",
                 original, exchanges, attempted, Math.max(0, attempted - exchanges.size()), tokens, null, List.of());

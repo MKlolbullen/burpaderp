@@ -51,6 +51,12 @@ jobs:
           RECONCTL_TEST_BINARY: /tmp/reconctl
         run: ./gradlew clean build --no-daemon --stacktrace
 
+      - name: Validate curated GF catalog and installer
+        run: |
+          python3 tools/gf/manage.py check
+          python3 tools/gf/manage.py test-grep
+          python3 -m unittest discover -s tools/gf/tests -v
+
       - name: Package and smoke-check passive recon sidecar
         run: |
           mkdir -p build/recon

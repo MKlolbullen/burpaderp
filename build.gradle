@@ -48,6 +48,7 @@ tasks.named('build') { dependsOn tasks.named('runtimeVerificationJar') }
 // One catalog for the Go planning manifest and the plugin preview; no runtime subprocess needed.
 tasks.named('processResources') {
     from('recon') { include 'chain_catalog.json' }
+    from('gf/packs') { into 'gf-packs' }
 }
 
 tasks.withType(JavaCompile).configureEach {

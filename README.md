@@ -512,9 +512,20 @@ destructive entries filtered and callback hosts rewritten to your Collaborator.
 
 ## gf patterns
 
-Normal gf-json files are discovered from `$GF_PATTERNS_DIR` or `~/.gf/*.json`. The lightweight loader
-supports both a single `"pattern"` and an array of `"patterns"`, plus case-insensitive `flags`
-containing `i`.
+The plugin and offline CLI bundle **167 curated detectors in ten GF packs** for cloud/SaaS/LLM
+credentials, private-key markers, authentication material, IPs, hostnames, cloud endpoints and recon
+variables. Captured values have rule IDs/categories; secret candidates are redacted and remain
+unverified SIGNALs. Existing local packs still load, with real JSON parsing and bounded matching.
+
+```bash
+python3 tools/gf/manage.py install --directory ~/.gf
+gf rh-secrets-prefixed response.js
+gf rh-secrets-context source.env
+gf rh-cloud-locators urls.txt
+```
+
+Exports require GNU grep's `-P` support. The installer preserves existing conflicting files. See
+[coverage, format distinctions, limits, provenance and maintenance](docs/GF_PATTERNS.md).
 
 ## Project layout
 

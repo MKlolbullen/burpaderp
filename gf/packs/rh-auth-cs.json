@@ -1,0 +1,133 @@
+{
+  "flags": "-P",
+  "patterns": [
+    "(amzn\\.mws\\.[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})",
+    "(https://[A-Za-z0-9.-]{3,128}/[^ \\t\\r\\n\"\\x27<>]{0,2048}[?&]X-Amz-Signature=[a-f0-9]{64})",
+    "(https://[A-Za-z0-9.-]{3,128}/[^ \\t\\r\\n\"\\x27<>]{0,2048}[?&]sig=[A-Za-z0-9%+/=]{20,256})",
+    "(https://(canary\\.|ptb\\.)?discord(app)?\\.com/api/webhooks/[0-9]{6,24}/[A-Za-z0-9_.-]{20,255})",
+    "(^|[^A-Za-z0-9_.-])(eyJ[A-Za-z0-9_-]{5,1024}\\.[A-Za-z0-9_-]{2,8192}\\.[A-Za-z0-9_-]{0,2048})($|[^A-Za-z0-9_.-])",
+    "(https://hooks\\.slack\\.com/(services|workflows|triggers)/[A-Za-z0-9_/-]{40,256})",
+    "(EAAA[A-Za-z0-9_-]{60})",
+    "([0-9]{6,12}:[A-Za-z0-9_-]{35})"
+  ],
+  "reconhound": {
+    "schemaVersion": 1,
+    "catalogVersion": "1.0.0",
+    "rules": [
+      {
+        "id": "aws-mws-token",
+        "provider": "aws",
+        "category": "credential",
+        "severity": "HIGH",
+        "pattern": "(amzn\\.mws\\.[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})",
+        "capture": 1,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "user-provided:legacy-mws-token-format"
+        ]
+      },
+      {
+        "id": "aws-presigned-url",
+        "provider": "aws",
+        "category": "credential",
+        "severity": "HIGH",
+        "pattern": "(https://[A-Za-z0-9.-]{3,128}/[^ \\t\\r\\n\"\\x27<>]{0,2048}[?&]X-Amz-Signature=[a-f0-9]{64})",
+        "capture": 1,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+        ]
+      },
+      {
+        "id": "azure-sas-url",
+        "provider": "microsoft",
+        "category": "credential",
+        "severity": "HIGH",
+        "pattern": "(https://[A-Za-z0-9.-]{3,128}/[^ \\t\\r\\n\"\\x27<>]{0,2048}[?&]sig=[A-Za-z0-9%+/=]{20,256})",
+        "capture": 1,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+        ]
+      },
+      {
+        "id": "discord-webhook",
+        "provider": "discord",
+        "category": "credential",
+        "severity": "HIGH",
+        "pattern": "(https://(canary\\.|ptb\\.)?discord(app)?\\.com/api/webhooks/[0-9]{6,24}/[A-Za-z0-9_.-]{20,255})",
+        "capture": 1,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+        ]
+      },
+      {
+        "id": "jwt",
+        "provider": "generic",
+        "category": "token",
+        "severity": "HIGH",
+        "pattern": "(^|[^A-Za-z0-9_.-])(eyJ[A-Za-z0-9_-]{5,1024}\\.[A-Za-z0-9_-]{2,8192}\\.[A-Za-z0-9_-]{0,2048})($|[^A-Za-z0-9_.-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "jwt",
+        "keywords": [
+          "eyJ"
+        ],
+        "sources": [
+          "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+        ]
+      },
+      {
+        "id": "slack-webhook",
+        "provider": "slack",
+        "category": "credential",
+        "severity": "HIGH",
+        "pattern": "(https://hooks\\.slack\\.com/(services|workflows|triggers)/[A-Za-z0-9_/-]{40,256})",
+        "capture": 1,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+        ]
+      },
+      {
+        "id": "square-legacy-oauth",
+        "provider": "square",
+        "category": "credential",
+        "severity": "HIGH",
+        "pattern": "(EAAA[A-Za-z0-9_-]{60})",
+        "capture": 1,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+        ]
+      },
+      {
+        "id": "telegram-bot-token",
+        "provider": "telegram",
+        "category": "credential",
+        "severity": "HIGH",
+        "pattern": "([0-9]{6,12}:[A-Za-z0-9_-]{35})",
+        "capture": 1,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+        ]
+      }
+    ]
+  }
+}

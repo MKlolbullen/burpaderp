@@ -1,0 +1,33 @@
+{
+  "flags": "-Pi",
+  "patterns": [
+    "(^|[^A-Za-z0-9_])(TRELLO_API_KEY|TRELLO_KEY|TRELLO\\-API\\-KEY|TRELLO\\-KEY|TRELLOAPIKEY|TRELLOKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([a-fA-F0-9]{32})($|[^A-Za-z0-9_./+=~:-])"
+  ],
+  "reconhound": {
+    "schemaVersion": 1,
+    "catalogVersion": "1.0.0",
+    "rules": [
+      {
+        "id": "trello-public-key-context",
+        "provider": "trello",
+        "category": "identifier",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_])(TRELLO_API_KEY|TRELLO_KEY|TRELLO\\-API\\-KEY|TRELLO\\-KEY|TRELLOAPIKEY|TRELLOKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([a-fA-F0-9]{32})($|[^A-Za-z0-9_./+=~:-])",
+        "capture": 3,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [
+          "TRELLO_API_KEY",
+          "TRELLO_KEY",
+          "TRELLO-API-KEY",
+          "TRELLO-KEY",
+          "TRELLOAPIKEY",
+          "TRELLOKEY"
+        ],
+        "sources": [
+          "authored:context-key-names-and-entropy"
+        ]
+      }
+    ]
+  }
+}

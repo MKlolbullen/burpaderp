@@ -1,0 +1,41 @@
+{
+  "flags": "-Pi",
+  "patterns": [
+    "(^|[^A-Za-z0-9_])((AWS|AZURE|GCP|GOOGLE|GITHUB|GITLAB|OPENAI|ANTHROPIC|XAI|VENICE|SHODAN|CENSYS|FOFA|PDCP)_[A-Za-z0-9_]{2,64})[\"\\x27]?[ \\t]*[=:]",
+    "(^|[?&; \\t])((redirect|return_url|next|callback|url|uri|path|file|filename|template|query|search|cmd|command|exec|debug|admin|role|token|api_key|access_token|tenant|account|user_id|object_id))="
+  ],
+  "reconhound": {
+    "schemaVersion": 1,
+    "catalogVersion": "1.0.0",
+    "rules": [
+      {
+        "id": "interesting-variable",
+        "provider": "generic",
+        "category": "hint",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_])((AWS|AZURE|GCP|GOOGLE|GITHUB|GITLAB|OPENAI|ANTHROPIC|XAI|VENICE|SHODAN|CENSYS|FOFA|PDCP)_[A-Za-z0-9_]{2,64})[\"\\x27]?[ \\t]*[=:]",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      },
+      {
+        "id": "recon-parameter",
+        "provider": "generic",
+        "category": "hint",
+        "severity": "INFO",
+        "pattern": "(^|[?&; \\t])((redirect|return_url|next|callback|url|uri|path|file|filename|template|query|search|cmd|command|exec|debug|admin|role|token|api_key|access_token|tenant|account|user_id|object_id))=",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      }
+    ]
+  }
+}
