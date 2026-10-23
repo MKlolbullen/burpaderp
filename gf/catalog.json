@@ -5787,7 +5787,7 @@
       "provider": "generic",
       "category": "private-key",
       "severity": "HIGH",
-      "pattern": "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+      "pattern": "\\-\\-\\-\\-\\-BEGIN\\ PGP\\ PRIVATE\\ KEY\\ BLOCK\\-\\-\\-\\-\\-",
       "capture": 0,
       "ignoreCase": false,
       "minEntropy": 0,
