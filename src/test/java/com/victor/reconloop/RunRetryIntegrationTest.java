@@ -72,6 +72,49 @@ public class RunRetryIntegrationTest {
         }
     }
 
+    @Test public void blindXssRetryStillNeedsBothGrantsAndGeneratesFreshCallbacks() {
+        try (var fake = new FakeMontoya()) {
+            var base = fake.request(URL); String target = RunRecord.target(base.method(), base.url());
+            String parameter = FindingEvidence.digest(InsertionPoint.enumerate(base).getFirst().label());
+            var probe = new RunRecord.Probe(RunRecord.probeKey("NATIVE_ACTIVE", "blind-xss", target, parameter, ""),
+                    "NATIVE_ACTIVE", "blind-xss", target, parameter, "", 0, RunRecord.ProbeStatus.INCONCLUSIVE);
+            String parent = UUID.randomUUID().toString();
+            var plan = RunRetry.plan(parent, List.of(probe), List.of(base), ignored -> true);
+            var active = new ActiveTestEngine(fake.api, 0); var correlations = new ArrayList<String>();
+            active.setCollaborator(NativeEvidenceIntegrationTest.collaborator(correlations));
+            var corpus = new CorpusFuzzEngine(fake.api, new PayloadLibrary(), 0);
+            var denied = ScanRun.begin(ScanProfile.ACTIVE_SAFE, plan.scope(), 2);
+            RunRetry.execute(plan, denied, new ActiveRequestGateway(new RequestPolicy(ignored -> true, Set.of(RequestPolicy.Permission.OAST)), fake.transport()), active, corpus, (f, r) -> {});
+            assertTrue(fake.sent.isEmpty()); assertTrue(fake.dnsLookups.isEmpty()); assertEquals(0, denied.requestBudget().used());
+            var allowed = ScanRun.begin(ScanProfile.ACTIVE_SAFE, plan.scope(), 2); allowed.parent(parent);
+            var rows = new ArrayList<ActiveTestEngine.ActiveFinding>();
+            RunRetry.execute(plan, allowed, new ActiveRequestGateway(new RequestPolicy(ignored -> true,
+                    Set.of(RequestPolicy.Permission.OAST, RequestPolicy.Permission.PERSISTENT_PAYLOAD)), fake.transport()), active, corpus, (f, r) -> rows.add(f));
+            assertEquals(1, fake.sent.size()); assertEquals(2, correlations.size()); assertNotEquals(correlations.getFirst(), correlations.getLast());
+            assertTrue(rows.stream().allMatch(f -> f.evidenceRecord().runId().equals(allowed.id().toString())));
+            assertEquals(RunRecord.ProbeStatus.INCONCLUSIVE, allowed.snapshot().probes().getFirst().status());
+        }
+    }
+
+    @Test public void crawlPerRunPauseKeepsIdentityAndCancelDoesNotRefillFutureCrawls() {
+        try (var fake = new FakeMontoya()) {
+            var controller = ReconControllerRunLifecycleTest.controller(fake, new ManualExecutor());
+            try {
+                controller.setMaxRequests(3);
+                var uri = java.net.URI.create(URL);
+                var item = new ReconController.QueueItem(uri, uri, "run controls");
+                controller.crawlOne(item); var run = controller.currentCrawlRun();
+                assertTrue(controller.controlRun(run.id().toString(), "pause")); assertEquals(RunStatus.PAUSED, run.status());
+                assertTrue(controller.controlRun(run.id().toString(), "resume")); controller.crawlOne(item);
+                assertSame(run, controller.currentCrawlRun()); assertEquals(2, run.requestBudget().used());
+                assertTrue(controller.controlRun(run.id().toString(), "cancel")); assertNull(controller.currentCrawlRun());
+                controller.crawlOne(item); controller.crawlOne(item);
+                assertNotEquals(run.id(), controller.currentCrawlRun().id()); assertEquals(1, controller.currentCrawlRun().requestBudget().limit());
+                assertEquals(3, fake.sent.size());
+            } finally { controller.shutdown(); }
+        }
+    }
+
     @Test public void corpusRetryRestrictsCategoryParameterAndEncodingAndKeepsRiskGates() {
         try (var fake = new FakeMontoya()) {
             var base = fake.request(URL); var parent = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.forTargetUrl(URL), 1);

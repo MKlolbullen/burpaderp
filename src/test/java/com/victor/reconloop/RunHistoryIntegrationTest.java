@@ -147,7 +147,7 @@ public class RunHistoryIntegrationTest {
         return new ReconModel.ActiveRow(row.severity(), row.testClass(), row.parameter(), row.status(), row.evidence(), url, withRun(row.evidenceRecord(), run.id().toString()));
     }
     static FindingEvidence withRun(FindingEvidence e, String id) {
-        return new FindingEvidence(e.id(), e.captureId(), id, e.source(), e.detectorId(), e.detectorVersion(), e.state(), e.observedAt(), e.rationale(), e.reproduction(),
+        return new FindingEvidence(UUID.nameUUIDFromBytes((id + e.id()).getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString(), e.captureId(), id, e.source(), e.detectorId(), e.detectorVersion(), e.state(), e.observedAt(), e.rationale(), e.reproduction(),
                 e.originalRequest(), e.originalResponse(), e.exchanges(), e.attempted(), e.omittedExchanges(), e.issuedTokens(), e.observation(), e.relatedEvidenceIds());
     }
 }

@@ -15,7 +15,7 @@ large snapshots are explicitly marked truncated.
 Select a live run and use **Pause**, **Resume** or **Cancel**. Pause waits at the next gateway/probe
 boundary, before destination preparation/admission, without changing the UUID or refilling quotas.
 An already admitted/in-flight dispatch can finish. Cancel is terminal and wakes paused workers.
-Other runs keep their own budgets and state. Disabling active testing, changing any risk grant,
+Other runs keep their own budgets and state. Cancelling the current crawl clears its pending queue; a later explicitly started crawl keeps the unspent global crawl cap. Disabling active testing, changing any risk grant,
 Reset and unload still invalidate old generation tickets; resume cannot revive invalidated work.
 The older global crawl Pause/Resume controls retain their session-cancellation semantics and their
 unspent global crawl cap. The per-run controls in this tab preserve the current run's ledger.

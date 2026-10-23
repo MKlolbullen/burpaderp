@@ -16,12 +16,13 @@ record ScopeSnapshot(Set<String> domains, Set<String> cidrs, boolean truncated) 
     ScopeSnapshot(Set<String> domains, Set<String> cidrs) { this(domains, cidrs, false); }
     ScopeSnapshot {
         Set<String> allDomains = normalize(domains, true), allCidrs = normalize(cidrs, false);
-        truncated |= allDomains.size() > 1024 || allCidrs.size() > 1024;
+        truncated |= allDomains.size() > 1024 || allCidrs.size() > 1024
+                || allDomains.stream().anyMatch(v -> v.length() > 253) || allCidrs.stream().anyMatch(v -> v.length() > 253);
         domains = bounded(allDomains); cidrs = bounded(allCidrs);
     }
 
     private static Set<String> bounded(Set<String> values) {
-        return Set.copyOf(values.stream().sorted().limit(1024).toList());
+        return Set.copyOf(values.stream().filter(v -> v.length() <= 253).sorted().limit(1024).toList());
     }
 
     static ScopeSnapshot empty() {

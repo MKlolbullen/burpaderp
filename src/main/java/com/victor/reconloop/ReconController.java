@@ -734,6 +734,12 @@ final class ReconController implements HttpHandler {
 
     boolean controlRun(String id, String action) {
         boolean changed = runHistory.control(id, action);
+        if (changed && "cancel".equals(action)) synchronized (crawlRuns) {
+            if (crawlRun != null && crawlRun.id().toString().equals(id)) {
+                previousCrawlUsage += crawlRun.requestBudget().used(); sentRequests.set(previousCrawlUsage);
+                crawlRun = null; queue.clear();
+            }
+        }
         if (changed) saveState();
         return changed;
     }
