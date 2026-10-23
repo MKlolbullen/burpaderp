@@ -17,6 +17,7 @@ public class NativeControllerPreviewIntegrationTest {
             try {
                 controller.enqueueSeeds(ROOT + "/queued");
                 controller.setOastActiveRequests(true); controller.setMutatingActiveRequests(true);
+                controller.setPersistentPayloadActiveRequests(true);
                 controller.setTimeDelayActiveRequests(true); controller.setUploadActiveRequests(true); controller.setAuthLockoutActiveRequests(true);
                 var captured = fake.request(ROOT + "/PATH_SECRET?q=QUERY_SECRET").withHeader("Authorization","Bearer " + token())
                         .withHeader("Cookie","COOKIE_SECRET").withBody("BODY_SECRET");
@@ -32,7 +33,8 @@ public class NativeControllerPreviewIntegrationTest {
                     assertTrue(preview,preview.contains("Dry run"));
                     for (String secret : List.of("PATH_SECRET","QUERY_SECRET","COOKIE_SECRET","BODY_SECRET","ALT_SECRET",token())) assertFalse(preview,preview.contains(secret));
                 }
-                assertTrue(previews.get(1).contains("PERSISTENT_PAYLOAD"));
+                assertTrue(previews.get(1).contains("PENDING_BINDING"));
+                assertFalse(previews.get(1).contains("MISSING_PERMISSION"));
                 assertEquals(before,controller.status()); assertEquals(scopeBefore,fake.scopeChanges);
                 assertFalse(fake.apiAccesses.contains("http")); assertFalse(fake.apiAccesses.contains("collaborator"));
                 assertEquals(1,fake.siteMap.size()); assertNull(controller.currentCrawlRun());

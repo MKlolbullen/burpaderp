@@ -58,6 +58,45 @@ public class NativeRiskPermissionIntegrationTest {
         }
     }
 
+    @Test public void blindXssNeedsBothIndependentGrantsAndOnlyProducesPendingSignalEvidence() {
+        var oast = RequestPolicy.Permission.OAST;
+        var persistent = RequestPolicy.Permission.PERSISTENT_PAYLOAD;
+        for (Set<RequestPolicy.Permission> grants : java.util.List.of(Set.<RequestPolicy.Permission>of(),
+                Set.of(oast), Set.of(persistent), Set.of(oast, persistent))) {
+            try (var fake = new FakeMontoya()) {
+                var engine = new ActiveTestEngine(fake.api, 0);
+                engine.setCollaborator(NativeEvidenceIntegrationTest.collaborator(new java.util.ArrayList<>()));
+                var run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), 4096);
+                var findings = engine.test(fake.request("https://api.example.test/search?q=a"), run,
+                        new ActiveRequestGateway(new RequestPolicy(url -> true, grants), fake.transport()));
+                boolean both = grants.containsAll(Set.of(oast, persistent));
+                assertEquals(grants.toString(), both, run.probeRequests("blind-xss") > 0);
+                var beacons = findings.stream().filter(f -> f.testClass().equals("XSS-blind")).toList();
+                assertEquals(both, !beacons.isEmpty());
+                assertTrue(beacons.stream().allMatch(f -> f.verificationState() == VerificationState.SIGNAL));
+                assertEquals(grants.contains(oast), run.probeRequests("ssrf") > 0);
+                assertTrue(fake.errors.toString(), fake.errors.isEmpty());
+            }
+        }
+    }
+
+    @Test public void grantingBothBrowserRisksDoesNotAuthorizeNonSafeMethods() {
+        try (var fake = new FakeMontoya()) {
+            var engine = new ActiveTestEngine(fake.api, 0);
+            engine.setCollaborator(NativeEvidenceIntegrationTest.collaborator(new java.util.ArrayList<>()));
+            var request = fake.request("https://api.example.test/search?q=a").withMethod("POST");
+            var grants = EnumSet.of(RequestPolicy.Permission.OAST, RequestPolicy.Permission.PERSISTENT_PAYLOAD);
+            var denied = ScanRun.begin(ScanProfile.ACTIVE_MUTATION, ScopeSnapshot.empty(), 4096);
+            engine.test(request, denied, new ActiveRequestGateway(new RequestPolicy(url -> true, grants), fake.transport()));
+            assertTrue(fake.sent.isEmpty()); assertEquals(0, denied.requestBudget().used());
+            grants.add(RequestPolicy.Permission.UNSAFE_HTTP_METHOD); grants.add(RequestPolicy.Permission.STATE_CHANGING);
+            var allowed = ScanRun.begin(ScanProfile.ACTIVE_MUTATION, ScopeSnapshot.empty(), 4096);
+            engine.test(request, allowed, new ActiveRequestGateway(new RequestPolicy(url -> true, grants), fake.transport()));
+            assertTrue(allowed.probeRequests("blind-xss") > 0);
+            assertTrue(fake.errors.toString(), fake.errors.isEmpty());
+        }
+    }
+
     private static boolean hasDelay(FakeMontoya fake) {
         return fake.sent.stream().anyMatch(r -> r.parameters().stream().anyMatch(p ->
                 p.value().contains("SLEEP") || p.value().contains("WAITFOR")));

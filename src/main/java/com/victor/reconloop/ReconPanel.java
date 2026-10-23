@@ -131,10 +131,12 @@ final class ReconPanel extends JPanel {
         JCheckBox mutatingActive = new JCheckBox("Allow mutating active replays (POST/PUT/PATCH/DELETE)", false);
         mutatingActive.setToolTipText("Default active tests replay only GET/HEAD/OPTIONS. Enable only when state-changing requests are explicitly authorized.");
         JCheckBox oastActive = new JCheckBox("Allow OAST / Collaborator callbacks", false);
+        JCheckBox persistentPayloadActive = new JCheckBox("Allow persistent / stored browser payloads", false);
         JCheckBox timeDelayActive = new JCheckBox("Allow time-delay probes", false);
         JCheckBox uploadActive = new JCheckBox("Allow upload mutations", false);
         JCheckBox authLockoutActive = new JCheckBox("Allow auth / lockout probes", false);
-        oastActive.setToolTipText("Required before SSRF/blind-XSS/CMDi/host-header and other Collaborator-backed payloads can leave Burp.");
+        oastActive.setToolTipText("Allows Collaborator-backed payloads. Blind-XSS also requires the separate persistent / stored browser payload grant.");
+        persistentPayloadActive.setToolTipText("Browser payloads may be stored and execute later. Blind-XSS requires both this grant and OAST; non-safe methods require the mutating replay grant too.");
         timeDelayActive.setToolTipText("Required before SLEEP/PG_SLEEP/WAITFOR-style timing payloads are dispatched.");
         uploadActive.setToolTipText("Required before multipart upload filenames/bodies are actively replayed.");
         authLockoutActive.setToolTipText("Required before rate-limit, JWT forgery, or alternate-identity access-control replays are dispatched.");
@@ -191,8 +193,11 @@ final class ReconPanel extends JPanel {
         riskRow.add(timeDelayActive);
         riskRow.add(uploadActive);
         riskRow.add(authLockoutActive);
-        riskRow.add(new JLabel("(persistent/destructive payloads stay disabled)"));
         activePanel.add(riskRow);
+        JPanel persistentRiskRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        persistentRiskRow.add(persistentPayloadActive);
+        persistentRiskRow.add(new JLabel("Blind-XSS needs this and OAST. Destructive corpus entries remain disabled."));
+        activePanel.add(persistentRiskRow);
         JPanel previewRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
         previewRow.add(new JLabel("Native probe dry run:")); previewRow.add(previewProbe); previewRow.add(activePreview);
         previewRow.add(new JLabel("(no traffic; response branches and runtime templates are identified)"));
@@ -346,6 +351,7 @@ final class ReconPanel extends JPanel {
         activeEnabled.addActionListener(e -> controller.setActiveTestsEnabled(activeEnabled.isSelected()));
         mutatingActive.addActionListener(e -> controller.setMutatingActiveRequests(mutatingActive.isSelected()));
         oastActive.addActionListener(e -> controller.setOastActiveRequests(oastActive.isSelected()));
+        persistentPayloadActive.addActionListener(e -> controller.setPersistentPayloadActiveRequests(persistentPayloadActive.isSelected()));
         timeDelayActive.addActionListener(e -> controller.setTimeDelayActiveRequests(timeDelayActive.isSelected()));
         uploadActive.addActionListener(e -> controller.setUploadActiveRequests(uploadActive.isSelected()));
         authLockoutActive.addActionListener(e -> controller.setAuthLockoutActiveRequests(authLockoutActive.isSelected()));

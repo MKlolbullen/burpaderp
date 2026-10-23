@@ -44,4 +44,25 @@ public class CorpusRiskPermissionIntegrationTest {
             assertTrue(fake.errors.toString(), fake.errors.isEmpty());
         }
     }
+    @Test public void persistentBrowserGrantDoesNotUnblockDestructiveCorpusEntries() throws Exception {
+        Files.writeString(folder.newFile("rce.txt").toPath(), "?cmd={payload}\n");
+        Files.writeString(folder.newFile("rce_payloads.txt").toPath(),
+                "net user fixture /add\necho fixture > fixture.php\necho recon-test\n");
+        try (var fake = new FakeMontoya()) {
+            var engine = new CorpusFuzzEngine(fake.api, new PayloadLibrary(folder.getRoot().toPath()), 0);
+            var request = fake.request("https://api.example.test/search?cmd=x");
+            var parameter = request.parameters().getFirst();
+            var encodings = Set.of(PayloadEncoder.Encoding.RAW);
+            var planned = NativeProbePreviewIntegrationTest.materialize(engine.plan(request, parameter, encodings, 10));
+            assertEquals(1, planned.size());
+            var run = ScanRun.begin(ScanProfile.ACTIVE_MUTATION, ScopeSnapshot.empty(), 100);
+            var grants = java.util.EnumSet.allOf(RequestPolicy.Permission.class);
+            engine.fuzz(request, parameter, encodings, 10, run,
+                    new ActiveRequestGateway(new RequestPolicy(url -> true, grants), fake.transport()));
+            assertEquals(1, fake.sent.size());
+            assertEquals("echo recon-test", fake.sent.getFirst().parameters().getFirst().value());
+            assertTrue(planned.getFirst().plan().matches(fake.sent.getFirst().withService(request.httpService())));
+            assertTrue(fake.errors.toString(), fake.errors.isEmpty());
+        }
+    }
 }

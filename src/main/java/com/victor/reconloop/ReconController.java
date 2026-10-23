@@ -138,6 +138,7 @@ final class ReconController implements HttpHandler {
     private final AtomicBoolean activeTestsEnabled = new AtomicBoolean(false);
     private final AtomicBoolean mutatingActiveRequests = new AtomicBoolean(false);
     private final AtomicBoolean oastActiveRequests = new AtomicBoolean(false);
+    private final AtomicBoolean persistentPayloadActiveRequests = new AtomicBoolean(false);
     private final AtomicBoolean timeDelayActiveRequests = new AtomicBoolean(false);
     private final AtomicBoolean uploadActiveRequests = new AtomicBoolean(false);
     private final AtomicBoolean authLockoutActiveRequests = new AtomicBoolean(false);
@@ -312,6 +313,7 @@ final class ReconController implements HttpHandler {
     }
     void setMutatingActiveRequests(boolean value) { setActivePermission(mutatingActiveRequests, value); }
     void setOastActiveRequests(boolean value) { setActivePermission(oastActiveRequests, value); }
+    void setPersistentPayloadActiveRequests(boolean value) { setActivePermission(persistentPayloadActiveRequests, value); }
     void setTimeDelayActiveRequests(boolean value) { setActivePermission(timeDelayActiveRequests, value); }
     void setUploadActiveRequests(boolean value) { setActivePermission(uploadActiveRequests, value); }
     void setAuthLockoutActiveRequests(boolean value) { setActivePermission(authLockoutActiveRequests, value); }
@@ -681,6 +683,7 @@ final class ReconController implements HttpHandler {
                     + run.requestLimits().perEndpoint() + "/" + run.requestLimits().perProbe()
                     + (allowMutating ? " including non-safe methods." : " using safe methods only.")
                     + " Risk grants=[OAST=" + oastActiveRequests.get()
+                    + ", persistent-payload=" + persistentPayloadActiveRequests.get()
                     + ", time-delay=" + timeDelayActiveRequests.get()
                     + ", upload=" + uploadActiveRequests.get()
                     + ", auth/lockout=" + authLockoutActiveRequests.get() + "]"
@@ -1375,13 +1378,14 @@ final class ReconController implements HttpHandler {
             permissions.add(RequestPolicy.Permission.STATE_CHANGING);
         }
         if (oastActiveRequests.get()) permissions.add(RequestPolicy.Permission.OAST);
+        if (persistentPayloadActiveRequests.get()) permissions.add(RequestPolicy.Permission.PERSISTENT_PAYLOAD);
         if (timeDelayActiveRequests.get()) permissions.add(RequestPolicy.Permission.TIME_DELAY);
         if (uploadActiveRequests.get()) permissions.add(RequestPolicy.Permission.UPLOAD);
         if (authLockoutActiveRequests.get()) {
             permissions.add(RequestPolicy.Permission.AUTHENTICATION_OR_LOCKOUT);
         }
-        // PERSISTENT_PAYLOAD deliberately has no UI grant: destructive/persistent corpus entries
-        // remain hard-disabled and are filtered before planning.
+        // The persistent-payload grant is independent of OAST. Destructive corpus entries are
+        // still filtered before planning/execution, regardless of native risk grants.
         return new RequestPolicy(api.scope()::isInScope, permissions);
     }
 
