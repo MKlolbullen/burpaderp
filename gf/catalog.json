@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "catalogVersion": "1.0.0",
+  "catalogVersion": "1.0.1",
   "provenance": {
     "reviewedAt": "2026-10-23",
     "gitleaksCommit": "b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b",
@@ -6931,14 +6931,16 @@
       "provider": "telegram",
       "category": "credential",
       "severity": "HIGH",
-      "pattern": "([0-9]{6,12}:[A-Za-z0-9_-]{35})",
-      "capture": 1,
+      "pattern": "(^|[^A-Za-z0-9_:-])(?:https://api[.]telegram[.]org/bot)?([0-9]{5,16}:A[A-Za-z0-9_-]{34})($|[^A-Za-z0-9_-])",
+      "capture": 2,
       "ignoreCase": false,
       "minEntropy": 0,
       "validator": "none",
       "keywords": [],
       "sources": [
-        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml",
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/cmd/generate/config/rules/telegram.go",
+        "https://core.telegram.org/bots/api#authorizing-your-bot"
       ],
       "positive": [
         {
@@ -6949,12 +6951,119 @@
             "W4yZ7cF0iLrUo"
           ],
           "suffix": " "
+        },
+        {
+          "prefix": "telegram_token=\"",
+          "valueParts": [
+            "12345:Ab3dE6gH9jK2",
+            "mN5pQ8sT1vW4yZ7cF0",
+            "iLrU-"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\n",
+          "valueParts": [
+            "1234567890123456:A",
+            "b3dE6gH9jK2mN5pQ8s",
+            "T1vW4yZ7cF0iLrU_"
+          ],
+          "suffix": "\n"
+        },
+        {
+          "prefix": "https://api.telegram.org/bot",
+          "valueParts": [
+            "123456789:Ab3dE6gH",
+            "9jK2mN5pQ8sT1vW4yZ",
+            "7cF0iLrUo"
+          ],
+          "suffix": "/getMe"
         }
       ],
       "negative": [
         {
           "parts": [
             "ordinary prose"
+          ]
+        },
+        {
+          "parts": [
+            "arn:aws:sns:us-eas",
+            "t-1:123456789012:m",
+            "y-application-noti",
+            "fication-topic-pro",
+            "d"
+          ]
+        },
+        {
+          "parts": [
+            "arn:aws:sns:us-eas",
+            "t-1:123456789012:A",
+            "b3dE6gH9jK2mN5pQ8s",
+            "T1vW4yZ7cF0iLrUo"
+          ]
+        },
+        {
+          "parts": [
+            "1234:Ab3dE6gH9jK2m",
+            "N5pQ8sT1vW4yZ7cF0i",
+            "LrUo"
+          ]
+        },
+        {
+          "parts": [
+            "12345678901234567:",
+            "Ab3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUo"
+          ]
+        },
+        {
+          "parts": [
+            "prefix123456789:Ab",
+            "3dE6gH9jK2mN5pQ8sT",
+            "1vW4yZ7cF0iLrUo"
+          ]
+        },
+        {
+          "parts": [
+            "123456789:Ab3dE6gH",
+            "9jK2mN5pQ8sT1vW4yZ",
+            "7cF0iLrUo_"
+          ]
+        },
+        {
+          "parts": [
+            "123456789:Ab3dE6gH",
+            "9jK2mN5pQ8sT1vW4yZ",
+            "7cF0iLrUo-"
+          ]
+        },
+        {
+          "parts": [
+            "123456789:Ab3dE6gH",
+            "9jK2mN5pQ8sT1vW4yZ",
+            "7cF0iLrUoEXTRA"
+          ]
+        },
+        {
+          "parts": [
+            "123456789:Bb3dE6gH",
+            "9jK2mN5pQ8sT1vW4yZ",
+            "7cF0iLrUo"
+          ]
+        },
+        {
+          "parts": [
+            "123456789:ab3dE6gH",
+            "9jK2mN5pQ8sT1vW4yZ",
+            "7cF0iLrUo"
+          ]
+        },
+        {
+          "parts": [
+            "123456789:Ab3dE6gH",
+            "9jK2mN5pQ8sT1vW4yZ",
+            "7cF0iLrU"
           ]
         }
       ]

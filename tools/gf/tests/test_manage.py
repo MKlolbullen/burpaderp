@@ -26,6 +26,26 @@ class ManageTests(unittest.TestCase):
             MANAGE.install(files, root)
             self.assertEqual(unrelated.read_text(), '{"pattern":"user-owned"}')
             self.assertEqual(len(list(root.glob('rh-*.json'))), len(files)-1)
+            self.assertEqual((root/'GITLEAKS-LICENSE.txt').read_bytes(),
+                             (MANAGE.ROOT/'gf/GITLEAKS-LICENSE.txt').read_bytes())
+
+    def test_conflicting_notice_and_notice_symlink_abort_before_copying_packs(self):
+        for symlink in (False, True):
+            with self.subTest(symlink=symlink), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                notice = root/'GITLEAKS-LICENSE.txt'
+                if symlink:
+                    target = root/'user-notice.txt'
+                    target.write_bytes((MANAGE.ROOT/'gf/GITLEAKS-LICENSE.txt').read_bytes())
+                    notice.symlink_to(target)
+                else:
+                    notice.write_text('user-owned notice')
+                original = notice.read_bytes()
+                with self.assertRaises(ValueError):
+                    MANAGE.install({'rh-first.json':'{"pattern":"first"}'}, root)
+                self.assertFalse((root/'rh-first.json').exists())
+                self.assertEqual(notice.read_bytes(), original)
+                self.assertEqual(notice.is_symlink(), symlink)
 
     def test_conflicting_pack_and_symlinks_are_preserved(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -25,6 +25,9 @@ With no `--directory`, the installer chooses `~/.config/gf` if that directory ex
 `~/.gf`, matching upstream gf's discovery order. Existing unrelated packs are retained. Conflicting
 same-name files and symlinks are refused; an identical installation can be repeated. No downloaded
 rule or external command is executed during installation. Use a trusted checkout.
+The installer also copies `GITLEAKS-LICENSE.txt` beside the packs and checks notice conflicts before
+copying any files. Both JARs bundle the same notice at `gf-packs/GITLEAKS-LICENSE.txt`; CI checks its
+contents against the source notice.
 
 The exports use **GNU grep with PCRE support (`-P`)**, with `-i` only in the case-insensitive packs.
 This avoids slow POSIX-ERE compilation of large bounded token formats and handles the JSON/quote

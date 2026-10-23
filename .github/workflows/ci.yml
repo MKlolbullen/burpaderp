@@ -88,11 +88,13 @@ jobs:
           test ! -e /tmp/recon-hound-blocked.sarif
           jar tf "$JAR" >/tmp/recon-hound-jar.txt
           grep -q '^com/victor/reconloop/ReconLoopExtension.class$' /tmp/recon-hound-jar.txt
+          unzip -p "$JAR" gf-packs/GITLEAKS-LICENSE.txt | cmp - gf/GITLEAKS-LICENSE.txt
           # The manual harness has one extension entry point and is isolated from the production JAR.
           VERIFY_JAR=build/runtime-verification/recon-hound-runtime-verification.jar
           test -s "$VERIFY_JAR"
           jar tf "$VERIFY_JAR" >/tmp/recon-hound-runtime-jar.txt
           grep -q '^com/victor/reconloop/RuntimeVerificationExtension.class$' /tmp/recon-hound-runtime-jar.txt
+          unzip -p "$VERIFY_JAR" gf-packs/GITLEAKS-LICENSE.txt | cmp - gf/GITLEAKS-LICENSE.txt
           if grep -q '^com/victor/reconloop/ReconLoopExtension.class$' /tmp/recon-hound-runtime-jar.txt; then exit 1; fi
           if grep -q '^com/victor/reconloop/RuntimeVerificationExtension.class$' /tmp/recon-hound-jar.txt; then exit 1; fi
 

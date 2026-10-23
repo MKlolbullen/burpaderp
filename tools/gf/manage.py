@@ -69,25 +69,26 @@ def atomic_write(path, content):
 
 
 def install(files, target):
+    packs = {n: text.encode('utf-8') for n, text in files.items() if n.endswith('.json')}
+    selected = {**packs, 'GITLEAKS-LICENSE.txt': (ROOT / 'gf/GITLEAKS-LICENSE.txt').read_bytes()}
     target = target.expanduser().absolute()
     if target.is_symlink():
         raise ValueError('Refusing a symlink as the installation directory')
     target.mkdir(parents=True, exist_ok=True)
-    selected = {n: text for n, text in files.items() if n.endswith('.json')}
-    for name, text in selected.items():
+    for name, content in selected.items():
         path = target / name
-        if path.is_symlink() or (path.exists() and path.read_text() != text):
-            raise ValueError('Existing pack preserved; move conflicting file first: ' + str(path))
-    for name, text in selected.items():
+        if path.is_symlink() or (path.exists() and path.read_bytes() != content):
+            raise ValueError('Existing file preserved; move conflicting file first: ' + str(path))
+    for name, content in selected.items():
         path = target / name
         # Exclusive creation also preserves a file created after the preflight check.
         try:
-            with path.open('x') as handle:
-                handle.write(text)
+            with path.open('xb') as handle:
+                handle.write(content)
         except FileExistsError:
-            if path.is_symlink() or path.read_text() != text:
+            if path.is_symlink() or path.read_bytes() != content:
                 raise ValueError('Concurrent change preserved: ' + str(path))
-    print(f'Installed {len(selected)} packs in {target}; existing unrelated files preserved.')
+    print(f'Installed {len(packs)} packs and Gitleaks notice in {target}; existing unrelated files preserved.')
 
 
 def verify_grep(catalog):
