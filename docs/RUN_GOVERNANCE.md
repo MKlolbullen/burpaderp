@@ -99,7 +99,7 @@ OAST alone cannot authorize a potentially stored browser payload, and the persis
 cannot authorize a callback. Non-safe methods still need the mutating replay grant. Changing either
 grant cancels current active runs and invalidates queued jobs; re-enabling cannot revive them.
 Already dispatched browser payloads may execute later, even after permission is revoked.
-Destructive corpus entries remain filtered regardless of these grants.
+Destructive corpus entries remain filtered regardless of these grants. Automated XSS corpus execution uses [reviewed browser recipes](CORPUS_BROWSER_POLICY.md): local markers require the persistent grant, controlled beacons require both grants, and unreviewed browser entries remain quarantined even with all grants.
 
 ### DNS and numeric-service binding
 

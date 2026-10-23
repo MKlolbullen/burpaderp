@@ -136,7 +136,7 @@ final class ReconPanel extends JPanel {
         JCheckBox uploadActive = new JCheckBox("Allow upload mutations", false);
         JCheckBox authLockoutActive = new JCheckBox("Allow auth / lockout probes", false);
         oastActive.setToolTipText("Allows Collaborator-backed payloads. Blind-XSS also requires the separate persistent / stored browser payload grant.");
-        persistentPayloadActive.setToolTipText("Browser payloads may be stored and execute later. Blind-XSS requires both this grant and OAST; non-safe methods require the mutating replay grant too.");
+        persistentPayloadActive.setToolTipText("Browser payloads may be stored and execute later. Reviewed XSS corpus markers need this grant; native and corpus blind-XSS also require OAST; non-safe methods require the mutating replay grant too.");
         timeDelayActive.setToolTipText("Required before SLEEP/PG_SLEEP/WAITFOR-style timing payloads are dispatched.");
         uploadActive.setToolTipText("Required for every multipart replay, including an unchanged captured file body carried by another probe. Mutating methods require their separate grant too.");
         authLockoutActive.setToolTipText("Required before rate-limit, JWT forgery, or alternate-identity access-control replays are dispatched.");
@@ -196,7 +196,7 @@ final class ReconPanel extends JPanel {
         activePanel.add(riskRow);
         JPanel persistentRiskRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
         persistentRiskRow.add(persistentPayloadActive);
-        persistentRiskRow.add(new JLabel("Blind-XSS needs this and OAST. Destructive corpus entries remain disabled."));
+        persistentRiskRow.add(new JLabel("Blind-XSS needs this and OAST. XSS corpus markers need this grant; unreviewed browser entries stay disabled."));
         activePanel.add(persistentRiskRow);
         JPanel previewRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
         previewRow.add(new JLabel("Native probe dry run:")); previewRow.add(previewProbe); previewRow.add(activePreview);
@@ -249,7 +249,7 @@ final class ReconPanel extends JPanel {
         corpusRow.add(runCorpusFuzz); corpusRow.add(corpusPreviewCategory); corpusRow.add(corpusPreview);
         activePanel.add(corpusRow);
         activePanel.add(new JLabel("(fires payloads/*.txt: LFI/RCE/SQLi/SSTI/XSS corpus at heuristically-matched "
-                + "parameters; destructive entries are skipped, callback hosts are rewritten to Collaborator)"));
+                + "parameters; destructive/unreviewed browser entries are skipped; XSS needs the persistent grant and beacons also need OAST)"));
 
         activePanel.add(new JLabel("sqlmap execution is paused; use the native SQLi probes."));
 

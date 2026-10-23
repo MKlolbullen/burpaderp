@@ -62,7 +62,7 @@ are grouped by original method/URL identity, detector, insertion point/parameter
 Transport failure, denied/missing observations, truncated native probes, insufficient timing samples, rejected timing response statuses and SIGNAL/CANDIDATE evidence remain retry eligible. Failed local mutation construction is recorded as FAILED without claiming a dispatch;
 a skipped prerequisite, checked negative or reproduced/confirmed result alone is not. Corpus retries rebuild the selected
 category/parameter/encoding with the original local category cap and current run quota. The corpus
-continues to exclude destructive entries. Helpers, external providers and subprocesses are not
+continues to exclude destructive entries and unreviewed browser entries. Reviewed XSS markers require persistent-payload permission; controlled browser beacons require both persistent-payload and OAST permission. Helpers, external providers and subprocesses are not
 silently replayed by this button; use their explicit existing actions.
 
 Retry staging resolves the most recent matching message in the **current** in-scope site map.
