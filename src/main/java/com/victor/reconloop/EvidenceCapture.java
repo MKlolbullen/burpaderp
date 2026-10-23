@@ -19,7 +19,7 @@ final class EvidenceCapture {
     private final List<FindingEvidence.OastToken> tokens = new ArrayList<>();
     private int attempted, retained;
     private ScanRun owner;
-    private boolean failed, blocked, responded;
+    private boolean failed, blocked, responded, incomplete;
 
     EvidenceCapture(ScanRun run, HttpRequest base, String source, String probeId) {
         this(run == null ? "" : run.id().toString(), base, source, probeId, UUID.randomUUID().toString());
@@ -89,12 +89,18 @@ final class EvidenceCapture {
         return new RunRecord.Probe(RunRecord.probeKey(source, probeId, target, parameter, encoding), source,
                 probeId, target, parameter, encoding, localLimit, status);
     }
+    void incomplete() { incomplete = true; }
+    void failed() { failed = true; }
     void finishProbe(String parameter, String encoding, int localLimit, List<ActiveTestEngine.ActiveFinding> output, int from, boolean crashed) {
         if (owner == null) return;
-        boolean inconclusive = blocked || !responded || output.subList(from, output.size()).stream()
+        boolean inconclusive = incomplete || blocked || !responded || output.subList(from, output.size()).stream()
                 .anyMatch(f -> f.verificationState() == VerificationState.SIGNAL || f.verificationState() == VerificationState.CANDIDATE);
-        var status = failed || crashed ? RunRecord.ProbeStatus.FAILED : attempted == 0 ? RunRecord.ProbeStatus.SKIPPED : inconclusive ? RunRecord.ProbeStatus.INCONCLUSIVE
-                : output.size() > from ? RunRecord.ProbeStatus.FINDING : RunRecord.ProbeStatus.CHECKED;
+        RunRecord.ProbeStatus status;
+        if (failed || crashed) status = RunRecord.ProbeStatus.FAILED;
+        else if (incomplete || blocked) status = RunRecord.ProbeStatus.INCONCLUSIVE;
+        else if (attempted == 0) status = RunRecord.ProbeStatus.SKIPPED;
+        else if (inconclusive) status = RunRecord.ProbeStatus.INCONCLUSIVE;
+        else status = output.size() > from ? RunRecord.ProbeStatus.FINDING : RunRecord.ProbeStatus.CHECKED;
         owner.probe(probeRecord(parameter, encoding, localLimit, status));
     }
     void recordWithTokens(ActiveRequestGateway.Result result, HttpRequest request) {

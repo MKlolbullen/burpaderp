@@ -93,11 +93,13 @@ final class CorpusFuzzEngine {
             for (String rawPayload : library.get(category)) {
                 if (categoryBudget.exhausted() || run.requestBudget().exhausted() || !run.isActive()) break;
                 if (isDestructive(rawPayload)) continue;
+                var browser = CorpusBrowserPolicy.classify(category, rawPayload);
+                if (!browser.allowed()) continue;
 
                 if (!run.awaitReady()) break;
                 EvidenceCapture prototype = new EvidenceCapture(run, base, "CORPUS", "corpus-fuzz:" + category);
                 String callbackHost = null;
-                boolean oastPayload = findCallbackHost(rawPayload).isPresent();
+                boolean oastPayload = browser.callback() || findCallbackHost(rawPayload).isPresent();
                 if (oastPayload) {
                     CollaboratorClient client = collaborator;
                     if (client == null) continue;
@@ -110,17 +112,16 @@ final class CorpusFuzzEngine {
                 boolean timeBased = mentionsSleep(rawPayload);
                 for (PayloadEncoder.Encoding encoding : selectedEncodings) {
                     if (categoryBudget.exhausted() || run.requestBudget().exhausted() || !run.isActive()) break;
-                    String encoded = encodedPayload(rawPayload, callbackHost, encoding);
                     EvidenceCapture capture = prototype.variant(base);
                     evidenceCapture.set(capture); capture.startProbe(parameterKey, encoding.name(), maxPerCategory); int firstFinding = out.size();
                     boolean crashed = true;
                     try {
+                        String encoded = encodedPayload(rawPayload, callbackHost, encoding);
                         crashed = false;
                         if (timeBased) {
                             // Every matched pair needs two remaining local/global tokens. Each actual
                             // send still checks all quota dimensions, grants and cancellation at the gate.
-                            EnumSet<RequestPolicy.Permission> timingPermissions = EnumSet.of(RequestPolicy.Permission.TIME_DELAY);
-                            if (oastPayload) timingPermissions.add(RequestPolicy.Permission.OAST);
+                            Set<RequestPolicy.Permission> timingPermissions = risks(browser, oastPayload, true);
                             List<Long> baseline = new ArrayList<>(), payload = new ArrayList<>();
                             for (int sample = 0; sample < TimingVerification.SAMPLES; sample++) {
                                 if (categoryBudget.remaining() < 2 || run.requestBudget().remaining() < 2 || !run.isActive()) break;
@@ -130,6 +131,7 @@ final class CorpusFuzzEngine {
                                 if (mutation < 0) break;
                                 baseline.add(control); payload.add(mutation);
                             }
+                            if (baseline.size() < TimingVerification.SAMPLES || payload.size() < TimingVerification.SAMPLES) capture.incomplete();
                             var timing = TimingVerification.paired(baseline, payload);
                             if (timing.state() != VerificationState.SIGNAL) {
                                 out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-" + category, parameter.name(),
@@ -139,8 +141,7 @@ final class CorpusFuzzEngine {
                             continue;
                         }
 
-                        Set<RequestPolicy.Permission> payloadPermissions = oastPayload
-                                ? Set.of(RequestPolicy.Permission.OAST) : Set.of();
+                        Set<RequestPolicy.Permission> payloadPermissions = risks(browser, oastPayload, false);
                         HttpResponse response = sendMutated(base, parameter, encoded, categoryBudget, run, gateway,
                                 category, payloadPermissions);
                         if (response == null) continue;
@@ -190,12 +191,14 @@ final class CorpusFuzzEngine {
             return categories.stream().filter(category -> categoryFilter == null || category.equals(categoryFilter)).flatMap(category -> {
                 Object localKey = new Object();
                 return java.util.stream.IntStream.range(0, library.get(category).size()).boxed()
-                        .filter(i -> !isDestructive(library.get(category).get(i)))
+                        .filter(i -> !isDestructive(library.get(category).get(i))
+                                && CorpusBrowserPolicy.classify(category, library.get(category).get(i)).allowed())
                         .flatMap(i -> selected.stream().flatMap(encoding -> {
                             String raw = library.get(category).get(i);
-                            boolean oast = findCallbackHost(raw).isPresent();
+                            var browser = CorpusBrowserPolicy.classify(category, raw);
+                            boolean oast = browser.callback() || findCallbackHost(raw).isPresent();
                             boolean timing = mentionsSleep(raw);
-                            Set<RequestPolicy.Permission> risks = risks(oast, timing);
+                            Set<RequestPolicy.Permission> risks = risks(browser, oast, timing);
                             String detail = "parameter " + parameter.name() + "; " + category + " entry " + (i + 1) + "; " + encoding
                                     + "; local cap " + maxPerCategory;
                             java.util.function.Supplier<HttpRequest> mutation = () -> mutate(base, parameter,
@@ -228,8 +231,9 @@ final class CorpusFuzzEngine {
         };
     }
 
-    private static Set<RequestPolicy.Permission> risks(boolean oast, boolean timing) {
+    private static Set<RequestPolicy.Permission> risks(CorpusBrowserPolicy.Kind browser, boolean oast, boolean timing) {
         EnumSet<RequestPolicy.Permission> risks = EnumSet.noneOf(RequestPolicy.Permission.class);
+        if (browser.browser()) risks.add(RequestPolicy.Permission.PERSISTENT_PAYLOAD);
         if (oast) risks.add(RequestPolicy.Permission.OAST);
         if (timing) risks.add(RequestPolicy.Permission.TIME_DELAY);
         return Set.copyOf(risks);
@@ -240,7 +244,8 @@ final class CorpusFuzzEngine {
     }
 
     private static String encodedPayload(String raw, String callbackHost, PayloadEncoder.Encoding encoding) {
-        return PayloadEncoder.encode(callbackHost == null ? raw : rewriteCallbackHost(raw, callbackHost), encoding);
+        String bound = CorpusBrowserPolicy.bind(raw, callbackHost);
+        return PayloadEncoder.encode(callbackHost == null ? bound : rewriteCallbackHost(bound, callbackHost), encoding);
     }
 
     private HttpResponse sendMutated(HttpRequest base, HttpParameter parameter, String value,
@@ -271,6 +276,7 @@ final class CorpusFuzzEngine {
             throttle();
             return result.response() == null ? null : result.response().response();
         } catch (Exception e) {
+            if (evidenceCapture.get() != null) evidenceCapture.get().failed();
             api.logging().logToError("Corpus fuzz probe failed for " + parameter.name(), e);
             return null;
         }

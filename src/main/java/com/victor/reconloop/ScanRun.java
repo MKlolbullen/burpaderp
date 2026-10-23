@@ -236,10 +236,12 @@ final class ScanRun {
     boolean isCancelled() { return status() == RunStatus.CANCELLED; }
     synchronized void parent(String id) { parentId = id == null ? "" : id; cachedSnapshot = null; onChange.run(); }
 
-    synchronized void dispatching(RequestPlan plan) {
+    synchronized boolean dispatching(RequestPlan plan) {
+        if (!isRunning() || Thread.currentThread().isInterrupted()) return false;
         attempts++; dispatched++;
         var request = plan.policyRequest();
         event("DISPATCH", request.probeId(), RunRecord.target(request.method(), request.url()), plan.requestHash(), "IN_FLIGHT", true, 0, "");
+        return true;
     }
     synchronized void record(RequestPlan plan, ActiveRequestGateway.Result result) {
         if (!result.dispatched()) { attempts++; denied++; }

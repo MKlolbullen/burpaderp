@@ -70,15 +70,14 @@ final class ActiveRequestGateway {
     }
 
     private Result dispatch(ScanRun run, RequestPlan plan, HttpRequest request) {
-        if (run != null && !run.awaitReady()) return Result.denied(RequestPolicy.Decision.deny(
-                run.isCancelled() ? RequestPolicy.DecisionCode.CANCELLED : RequestPolicy.DecisionCode.RUN_NOT_ACTIVE, "run stopped"));
+        if (run != null && !run.awaitReady()) return Result.denied(stopped(run));
         if (plan == null || !plan.matches(request)) return invalidPlan();
         if (Thread.currentThread().isInterrupted()) return Result.denied(RequestPolicy.Decision.deny(
                 RequestPolicy.DecisionCode.CANCELLED, "worker interrupted before destination preparation"));
         RequestPolicy.PlannedRequest planned = plan.policyRequest();
         Dispatch dispatch = null;
         if (sender instanceof PreparedSender prepared) {
-            RequestPolicy.Decision initial = policy.evaluate(run, planned);
+            RequestPolicy.Decision initial = readyDecision(run, planned, false);
             if (!initial.allowed()) return Result.denied(initial);
             if (run.requestBudget().exhausted()) return Result.denied(admit(run, policy, planned));
             try {
@@ -93,21 +92,19 @@ final class ActiveRequestGateway {
         }
         if (Thread.currentThread().isInterrupted()) return Result.denied(RequestPolicy.Decision.deny(
                 RequestPolicy.DecisionCode.CANCELLED, "worker interrupted before admission"));
-        if (run != null && !run.awaitReady()) return Result.denied(RequestPolicy.Decision.deny(
-                RequestPolicy.DecisionCode.CANCELLED, "run stopped before admission"));
-        RequestPolicy.Decision decision = admit(run, policy, planned);
+        RequestPolicy.Decision decision = readyDecision(run, planned, true);
         if (!decision.allowed()) return Result.denied(decision);
-        // Montoya HttpRequest transformations are immutable. Check again after policy callbacks and
-        // quota acquisition so a changed concrete message never inherits an earlier approval.
-        if (!plan.matches(request)) return invalidPlan();
-        if (!run.awaitReady()) {
-            RequestPolicy.DecisionCode code = run.isCancelled()
-                    ? RequestPolicy.DecisionCode.CANCELLED : RequestPolicy.DecisionCode.RUN_NOT_ACTIVE;
-            return Result.denied(RequestPolicy.Decision.deny(code, "run stopped before dispatch"));
+        // A reservation is not a durable policy grant. Pause can happen after admission or even
+        // inside scope/binding callbacks, so commit only against a fresh policy and RUNNING state.
+        // Resuming this loop never acquires a second quota token.
+        while (true) {
+            RequestPolicy.Decision current = readyDecision(run, planned, false);
+            if (!current.allowed()) return Result.denied(current);
+            if (!plan.matches(request)) return invalidPlan();
+            if (run.dispatching(plan)) break;
+            if (!run.isActive() || Thread.currentThread().isInterrupted()) return Result.denied(stopped(run));
         }
-        // Measure only the admitted transport invocation, excluding gateway DNS/admission and engine pacing.
-        // This is API elapsed time, not a wire-level RTT or proof of server execution.
-        run.dispatching(plan);
+        // Measure only the committed transport invocation, excluding gateway waits and policy work.
         long start = nanoTime.getAsLong();
         try {
             HttpRequestResponse response = dispatch == null ? sender.send(request) : dispatch.send();
@@ -115,6 +112,23 @@ final class ActiveRequestGateway {
         } catch (Exception e) {
             return new Result(decision, null, e, true, null, Math.max(0, nanoTime.getAsLong() - start));
         }
+    }
+
+    private RequestPolicy.Decision readyDecision(ScanRun run, RequestPolicy.PlannedRequest planned, boolean acquire) {
+        while (true) {
+            if (run != null && !run.awaitReady()) return stopped(run);
+            RequestPolicy.Decision decision = acquire ? admit(run, policy, planned) : policy.evaluate(run, planned);
+            // Pausing during policy evaluation must wait rather than discard a pending probe.
+            // An allowed admission already owns its reservation, so only the final commit can wait.
+            if (run != null && run.isActive() && (decision.code() == RequestPolicy.DecisionCode.RUN_NOT_ACTIVE
+                    || !acquire && decision.allowed() && !run.isRunning())) continue;
+            return decision;
+        }
+    }
+
+    private static RequestPolicy.Decision stopped(ScanRun run) {
+        return RequestPolicy.Decision.deny(Thread.currentThread().isInterrupted() || run != null && run.isCancelled()
+                ? RequestPolicy.DecisionCode.CANCELLED : RequestPolicy.DecisionCode.RUN_NOT_ACTIVE, "run stopped before dispatch");
     }
 
     private static Result invalidPlan() {

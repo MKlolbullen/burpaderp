@@ -17,7 +17,7 @@ public class OutboundRunIntegrationTest {
     @Rule public TemporaryFolder folder = new TemporaryFolder();
 
     @Test public void differentEnginesTargetsParametersAndCategoriesShareSevenSends() throws Exception {
-        for (String category : List.of("sqli", "xss", "ssti")) {
+        for (String category : List.of("sqli", "sqli2", "ssti")) {
             Files.writeString(folder.newFile(category + ".txt").toPath(), "one\ntwo\n");
         }
         try (FakeMontoya fake = new FakeMontoya()) {
