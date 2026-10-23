@@ -87,8 +87,13 @@ blocking response: a request already admitted may finish, but the next admission
 that throws is still charged; a cancellation race may conservatively spend a token without a send.
 These are Montoya dispatch counts, not a claim to meter internal Burp TCP retries/retransmissions.
 
-Persistent payload permission has no UI grant. Blind-XSS beacons require it as well as OAST and stay
-blocked. An OAST grant alone must not silently authorize a potentially stored browser payload.
+The **Allow persistent / stored browser payloads** checkbox grants `PERSISTENT_PAYLOAD` separately
+from OAST; both default off. Blind-XSS beacons require both grants, including for GET requests.
+OAST alone cannot authorize a potentially stored browser payload, and the persistent grant alone
+cannot authorize a callback. Non-safe methods still need the mutating replay grant. Changing either
+grant cancels current active runs and invalidates queued jobs; re-enabling cannot revive them.
+Already dispatched browser payloads may execute later, even after permission is revoked.
+Destructive corpus entries remain filtered regardless of these grants.
 
 ### DNS and numeric-service binding
 

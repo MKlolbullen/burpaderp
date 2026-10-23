@@ -154,11 +154,13 @@ Confirming a passive lead still means firing a context-appropriate probe against
 An opt-in **Active testing** panel adds discovery and confirmation that require sending crafted
 traffic. It is **disabled by default**, scope-checked per request, throttled, and governed by
 hierarchical run quotas. High-impact behaviours are separately fail-closed: Collaborator/OAST,
-time-delay payloads, upload mutations, authentication/lockout replays, and non-safe HTTP methods each
+time-delay payloads, persistent/stored browser payloads, upload mutations, authentication/lockout replays, and non-safe HTTP methods each
 require their own operator opt-in. Persistent/destructive corpus entries remain blocked. Enable only
 the permissions your rules of engagement actually authorize. Changing a permission or disabling active
-tests cancels current native runs and invalidates queued jobs. Blind-XSS beacons additionally require
-persistent-payload permission and remain blocked until a separate authorization path exists.
+tests cancels current native runs and invalidates queued jobs. Blind-XSS beacons require **both**
+**Allow OAST / Collaborator callbacks** and **Allow persistent / stored browser payloads**, including
+on GET requests. Neither grant implies the other. A dispatched payload may be stored and execute in a
+browser later; revoking permission stops further dispatches, not a payload already stored by a target.
 
 Use the **Preview…** actions for native probes, corpus fuzzing, JWT, access-control, takeover, crawl
 seeds/queue, parameters and GraphQL before enabling traffic. Previews send nothing and spend no live
