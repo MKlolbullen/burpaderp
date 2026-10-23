@@ -130,6 +130,7 @@ final class CorpusFuzzEngine {
                                 if (mutation < 0) break;
                                 baseline.add(control); payload.add(mutation);
                             }
+                            if (baseline.size() < TimingVerification.SAMPLES || payload.size() < TimingVerification.SAMPLES) capture.incomplete();
                             var timing = TimingVerification.paired(baseline, payload);
                             if (timing.state() != VerificationState.SIGNAL) {
                                 out.add(new ActiveTestEngine.ActiveFinding("HIGH", "CorpusFuzz-" + category, parameter.name(),
@@ -271,6 +272,7 @@ final class CorpusFuzzEngine {
             throttle();
             return result.response() == null ? null : result.response().response();
         } catch (Exception e) {
+            if (evidenceCapture.get() != null) evidenceCapture.get().failed();
             api.logging().logToError("Corpus fuzz probe failed for " + parameter.name(), e);
             return null;
         }

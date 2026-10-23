@@ -4,6 +4,7 @@ import burp.api.montoya.http.message.requests.HttpRequest;
 import org.junit.Test;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.Assert.*;
 
 public class PausedAdmissionIntegrationTest {
@@ -64,10 +65,10 @@ public class PausedAdmissionIntegrationTest {
     @Test public void pauseDuringAdmissionWaitsInsteadOfDroppingTheProbe() throws Exception {
         try (var fake = new FakeMontoya()) {
             var run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.forTargetUrl(URL), 1);
-            CountDownLatch paused = new CountDownLatch(1); var once = new AtomicBoolean();
-            // A plain in-memory sender isolates admission from destination preparation.
+            CountDownLatch paused = new CountDownLatch(1); var checks = new AtomicInteger();
+            // The second scope check is quota admission, after numeric destination preparation.
             var policy = RequestPolicy.safeDefault(ignored -> {
-                if (once.compareAndSet(false, true)) { run.pause(); paused.countDown(); }
+                if (checks.incrementAndGet() == 2) { run.pause(); paused.countDown(); }
                 return true;
             });
             var gateway = new ActiveRequestGateway(policy, fake.transport());

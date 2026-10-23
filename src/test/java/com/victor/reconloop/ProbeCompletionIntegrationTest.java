@@ -55,4 +55,22 @@ public class ProbeCompletionIntegrationTest {
             assertEquals(RunRecord.ProbeStatus.INCONCLUSIVE, run.snapshot().probes().getFirst().status());
         }
     }
+    @Test public void mutationConstructionFailureRemainsFailedAndRetryableWithoutSending() {
+        try (var fake = new FakeMontoya()) {
+            var original = fake.request(URL);
+            var request = FakeMontoya.proxy(burp.api.montoya.http.message.requests.HttpRequest.class, (self, method, args) -> {
+                if (method.getName().equals("withUpdatedParameters")) throw new IllegalStateException("mutation fixture failure");
+                return method.invoke(original, args);
+            });
+            var point = InsertionPoint.enumerate(request).getFirst();
+            String key = RunRecord.probeKey("NATIVE_ACTIVE", "reflected-xss", RunRecord.target(request.method(), request.url()), RunRecord.pointIdentity(point), "");
+            var run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.forTargetUrl(URL), 2);
+            var history = new RunHistory(); history.register(run);
+            new ActiveTestEngine(fake.api, 0).test(request, run,
+                    new ActiveRequestGateway(RequestPolicy.safeDefault(ignored -> true), fake.transport()), Set.of(key));
+            run.complete(); assertTrue(fake.sent.isEmpty()); assertEquals(0, run.requestBudget().used());
+            assertEquals(RunRecord.ProbeStatus.FAILED, history.retries(run.id().toString()).getFirst().status());
+        }
+    }
+
 }

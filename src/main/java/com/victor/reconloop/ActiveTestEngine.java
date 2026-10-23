@@ -587,7 +587,9 @@ final class ActiveTestEngine {
     private long timeRequest(HttpRequest base, InsertionPoint point, String value) {
         lastTransportMillis.set(-1L);
         sendMutated(base, point, value, Set.of(RequestPolicy.Permission.TIME_DELAY));
-        return lastTransportMillis.get();
+        long sample = lastTransportMillis.get();
+        if (sample < 0 && evidenceCapture.get() != null) evidenceCapture.get().incomplete();
+        return sample;
     }
 
     private List<Long> timingSamples(HttpRequest base, InsertionPoint point, String value, int count) {
@@ -656,6 +658,7 @@ final class ActiveTestEngine {
             HttpRequestResponse rr = sendRequest(base.withBody(body), permissions);
             return rr == null ? null : rr.response();
         } catch (Exception e) {
+            if (evidenceCapture.get() != null) evidenceCapture.get().failed();
             api.logging().logToError("XXE probe failed for " + base.url(), e);
             return null;
         }
@@ -833,6 +836,7 @@ final class ActiveTestEngine {
             HttpRequestResponse rr = sendRequest(point.apply(base, value), permissions);
             return rr == null ? null : rr.response();
         } catch (Exception e) {
+            if (evidenceCapture.get() != null) evidenceCapture.get().failed();
             api.logging().logToError("Active probe failed for " + point.label(), e);
             return null;
         }
@@ -876,7 +880,9 @@ final class ActiveTestEngine {
 
     private boolean budgetExhausted() {
         ScanRun run = scanRun.get();
-        return run == null || !run.isActive() || run.requestBudget().exhausted();
+        boolean exhausted = run == null || !run.isActive() || run.requestBudget().exhausted();
+        if (exhausted && evidenceCapture.get() != null) evidenceCapture.get().incomplete();
+        return exhausted;
     }
 
     private int budgetUsed() {

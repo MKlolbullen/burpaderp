@@ -14,7 +14,7 @@ large snapshots are explicitly marked truncated.
 
 Select a live run and use **Pause**, **Resume** or **Cancel**. Pause waits at the next gateway/probe
 boundary, before destination preparation/admission, without changing the UUID or refilling quotas.
-An already admitted/in-flight dispatch can finish. Cancel is terminal and wakes paused workers.
+A request paused after quota reservation rechecks current policy, scope and binding before its dispatch commit; resuming does not acquire a second token. A denial after reservation keeps the token charged. An already committed/in-flight dispatch can finish. Cancel is terminal and wakes paused workers.
 Other runs keep their own budgets and state. Cancelling the current crawl clears its pending queue; a later explicitly started crawl keeps the unspent global crawl cap. Disabling active testing, changing any risk grant,
 Reset and unload still invalidate old generation tickets; resume cannot revive invalidated work.
 The older global crawl Pause/Resume controls retain their session-cancellation semantics and their
@@ -59,7 +59,7 @@ unequal targets/profiles/grants/budgets also mean absence cannot establish a fix
 
 **Re-run failed / inconclusive probes** creates a new child run. Native and corpus probe outcomes
 are grouped by original method/URL identity, detector, insertion point/parameter (including location/type) and encoding.
-Transport failure, denied/missing observations and SIGNAL/CANDIDATE evidence remain retry eligible;
+Transport failure, denied/missing observations, truncated native probes, insufficient timing samples, rejected timing response statuses and SIGNAL/CANDIDATE evidence remain retry eligible. Failed local mutation construction is recorded as FAILED without claiming a dispatch;
 a skipped prerequisite, checked negative or reproduced/confirmed result alone is not. Corpus retries rebuild the selected
 category/parameter/encoding with the original local category cap and current run quota. The corpus
 continues to exclude destructive entries. Helpers, external providers and subprocesses are not
