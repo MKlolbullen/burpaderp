@@ -71,14 +71,9 @@ final class ActiveTestEngine {
     private static final String WAF_PROBE = "<script>alert(1)</script>";
 
     // SQL injection: error-based, boolean-based blind, and time-based blind (MySQL/PostgreSQL/MSSQL).
-    private static final Pattern SQL_ERROR = Pattern.compile(
-            "sql syntax|unclosed quotation mark|quoted string not properly terminated|"
-                    + "mysql_fetch|mysqli|you have an error in your sql syntax|warning: mysql|"
-                    + "valid mysql result|check the manual that corresponds to your (mysql|mariadb) server|"
-                    + "ora-\\d{5}|pg_query\\(\\)|postgresql.*error|sqlstate\\[|sqlite3?\\.(operationalerror|error)|"
-                    + "microsoft ole db provider for odbc drivers|incorrect syntax near|"
-                    + "unterminated quoted string|System\\.Data\\.SqlClient\\.SqlException",
-            Pattern.CASE_INSENSITIVE);
+    // The signature source is shared with the Nuclei PoC matcher via DetectionSignatures so the two cannot
+    // drift (the regex carries an inline (?i) rather than a compile-time flag the PoC side cannot see).
+    private static final Pattern SQL_ERROR = Pattern.compile(DetectionSignatures.SQL_ERROR_REGEX);
     private static final String SQLI_ERROR_PAYLOAD = "'";
     private static final String SQLI_TRUE_PAYLOAD = "' OR '1'='1'-- -";
     private static final String SQLI_FALSE_PAYLOAD = "' AND '1'='2'-- -";
@@ -100,11 +95,7 @@ final class ActiveTestEngine {
             "{\"$gt\":\"\"}",              // operator object supplied where a scalar is expected
             "[$ne]",                        // bracket-operator key fragment
             "\\");                          // trailing backslash: unterminated escape
-    private static final Pattern NOSQL_ERROR = Pattern.compile(
-            "(?i)mongoerror|mongonetworkerror|mongoserverror|mongoose|bsonerror|\\bbson\\b|"
-                    + "e11000 duplicate key|cast to objectid failed|casterror|"
-                    + "\\$where|\\$regex|unterminated string|couchdberror|"
-                    + "unexpected token .* in json|error parsing (bson|json)");
+    private static final Pattern NOSQL_ERROR = Pattern.compile(DetectionSignatures.NOSQL_ERROR_REGEX);
 
     // Path traversal / LFI: read a well-known OS file through the parameter, across depth, separator,
     // and encoding variants that defeat naive filters. A hit is confirmed only when a file's canary
@@ -489,7 +480,8 @@ final class ActiveTestEngine {
         HttpResponse errorResponse = sendMutated(base, point, SQLI_ERROR_PAYLOAD);
         if (errorResponse != null && containsSqlError(errorResponse.bodyToString()) && !containsSqlError(baselineBody)) {
             out.add(new ActiveFinding("HIGH", "SQLi", point.label(),
-                    "Injecting a single quote produced a database error signature not present in the baseline response",
+                    "Injecting a single quote produced a " + DetectionSignatures.SQL_ERROR_EVIDENCE
+                            + " not present in the baseline response",
                     VerificationState.REPRODUCED, base.url()));
             return budgetUsed() - before;
         }
@@ -927,8 +919,8 @@ final class ActiveTestEngine {
     static Optional<String> detectSstiEval(String body, String payload) {
         if (body == null || !body.contains(SSTI_HIT)) return Optional.empty();
         String family;
-        if (payload.contains("{{")) family = "Jinja2/Twig-style {{...}}";
-        else if (payload.contains("${{")) family = "nested ${{...}}";
+        if (payload.contains("${{")) family = "nested ${{...}}";
+        else if (payload.contains("{{")) family = DetectionSignatures.SSTI_JINJA_FAMILY;
         else if (payload.contains("${")) family = "EL/Freemarker ${...}";
         else if (payload.contains("#{")) family = "Ruby/JSF #{...}";
         else if (payload.contains("<%=")) family = "ERB/EJS <%=...%>";

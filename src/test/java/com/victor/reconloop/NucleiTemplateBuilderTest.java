@@ -3,13 +3,19 @@ package com.victor.reconloop;
 import org.junit.Test;
 
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 import static org.junit.Assert.*;
 
 public class NucleiTemplateBuilderTest {
 
-    private static final String SQLI_ERROR_EV = "Injecting a single quote produced a database error signature not present in the baseline response";
-    private static final String SSTI_JINJA_EV = "Template arithmetic evaluated (7*777=5439) via Jinja2/Twig-style {{...}}";
+    // Built from the shared markers the engine actually writes, so a reworded marker moves the engine,
+    // the builder gate and these fixtures together instead of leaving the tests holding a stale copy.
+    private static final String SQLI_ERROR_EV =
+            "Injecting a single quote produced a " + DetectionSignatures.SQL_ERROR_EVIDENCE
+                    + " not present in the baseline response";
+    private static final String SSTI_JINJA_EV =
+            "Template arithmetic evaluated (7*777=5439) via " + DetectionSignatures.SSTI_JINJA_FAMILY;
 
     // ---- fromActiveFinding ----
 
@@ -22,6 +28,8 @@ public class NucleiTemplateBuilderTest {
         assertEquals("body", spec.get().matcherPart());
         assertEquals("high", spec.get().severity());
         assertTrue(spec.get().targetUrl().contains("id=%27")); // ' url-encoded into the query
+        // The PoC matches on the SAME signature set the engine confirmed with — not a narrower copy.
+        assertEquals(DetectionSignatures.SQL_ERROR_REGEX, spec.get().matcherValue());
     }
 
     @Test
@@ -30,7 +38,54 @@ public class NucleiTemplateBuilderTest {
         assertTrue(NucleiTemplateBuilder.fromActiveFinding("SQLi", "HIGH", "https://t/x?id=1", "id",
                 "Boolean-based blind: the always-true condition matches the baseline response").isEmpty());
         assertTrue(NucleiTemplateBuilder.fromActiveFinding("SQLi", "HIGH", "https://t/x?id=1", "id",
-                "Time-based blind: response time increased by ~5s in response to payload").isEmpty());
+                "Repeated time-based blind signal for payload ' OR SLEEP(5)-- -").isEmpty());
+    }
+
+    @Test
+    public void noSqliProducesARegexBodyMatcherFromTheSharedSignatures() {
+        Optional<NucleiTemplateBuilder.PocSpec> spec = NucleiTemplateBuilder.fromActiveFinding(
+                "NoSQLi", "HIGH", "https://t.example/api?q=1", "q",
+                "Injecting '\" produced a NoSQL datastore error signature not present in the baseline response");
+        assertTrue(spec.isPresent());
+        assertEquals(NucleiTemplateBuilder.MatcherKind.REGEX, spec.get().matcherKind());
+        assertEquals("body", spec.get().matcherPart());
+        assertEquals(DetectionSignatures.NOSQL_ERROR_REGEX, spec.get().matcherValue());
+    }
+
+    /**
+     * The regression that pins findings #1/#2: a PoC must match on exactly what the engine confirmed on.
+     * For every signature the engine flags, the emitted PoC matcher must flag it too — the old hand-copied
+     * matchers had drifted to a subset, so these signatures confirmed a finding but produced a PoC whose
+     * matcher could never match.
+     */
+    @Test
+    public void emittedMatchersCoverEverySignatureTheEngineConfirmsOn() {
+        String sqlMatcher = NucleiTemplateBuilder.fromActiveFinding(
+                "SQLi", "HIGH", "https://t/x?id=1", "id", SQLI_ERROR_EV).orElseThrow().matcherValue();
+        Pattern sqlPoc = Pattern.compile(sqlMatcher);
+        for (String sig : new String[]{
+                "Incorrect syntax near ')'",                       // MSSQL — omitted by the old matcher
+                "System.Data.SqlClient.SqlException: timeout",     // .NET  — omitted by the old matcher
+                "SQLSTATE[42000]: Syntax error",                   // PDO   — omitted by the old matcher
+                "Warning: pg_query(): query failed",               // PostgreSQL — omitted by the old matcher
+                "You have an error in your SQL syntax"}) {         // MySQL — was covered
+            assertTrue("engine confirms: " + sig, ActiveTestEngine.containsSqlError(sig));
+            assertTrue("PoC must reproduce: " + sig, sqlPoc.matcher(sig).find());
+        }
+
+        String noSqlMatcher = NucleiTemplateBuilder.fromActiveFinding(
+                "NoSQLi", "HIGH", "https://t/x?q=1", "q",
+                "Injecting '\" produced a NoSQL datastore error signature not present in the baseline response")
+                .orElseThrow().matcherValue();
+        Pattern noSqlPoc = Pattern.compile(noSqlMatcher);
+        for (String sig : new String[]{
+                "CastError: Cast to ObjectId failed",              // omitted by the old matcher
+                "Uncaught couchdberror while querying",            // omitted by the old matcher
+                "ValidationError from Mongoose schema",            // omitted by the old matcher
+                "MongoServerError: E11000 duplicate key"}) {       // was covered
+            assertTrue("engine confirms: " + sig, ActiveTestEngine.containsNoSqlError(sig));
+            assertTrue("PoC must reproduce: " + sig, noSqlPoc.matcher(sig).find());
+        }
     }
 
     @Test
@@ -47,6 +102,14 @@ public class NucleiTemplateBuilderTest {
         // A ${...} / #{...} / <%=%> engine won't evaluate the {{7*777}} payload.
         assertTrue(NucleiTemplateBuilder.fromActiveFinding("SSTI", "HIGH", "https://t/p?q=x", "q",
                 "Template arithmetic evaluated (7*777=5439) via EL/Freemarker ${...}").isEmpty());
+    }
+
+    @Test
+    public void nestedBraceSstiFamilyProducesNoTemplate() {
+        // The nested ${{...}} family's engine does not evaluate the plain {{7*777}} payload, and its label
+        // contains "{{" — so a bare-substring gate would wrongly emit a non-reproducing PoC. It must not.
+        assertTrue(NucleiTemplateBuilder.fromActiveFinding("SSTI", "HIGH", "https://t/p?q=x", "q",
+                "Template arithmetic evaluated (7*777=5439) via nested ${{...}}").isEmpty());
     }
 
     @Test

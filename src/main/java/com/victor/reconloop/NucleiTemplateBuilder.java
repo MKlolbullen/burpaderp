@@ -59,21 +59,25 @@ final class NucleiTemplateBuilder {
         String matcher;
         switch (testClass) {
             case "SQLi" -> {
-                // Only error-based SQLi is reproduced by an error-signature body matcher; a
-                // boolean- or time-based confirmation is not, so don't emit a template that would fail.
-                if (!ev.toLowerCase(Locale.ROOT).contains("error signature")) return Optional.empty();
+                // Only error-based SQLi is reproduced by an error-signature body matcher; a boolean- or
+                // time-based confirmation is not, so don't emit a template that would fail. The engine
+                // tags an error-based confirmation with DetectionSignatures.SQL_ERROR_EVIDENCE.
+                if (!ev.contains(DetectionSignatures.SQL_ERROR_EVIDENCE)) return Optional.empty();
                 payload = "'"; kind = MatcherKind.REGEX; part = "body";
-                matcher = "(?i)sql syntax|mysql_fetch|ORA-[0-9]{4,5}|PostgreSQL.*ERROR|SQLite/JDBCDriver|"
-                        + "Unclosed quotation mark|quoted string not properly terminated";
+                // Match on the SAME signature set the engine confirmed with — not a narrower copy.
+                matcher = DetectionSignatures.SQL_ERROR_REGEX;
             }
             case "NoSQLi" -> {
+                // NoSQLi is error-based only (a single confirmation vector), so it needs no gate — but the
+                // matcher must cover every signature the engine confirms on, hence the shared source.
                 payload = "'\""; kind = MatcherKind.REGEX; part = "body";
-                matcher = "(?i)MongoError|MongoServerError|BSON|E11000 duplicate key|Cast to ObjectId failed|\\$where";
+                matcher = DetectionSignatures.NOSQL_ERROR_REGEX;
             }
             case "SSTI" -> {
-                // The {{7*777}} payload only reproduces the brace family; a ${...}/#{...}/<%=%> engine
-                // (named in the evidence) would not evaluate it, so gate on the confirmed family.
-                if (!ev.contains("{{")) return Optional.empty();
+                // The {{7*777}} payload only reproduces the Jinja2/Twig {{...}} family; a ${...}/#{...}/
+                // <%=%>/nested-${{...}} engine would not evaluate it. Gate on the full family label the
+                // engine writes (not a bare "{{" substring, which the nested ${{...}} label also contains).
+                if (!ev.contains(DetectionSignatures.SSTI_JINJA_FAMILY)) return Optional.empty();
                 payload = "rhs{{7*777}}she"; kind = MatcherKind.WORD; part = "body";
                 matcher = "rhs5439she"; // the distinctive product marker ActiveTestEngine confirms on
             }
