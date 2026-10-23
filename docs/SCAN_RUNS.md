@@ -51,14 +51,14 @@ fabricated from old evidence. Late retained callbacks can update their archived 
 ## Compare and retry
 
 Choose a baseline UUID, select another run, and press **Compare**. Identity includes detector and
-revision, class, insertion point and route/query names, excluding generated payload/OAST tokens,
+revision, class, insertion-point label, recorded HTTP method and route/query names, excluding generated payload/OAST tokens,
 query values, evidence prose and capture UUIDs. **Show new findings only** filters the Active tests
 and Findings tables to added identities in the selected run. Missing observations are labelled
 **not observed**, never resolved. Incomplete retained finding indexes make the comparison partial;
 unequal targets/profiles/grants/budgets also mean absence cannot establish a fix.
 
 **Re-run failed / inconclusive probes** creates a new child run. Native and corpus probe outcomes
-are grouped by original method/URL identity, detector, insertion point/parameter and encoding.
+are grouped by original method/URL identity, detector, insertion point/parameter (including location/type) and encoding.
 Transport failure, denied/missing observations and SIGNAL/CANDIDATE evidence remain retry eligible;
 a checked negative or reproduced/confirmed result alone is not. Corpus retries rebuild the selected
 category/parameter/encoding with the original local category cap and current run quota. The corpus

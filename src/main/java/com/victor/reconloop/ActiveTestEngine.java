@@ -197,7 +197,7 @@ final class ActiveTestEngine {
             for (InsertionPoint point : points) {
                 if (point == null || point.name() == null || point.name().isBlank()) continue;
                 if (budgetExhausted()) break;
-                pointIdentity.set(FindingEvidence.digest(point.label()));
+                pointIdentity.set(RunRecord.pointIdentity(point));
 
                 if (!wafChecked && !budgetExhausted()) {
                     runProbe("waf", () -> testWaf(base, point, findings));

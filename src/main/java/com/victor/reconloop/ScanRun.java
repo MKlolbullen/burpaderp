@@ -56,6 +56,7 @@ final class ScanRun {
         }
     }
 
+    private RunRecord cachedSnapshot;
     private Runnable onChange = () -> {};
     synchronized void onChange(Runnable listener) { onChange = listener; }
     private String parentId = "";
@@ -149,6 +150,7 @@ final class ScanRun {
         hostUsage.put(host, hostUsed + 1);
         endpointUsage.put(endpoint, endpointUsed + 1);
         probeUsage.put(probe, probeUsed + 1);
+        cachedSnapshot = null;
         return Allocation.granted();
     }
 
@@ -231,7 +233,7 @@ final class ScanRun {
     boolean isRunning() { return status() == RunStatus.RUNNING; }
     boolean isActive() { return isRunning() || status() == RunStatus.PAUSED; }
     boolean isCancelled() { return status() == RunStatus.CANCELLED; }
-    synchronized void parent(String id) { parentId = id == null ? "" : id; onChange.run(); }
+    synchronized void parent(String id) { parentId = id == null ? "" : id; cachedSnapshot = null; onChange.run(); }
 
     synchronized void dispatching(RequestPlan plan) {
         attempts++; dispatched++;
@@ -253,6 +255,7 @@ final class ScanRun {
                 Math.max(0, result.transportElapsedNanos()), hasResponse ? "RESPONSE" : result.dispatched() ? "NO_RESPONSE" : "DENIED");
     }
     synchronized void probe(RunRecord.Probe probe) {
+        cachedSnapshot = null;
         if (!probes.containsKey(probe.key()) && probes.size() >= RunRecord.MAX_PROBES) { omittedProbes++; return; }
         // A failure in any insertion point keeps the grouped retry eligible.
         var prior = probes.get(probe.key());
@@ -266,19 +269,22 @@ final class ScanRun {
                 evidence.observation() == null ? "FINDING" : "CALLBACK", evidence.detectorId());
     }
     synchronized void finding(RunRecord.Finding finding, String kind, String detector) {
+        cachedSnapshot = null;
         if (!findings.containsKey(finding.evidenceId()) && findings.size() >= RunRecord.MAX_FINDINGS) { omittedFindings++; return; }
         findings.put(finding.evidenceId(), finding);
         event(kind, detector, "", "", finding.state().name(), false, 0, finding.evidenceId());
     }
     private void event(String kind, String probe, String target, String hash, String decision, boolean sent, long elapsed, String detail) {
+        cachedSnapshot = null;
         if (audit.size() == RunRecord.MAX_EVENTS) { audit.removeFirst(); omittedEvents++; }
         audit.add(new RunRecord.Event(UUID.randomUUID().toString(), Instant.now().toString(), kind,
                 probe.length() > 128 ? probe.substring(0, 128) : probe, target, hash, decision, sent, elapsed, detail));
         onChange.run();
     }
     synchronized RunRecord snapshot() {
+        if (cachedSnapshot != null && cachedSnapshot.metrics().admitted() == requestBudget.used()) return cachedSnapshot;
         // Ledger map keys are hashes in durable history; full URLs and query values are not retained.
-        return new RunRecord(id.toString(), parentId, startedAt.toString(), finishedAt() == null ? "" : finishedAt().toString(),
+        return cachedSnapshot = new RunRecord(id.toString(), parentId, startedAt.toString(), finishedAt() == null ? "" : finishedAt().toString(),
                 status(), profile, scope, requestLimits, new RunRecord.Metrics(attempts, requestBudget.used(), dispatched,
                 responses, errors, denied, transportNanos, hashed(hostUsage), hashed(endpointUsage), bounded(probeUsage)),
                 audit, omittedEvents, List.copyOf(probes.values()), omittedProbes, List.copyOf(findings.values()), omittedFindings);

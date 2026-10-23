@@ -72,10 +72,29 @@ public class RunRetryIntegrationTest {
         }
     }
 
+    @Test public void nativeRetrySelectsBodyPointWhenQueryUsesTheSameName() {
+        try (var fake = new FakeMontoya()) {
+            var base = fake.request(URL).withAddedParameters(FakeMontoya.parameter("q", "body-original", burp.api.montoya.http.message.params.HttpParameterType.BODY));
+            var points = InsertionPoint.enumerate(base).stream().filter(p -> p.kind() == InsertionPoint.Kind.PARAM).toList();
+            var body = points.stream().filter(p -> p.paramType() == burp.api.montoya.http.message.params.HttpParameterType.BODY).findFirst().orElseThrow();
+            var query = points.stream().filter(p -> p.paramType() == burp.api.montoya.http.message.params.HttpParameterType.URL).findFirst().orElseThrow();
+            assertEquals(query.label(), body.label()); assertNotEquals(RunRecord.pointIdentity(query), RunRecord.pointIdentity(body));
+            String target = RunRecord.target(base.method(), base.url()); String parameter = RunRecord.pointIdentity(body);
+            var probe = new RunRecord.Probe(RunRecord.probeKey("NATIVE_ACTIVE", "reflected-xss", target, parameter, ""), "NATIVE_ACTIVE", "reflected-xss", target, parameter, "", 0, RunRecord.ProbeStatus.FAILED);
+            var plan = RunRetry.plan(UUID.randomUUID().toString(), List.of(probe), List.of(base), ignored -> true);
+            var run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, plan.scope(), 5);
+            RunRetry.execute(plan, run, new ActiveRequestGateway(RequestPolicy.safeDefault(ignored -> true), fake.transport()), new ActiveTestEngine(fake.api, 0),
+                    new CorpusFuzzEngine(fake.api, new PayloadLibrary(), 0), (f, r) -> {});
+            assertEquals(1, fake.sent.size());
+            assertEquals("a", fake.sent.getFirst().parameters().stream().filter(p -> p.type() == burp.api.montoya.http.message.params.HttpParameterType.URL).findFirst().orElseThrow().value());
+            assertNotEquals("body-original", fake.sent.getFirst().parameters().stream().filter(p -> p.type() == burp.api.montoya.http.message.params.HttpParameterType.BODY).findFirst().orElseThrow().value());
+        }
+    }
+
     @Test public void blindXssRetryStillNeedsBothGrantsAndGeneratesFreshCallbacks() {
         try (var fake = new FakeMontoya()) {
             var base = fake.request(URL); String target = RunRecord.target(base.method(), base.url());
-            String parameter = FindingEvidence.digest(InsertionPoint.enumerate(base).getFirst().label());
+            String parameter = RunRecord.pointIdentity(InsertionPoint.enumerate(base).getFirst());
             var probe = new RunRecord.Probe(RunRecord.probeKey("NATIVE_ACTIVE", "blind-xss", target, parameter, ""),
                     "NATIVE_ACTIVE", "blind-xss", target, parameter, "", 0, RunRecord.ProbeStatus.INCONCLUSIVE);
             String parent = UUID.randomUUID().toString();

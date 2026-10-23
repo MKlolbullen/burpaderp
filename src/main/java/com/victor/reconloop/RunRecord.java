@@ -37,10 +37,14 @@ record RunRecord(String id, String parentId, String startedAt, String finishedAt
         return Set.copyOf(keys);
     }
     static String target(String method, String url) { return FindingEvidence.digest(method + "\0" + url); }
+    static String pointIdentity(InsertionPoint point) {
+        return FindingEvidence.digest(point.kind() + "\0" + point.paramType() + "\0" + point.name() + "\0" + point.index());
+    }
     static String findingKey(ReconModel.ActiveRow row) {
         var evidence = row.evidenceRecord();
         return FindingEvidence.digest(evidence.detectorId() + "\0" + evidence.detectorVersion() + "\0"
-                + row.testClass() + "\0" + row.parameter() + "\0" + route(row.url()));
+                + row.testClass() + "\0" + row.parameter() + "\0"
+                + (evidence.exchanges().isEmpty() ? "" : evidence.exchanges().getFirst().method()) + "\0" + route(row.url()));
     }
     private static String route(String url) {
         String route = url;
