@@ -33,13 +33,19 @@ final class ActiveTestEngine {
      */
     record ActiveFinding(String severity, String testClass, String parameter,
                          String evidence, VerificationState verificationState, String url,
-                         FindingEvidence evidenceRecord, List<HttpRequestResponse> httpEvidence) {
+                         FindingEvidence evidenceRecord, List<HttpRequestResponse> httpEvidence,
+                         Confirmation confirmation) {
         ActiveFinding { httpEvidence = List.copyOf(httpEvidence); }
         ActiveFinding(String severity, String testClass, String parameter, String evidence, VerificationState state, String url) {
-            this(severity, testClass, parameter, evidence, state, url, null, List.of());
+            this(severity, testClass, parameter, evidence, state, url, null, List.of(), null);
+        }
+        /** For a confirmed finding whose exact vector and payload are recorded for faithful PoC generation. */
+        ActiveFinding(String severity, String testClass, String parameter, String evidence, VerificationState state,
+                      String url, Confirmation confirmation) {
+            this(severity, testClass, parameter, evidence, state, url, null, List.of(), confirmation);
         }
         ActiveFinding withEvidence(FindingEvidence record, List<HttpRequestResponse> messages) {
-            return new ActiveFinding(severity, testClass, parameter, evidence, verificationState, url, record, messages);
+            return new ActiveFinding(severity, testClass, parameter, evidence, verificationState, url, record, messages, confirmation);
         }
         ActiveFinding(String severity, String testClass, String parameter,
                       String evidence, boolean legacyConfirmed, String url) {
@@ -52,6 +58,13 @@ final class ActiveTestEngine {
             return verificationState != null && verificationState.isReportable();
         }
     }
+
+    /**
+     * The structured confirmation of a finding: the {@link ConfirmationVector} that names how it was proven,
+     * and the exact payload that proved it. The Nuclei PoC builder gates on the vector and fires the payload,
+     * so a generated PoC reproduces the same vector with the same input rather than a fixed guess.
+     */
+    record Confirmation(ConfirmationVector vector, String payload) {}
 
     // Server-side template injection: distinctive product avoids coincidental "49" matches.
     static final long SSTI_A = 7, SSTI_B = 777, SSTI_PRODUCT = SSTI_A * SSTI_B; // 5439
@@ -392,7 +405,8 @@ final class ActiveTestEngine {
             if (engine.isPresent()) {
                 out.add(new ActiveFinding("HIGH", "SSTI", point.label(),
                         "Template arithmetic evaluated (" + SSTI_A + "*" + SSTI_B + "=" + SSTI_PRODUCT
-                                + ") via " + engine.get(), VerificationState.CONFIRMED, base.url()));
+                                + ") via " + engine.get(), VerificationState.CONFIRMED, base.url(),
+                        new Confirmation(sstiVector(payload), payload)));
                 break;
             }
         }
@@ -482,7 +496,8 @@ final class ActiveTestEngine {
             out.add(new ActiveFinding("HIGH", "SQLi", point.label(),
                     "Injecting a single quote produced a " + DetectionSignatures.SQL_ERROR_EVIDENCE
                             + " not present in the baseline response",
-                    VerificationState.REPRODUCED, base.url()));
+                    VerificationState.REPRODUCED, base.url(),
+                    new Confirmation(ConfirmationVector.SQL_ERROR, SQLI_ERROR_PAYLOAD)));
             return budgetUsed() - before;
         }
         if (budgetExhausted()) return budgetUsed() - before;
@@ -494,7 +509,8 @@ final class ActiveTestEngine {
                 && looksBooleanBased(baselineBody, trueResponse.bodyToString(), falseResponse.bodyToString())) {
             out.add(new ActiveFinding("HIGH", "SQLi", point.label(),
                     "Boolean-based blind: the always-true condition matches the baseline response while the "
-                            + "always-false condition diverges from both", VerificationState.REPRODUCED, base.url()));
+                            + "always-false condition diverges from both", VerificationState.REPRODUCED, base.url(),
+                    new Confirmation(ConfirmationVector.SQL_BOOLEAN, SQLI_TRUE_PAYLOAD)));
             return budgetUsed() - before;
         }
         if (budgetExhausted()) return budgetUsed() - before;
@@ -518,7 +534,8 @@ final class ActiveTestEngine {
                                 + "ms), delta=" + timing.medianDeltaMillis() + "ms across "
                                 + timing.consistentDelayedSamples() + "/" + payloadTimings.size()
                                 + " consistently delayed samples. This reproduces a timing signal; interpreter execution and impact remain unproven.",
-                        VerificationState.REPRODUCED, base.url()));
+                        VerificationState.REPRODUCED, base.url(),
+                        new Confirmation(ConfirmationVector.SQL_TIME, payload)));
                 break;
             }
         }
@@ -543,7 +560,8 @@ final class ActiveTestEngine {
             if (containsNoSqlError(response.bodyToString())) {
                 out.add(new ActiveFinding("HIGH", "NoSQLi", point.label(),
                         "Injecting " + payload + " produced a NoSQL datastore error signature not present "
-                                + "in the baseline response", VerificationState.REPRODUCED, base.url()));
+                                + "in the baseline response", VerificationState.REPRODUCED, base.url(),
+                        new Confirmation(ConfirmationVector.NOSQL_ERROR, payload)));
                 break;
             }
         }
@@ -926,6 +944,17 @@ final class ActiveTestEngine {
         else if (payload.contains("<%=")) family = "ERB/EJS <%=...%>";
         else family = "brace {...}";
         return Optional.of(family);
+    }
+
+    /**
+     * The confirmation vector for an SSTI payload: {@link ConfirmationVector#SSTI_BRACE} only for the
+     * Jinja2/Twig {@code {{...}}} family (which the {@code {{7*777}}} PoC payload reproduces), else
+     * {@link ConfirmationVector#SSTI_OTHER}. The nested {@code ${{...}}} family also contains {@code {{},
+     * so it is excluded explicitly rather than by a loose substring test.
+     */
+    static ConfirmationVector sstiVector(String payload) {
+        boolean brace = payload != null && payload.contains("{{") && !payload.contains("${{");
+        return brace ? ConfirmationVector.SSTI_BRACE : ConfirmationVector.SSTI_OTHER;
     }
 
     /** Of {@code < > " '}, which appear literally in the body immediately after {@code token}. */

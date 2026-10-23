@@ -3144,8 +3144,11 @@ final class ReconController implements HttpHandler {
             String detail = "<b>Active test: " + escape(finding.testClass()) + "</b><br>"
                     + "Parameter: <code>" + escape(finding.parameter()) + "</code><br>"
                     + "Evidence: " + escape(finding.evidence());
+            ActiveTestEngine.Confirmation confirmation = finding.confirmation();
+            ConfirmationVector vector = confirmation == null ? null : confirmation.vector();
+            String confirmingPayload = confirmation == null ? null : confirmation.payload();
             java.util.Optional<NucleiTemplateBuilder.PocSpec> poc = NucleiTemplateBuilder.fromActiveFinding(
-                    finding.testClass(), finding.severity(), finding.url(), finding.parameter(), finding.evidence());
+                    finding.testClass(), finding.severity(), finding.url(), finding.parameter(), vector, confirmingPayload);
             if (poc.isPresent()) {
                 detail += "<br><br><b>Runnable Nuclei PoC</b> (re-proves this finding — run against an "
                         + "authorised target):<br><pre>" + escape(NucleiTemplateBuilder.build(poc.get())) + "</pre>";

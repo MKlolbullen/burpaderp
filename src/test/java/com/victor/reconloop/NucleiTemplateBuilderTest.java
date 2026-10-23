@@ -9,20 +9,12 @@ import static org.junit.Assert.*;
 
 public class NucleiTemplateBuilderTest {
 
-    // Built from the shared markers the engine actually writes, so a reworded marker moves the engine,
-    // the builder gate and these fixtures together instead of leaving the tests holding a stale copy.
-    private static final String SQLI_ERROR_EV =
-            "Injecting a single quote produced a " + DetectionSignatures.SQL_ERROR_EVIDENCE
-                    + " not present in the baseline response";
-    private static final String SSTI_JINJA_EV =
-            "Template arithmetic evaluated (7*777=5439) via " + DetectionSignatures.SSTI_JINJA_FAMILY;
-
-    // ---- fromActiveFinding ----
+    // ---- fromActiveFinding: gating is on the structured vector, not evidence prose ----
 
     @Test
     public void errorBasedSqliQueryParamProducesARegexBodyMatcherWithTheEncodedPayload() {
         Optional<NucleiTemplateBuilder.PocSpec> spec = NucleiTemplateBuilder.fromActiveFinding(
-                "SQLi", "HIGH", "https://t.example/item?id=1", "id", SQLI_ERROR_EV);
+                "SQLi", "HIGH", "https://t.example/item?id=1", "id", ConfirmationVector.SQL_ERROR, "'");
         assertTrue(spec.isPresent());
         assertEquals(NucleiTemplateBuilder.MatcherKind.REGEX, spec.get().matcherKind());
         assertEquals("body", spec.get().matcherPart());
@@ -34,22 +26,23 @@ public class NucleiTemplateBuilderTest {
 
     @Test
     public void booleanOrTimeBasedSqliProducesNoTemplate() {
-        // These confirmations aren't reproduced by an error-signature body matcher.
-        assertTrue(NucleiTemplateBuilder.fromActiveFinding("SQLi", "HIGH", "https://t/x?id=1", "id",
-                "Boolean-based blind: the always-true condition matches the baseline response").isEmpty());
-        assertTrue(NucleiTemplateBuilder.fromActiveFinding("SQLi", "HIGH", "https://t/x?id=1", "id",
-                "Repeated time-based blind signal for payload ' OR SLEEP(5)-- -").isEmpty());
+        // These vectors aren't reproduced by an error-signature body matcher.
+        assertTrue(NucleiTemplateBuilder.fromActiveFinding(
+                "SQLi", "HIGH", "https://t/x?id=1", "id", ConfirmationVector.SQL_BOOLEAN, "' OR '1'='1'-- -").isEmpty());
+        assertTrue(NucleiTemplateBuilder.fromActiveFinding(
+                "SQLi", "HIGH", "https://t/x?id=1", "id", ConfirmationVector.SQL_TIME, "' OR SLEEP(5)-- -").isEmpty());
     }
 
     @Test
-    public void noSqliProducesARegexBodyMatcherFromTheSharedSignatures() {
+    public void noSqliFiresTheExactConfirmingProbeAndTheSharedSignatureMatcher() {
+        // The engine tries several NoSQL probes; the PoC must fire the one that actually errored.
         Optional<NucleiTemplateBuilder.PocSpec> spec = NucleiTemplateBuilder.fromActiveFinding(
-                "NoSQLi", "HIGH", "https://t.example/api?q=1", "q",
-                "Injecting '\" produced a NoSQL datastore error signature not present in the baseline response");
+                "NoSQLi", "HIGH", "https://t.example/api?q=1", "q", ConfirmationVector.NOSQL_ERROR, "[$ne]");
         assertTrue(spec.isPresent());
         assertEquals(NucleiTemplateBuilder.MatcherKind.REGEX, spec.get().matcherKind());
         assertEquals("body", spec.get().matcherPart());
         assertEquals(DetectionSignatures.NOSQL_ERROR_REGEX, spec.get().matcherValue());
+        assertTrue(spec.get().targetUrl().contains("q=%5B%24ne%5D")); // the exact confirming payload, encoded
     }
 
     /**
@@ -61,7 +54,7 @@ public class NucleiTemplateBuilderTest {
     @Test
     public void emittedMatchersCoverEverySignatureTheEngineConfirmsOn() {
         String sqlMatcher = NucleiTemplateBuilder.fromActiveFinding(
-                "SQLi", "HIGH", "https://t/x?id=1", "id", SQLI_ERROR_EV).orElseThrow().matcherValue();
+                "SQLi", "HIGH", "https://t/x?id=1", "id", ConfirmationVector.SQL_ERROR, "'").orElseThrow().matcherValue();
         Pattern sqlPoc = Pattern.compile(sqlMatcher);
         for (String sig : new String[]{
                 "Incorrect syntax near ')'",                       // MSSQL — omitted by the old matcher
@@ -74,8 +67,7 @@ public class NucleiTemplateBuilderTest {
         }
 
         String noSqlMatcher = NucleiTemplateBuilder.fromActiveFinding(
-                "NoSQLi", "HIGH", "https://t/x?q=1", "q",
-                "Injecting '\" produced a NoSQL datastore error signature not present in the baseline response")
+                "NoSQLi", "HIGH", "https://t/x?q=1", "q", ConfirmationVector.NOSQL_ERROR, "[$ne]")
                 .orElseThrow().matcherValue();
         Pattern noSqlPoc = Pattern.compile(noSqlMatcher);
         for (String sig : new String[]{
@@ -91,31 +83,27 @@ public class NucleiTemplateBuilderTest {
     @Test
     public void jinjaSstiUsesTheDistinctiveProductMarkerAsAWordMatcher() {
         Optional<NucleiTemplateBuilder.PocSpec> spec = NucleiTemplateBuilder.fromActiveFinding(
-                "SSTI", "HIGH", "https://t.example/p?q=x", "q", SSTI_JINJA_EV);
+                "SSTI", "HIGH", "https://t.example/p?q=x", "q", ConfirmationVector.SSTI_BRACE, "rhs{{7*777}}she");
         assertTrue(spec.isPresent());
         assertEquals(NucleiTemplateBuilder.MatcherKind.WORD, spec.get().matcherKind());
         assertEquals("rhs5439she", spec.get().matcherValue());
     }
 
     @Test
-    public void nonBraceSstiFamilyProducesNoTemplate() {
-        // A ${...} / #{...} / <%=%> engine won't evaluate the {{7*777}} payload.
-        assertTrue(NucleiTemplateBuilder.fromActiveFinding("SSTI", "HIGH", "https://t/p?q=x", "q",
-                "Template arithmetic evaluated (7*777=5439) via EL/Freemarker ${...}").isEmpty());
-    }
-
-    @Test
-    public void nestedBraceSstiFamilyProducesNoTemplate() {
-        // The nested ${{...}} family's engine does not evaluate the plain {{7*777}} payload, and its label
-        // contains "{{" — so a bare-substring gate would wrongly emit a non-reproducing PoC. It must not.
-        assertTrue(NucleiTemplateBuilder.fromActiveFinding("SSTI", "HIGH", "https://t/p?q=x", "q",
-                "Template arithmetic evaluated (7*777=5439) via nested ${{...}}").isEmpty());
+    public void nonBraceAndNestedSstiFamiliesProduceNoTemplate() {
+        // A ${...}/#{...}/<%=%> engine, and the nested ${{...}} family, do not evaluate the {{7*777}}
+        // payload — all carry SSTI_OTHER, and none may emit a (non-reproducing) template.
+        assertTrue(NucleiTemplateBuilder.fromActiveFinding(
+                "SSTI", "HIGH", "https://t/p?q=x", "q", ConfirmationVector.SSTI_OTHER, "rhs${7*777}she").isEmpty());
+        assertTrue(NucleiTemplateBuilder.fromActiveFinding(
+                "SSTI", "HIGH", "https://t/p?q=x", "q", ConfirmationVector.SSTI_OTHER, "rhs${{7*777}}she").isEmpty());
     }
 
     @Test
     public void openRedirectMatchesTheLocationHeader() {
+        // OpenRedirect carries no structured vector (single mechanism); it keys off the class alone.
         Optional<NucleiTemplateBuilder.PocSpec> spec = NucleiTemplateBuilder.fromActiveFinding(
-                "OpenRedirect", "MEDIUM", "https://t.example/go?next=/", "next", "Redirect Location points to attacker host");
+                "OpenRedirect", "MEDIUM", "https://t.example/go?next=/", "next", null, null);
         assertTrue(spec.isPresent());
         assertEquals("header", spec.get().matcherPart());
         assertTrue(spec.get().matcherValue().contains("rh-redirect.example.net"));
@@ -123,18 +111,24 @@ public class NucleiTemplateBuilderTest {
 
     @Test
     public void outOfBandAndBlindClassesProduceNoTemplate() {
-        assertTrue(NucleiTemplateBuilder.fromActiveFinding("SSRF", "HIGH", "https://t/x?u=1", "u", "ev").isEmpty());
-        assertTrue(NucleiTemplateBuilder.fromActiveFinding("XSS-blind", "INFO", "https://t/x?u=1", "u", "ev").isEmpty());
-        assertTrue(NucleiTemplateBuilder.fromActiveFinding("CMDi", "INFO", "https://t/x?u=1", "u", "ev").isEmpty());
+        assertTrue(NucleiTemplateBuilder.fromActiveFinding("SSRF", "HIGH", "https://t/x?u=1", "u", null, null).isEmpty());
+        assertTrue(NucleiTemplateBuilder.fromActiveFinding("XSS-blind", "INFO", "https://t/x?u=1", "u", null, null).isEmpty());
+        assertTrue(NucleiTemplateBuilder.fromActiveFinding("CMDi", "INFO", "https://t/x?u=1", "u", null, null).isEmpty());
+    }
+
+    @Test
+    public void sqliWithoutTheErrorVectorProducesNoTemplate() {
+        // A SQLi finding that somehow carries no error vector must not emit (would not reproduce).
+        assertTrue(NucleiTemplateBuilder.fromActiveFinding("SQLi", "HIGH", "https://t/x?id=1", "id", null, "'").isEmpty());
     }
 
     @Test
     public void nonQueryParamInsertionPointsProduceNoTemplate() {
-        assertTrue(NucleiTemplateBuilder.fromActiveFinding("SQLi", "HIGH", "https://t/x?u=1", "header:X-Forwarded-For", SQLI_ERROR_EV).isEmpty());
-        assertTrue(NucleiTemplateBuilder.fromActiveFinding("SQLi", "HIGH", "https://t/x", "path[2]", SQLI_ERROR_EV).isEmpty());
-        assertTrue(NucleiTemplateBuilder.fromActiveFinding("SQLi", "HIGH", "https://t/x", "json:/user/id", SQLI_ERROR_EV).isEmpty());
-        assertTrue(NucleiTemplateBuilder.fromActiveFinding("SQLi", "HIGH", "https://t/x", "", SQLI_ERROR_EV).isEmpty());
-        assertTrue(NucleiTemplateBuilder.fromActiveFinding(null, "HIGH", "https://t/x", "u", "ev").isEmpty());
+        assertTrue(NucleiTemplateBuilder.fromActiveFinding("SQLi", "HIGH", "https://t/x?u=1", "header:X-Forwarded-For", ConfirmationVector.SQL_ERROR, "'").isEmpty());
+        assertTrue(NucleiTemplateBuilder.fromActiveFinding("SQLi", "HIGH", "https://t/x", "path[2]", ConfirmationVector.SQL_ERROR, "'").isEmpty());
+        assertTrue(NucleiTemplateBuilder.fromActiveFinding("SQLi", "HIGH", "https://t/x", "json:/user/id", ConfirmationVector.SQL_ERROR, "'").isEmpty());
+        assertTrue(NucleiTemplateBuilder.fromActiveFinding("SQLi", "HIGH", "https://t/x", "", ConfirmationVector.SQL_ERROR, "'").isEmpty());
+        assertTrue(NucleiTemplateBuilder.fromActiveFinding(null, "HIGH", "https://t/x", "u", null, null).isEmpty());
     }
 
     // ---- build ----
@@ -142,7 +136,7 @@ public class NucleiTemplateBuilderTest {
     @Test
     public void buildEmitsAWellFormedTemplateSkeleton() {
         NucleiTemplateBuilder.PocSpec spec = NucleiTemplateBuilder.fromActiveFinding(
-                "SQLi", "HIGH", "https://t.example/item?id=1", "id", SQLI_ERROR_EV).orElseThrow();
+                "SQLi", "HIGH", "https://t.example/item?id=1", "id", ConfirmationVector.SQL_ERROR, "'").orElseThrow();
         String yaml = NucleiTemplateBuilder.build(spec);
         assertTrue(yaml.startsWith("id: recon-hound-sqli-"));
         assertTrue(yaml.contains("severity: high"));
