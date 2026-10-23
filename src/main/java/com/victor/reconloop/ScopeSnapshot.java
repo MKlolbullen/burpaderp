@@ -12,14 +12,27 @@ import java.util.Set;
  * it records the target or operator-declared domains/CIDRs that a run was created for without trying
  * to reconstruct Burp's complete project scope.
  */
-record ScopeSnapshot(Set<String> domains, Set<String> cidrs) {
+record ScopeSnapshot(Set<String> domains, Set<String> cidrs, boolean truncated) {
+    ScopeSnapshot(Set<String> domains, Set<String> cidrs) { this(domains, cidrs, false); }
     ScopeSnapshot {
-        domains = normalize(domains, true);
-        cidrs = normalize(cidrs, false);
+        Set<String> allDomains = normalize(domains, true), allCidrs = normalize(cidrs, false);
+        truncated |= allDomains.size() > 1024 || allCidrs.size() > 1024
+                || allDomains.stream().anyMatch(v -> v.length() > 253) || allCidrs.stream().anyMatch(v -> v.length() > 253);
+        domains = bounded(allDomains); cidrs = bounded(allCidrs);
+    }
+
+    private static Set<String> bounded(Set<String> values) {
+        return Set.copyOf(values.stream().filter(v -> v.length() <= 253).sorted().limit(1024).toList());
     }
 
     static ScopeSnapshot empty() {
         return new ScopeSnapshot(Set.of(), Set.of());
+    }
+
+    static ScopeSnapshot forTargets(java.util.Collection<String> urls) {
+        Set<String> hosts = new LinkedHashSet<>();
+        for (String url : urls) hosts.addAll(forTargetUrl(url).domains());
+        return new ScopeSnapshot(hosts, Set.of());
     }
 
     static ScopeSnapshot forTargetUrl(String targetUrl) {

@@ -39,7 +39,7 @@ final class NativeReconChain {
         Set<String> scripts=new TreeSet<>();
         Path dir=plan.runDir().resolve("native");
         try {
-            if(Thread.currentThread().isInterrupted()||!run.isRunning()) {run.cancel();state="CANCELLED";return new Outcome("CANCELLED",0,0,0,0,"Cancelled before native phase.");}
+            if(Thread.currentThread().isInterrupted()||!run.isActive()) {run.cancel();state="CANCELLED";return new Outcome("CANCELLED",0,0,0,0,"Cancelled before native phase.");}
             createPrivateDirectory(dir);
             int count=0;
             for(String host:inputs.hosts()) {
@@ -54,7 +54,7 @@ final class NativeReconChain {
             }
             try(BufferedWriter metadata=writer(dir.resolve("http.jsonl"));BufferedWriter evidence=writer(dir.resolve("evidence.jsonl"));BufferedWriter urls=writer(dir.resolve("urls.jsonl"))) {
                 while(!queue.isEmpty()||!roots.isEmpty()||!archives.isEmpty()) {
-                    if(Thread.currentThread().isInterrupted()||!run.isRunning()){run.cancel();state="CANCELLED";break;}
+                    if(Thread.currentThread().isInterrupted()||!run.isActive()){run.cancel();state="CANCELLED";break;}
                     if(System.nanoTime()>deadline){limited=true;timeLimit=true;break;}
                     if(run.requestBudget().exhausted()){limited=true;break;}
                     Node node=switch(turn++%3){case 0->roots.pollFirst();case 1->archives.pollFirst();default->queue.pollFirst();};

@@ -60,6 +60,7 @@ final class ActiveRequestGateway {
     Result send(ScanRun run, RequestPlan plan, HttpRequest request) {
         long start = nanoTime.getAsLong();
         Result result = dispatch(run, plan, request);
+        if (run != null) run.record(plan, result);
         if (run == null || plan == null || plan.policyRequest() == null || request == null) return result;
         // Evidence collection must not change a completed dispatch or policy decision.
         try {
@@ -69,6 +70,8 @@ final class ActiveRequestGateway {
     }
 
     private Result dispatch(ScanRun run, RequestPlan plan, HttpRequest request) {
+        if (run != null && !run.awaitReady()) return Result.denied(RequestPolicy.Decision.deny(
+                run.isCancelled() ? RequestPolicy.DecisionCode.CANCELLED : RequestPolicy.DecisionCode.RUN_NOT_ACTIVE, "run stopped"));
         if (plan == null || !plan.matches(request)) return invalidPlan();
         if (Thread.currentThread().isInterrupted()) return Result.denied(RequestPolicy.Decision.deny(
                 RequestPolicy.DecisionCode.CANCELLED, "worker interrupted before destination preparation"));
@@ -90,18 +93,21 @@ final class ActiveRequestGateway {
         }
         if (Thread.currentThread().isInterrupted()) return Result.denied(RequestPolicy.Decision.deny(
                 RequestPolicy.DecisionCode.CANCELLED, "worker interrupted before admission"));
+        if (run != null && !run.awaitReady()) return Result.denied(RequestPolicy.Decision.deny(
+                RequestPolicy.DecisionCode.CANCELLED, "run stopped before admission"));
         RequestPolicy.Decision decision = admit(run, policy, planned);
         if (!decision.allowed()) return Result.denied(decision);
         // Montoya HttpRequest transformations are immutable. Check again after policy callbacks and
         // quota acquisition so a changed concrete message never inherits an earlier approval.
         if (!plan.matches(request)) return invalidPlan();
-        if (!run.isRunning()) {
+        if (!run.awaitReady()) {
             RequestPolicy.DecisionCode code = run.isCancelled()
                     ? RequestPolicy.DecisionCode.CANCELLED : RequestPolicy.DecisionCode.RUN_NOT_ACTIVE;
             return Result.denied(RequestPolicy.Decision.deny(code, "run stopped before dispatch"));
         }
         // Measure only the admitted transport invocation, excluding gateway DNS/admission and engine pacing.
         // This is API elapsed time, not a wire-level RTT or proof of server execution.
+        run.dispatching(plan);
         long start = nanoTime.getAsLong();
         try {
             HttpRequestResponse response = dispatch == null ? sender.send(request) : dispatch.send();
@@ -122,6 +128,8 @@ final class ActiveRequestGateway {
         if (!decision.allowed()) return decision;
         ScanRun.Allocation allocation = run.tryAcquire(planned);
         if (!allocation.allowed()) {
+            if (!run.isRunning()) return RequestPolicy.Decision.deny(run.isCancelled()
+                    ? RequestPolicy.DecisionCode.CANCELLED : RequestPolicy.DecisionCode.RUN_NOT_ACTIVE, "run stopped during admission");
             RequestPolicy.DecisionCode code = switch (allocation.exhaustedQuota()) {
                 case HOST -> RequestPolicy.DecisionCode.HOST_BUDGET_EXHAUSTED;
                 case ENDPOINT -> RequestPolicy.DecisionCode.ENDPOINT_BUDGET_EXHAUSTED;

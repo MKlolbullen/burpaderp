@@ -4,6 +4,8 @@ package com.victor.reconloop;
 enum RunStatus {
     PLANNED,
     RUNNING,
+    PAUSED,
+    INTERRUPTED,
     CANCELLED,
     COMPLETED,
     FAILED

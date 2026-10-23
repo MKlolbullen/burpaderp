@@ -73,16 +73,28 @@ final class CorpusFuzzEngine {
     List<ActiveTestEngine.ActiveFinding> fuzz(HttpRequest base, HttpParameter parameter,
                                                Set<PayloadEncoder.Encoding> encodings, int maxPerCategory,
                                                ScanRun run, ActiveRequestGateway gateway) {
+        return fuzz(base, parameter, encodings, maxPerCategory, run, gateway, Set.of());
+    }
+
+    List<ActiveTestEngine.ActiveFinding> fuzz(HttpRequest base, HttpParameter parameter,
+            Set<PayloadEncoder.Encoding> encodings, int maxPerCategory, ScanRun run, ActiveRequestGateway gateway,
+            Set<String> selectedProbeKeys) {
         List<ActiveTestEngine.ActiveFinding> out = new ArrayList<>();
         if (base == null || parameter == null || encodings == null || encodings.isEmpty()
-                || maxPerCategory <= 0 || run == null || gateway == null || !run.isRunning()) return out;
+                || maxPerCategory <= 0 || run == null || gateway == null || !run.isActive()) return out;
 
         for (String category : relevantCategories(parameter.name(), parameter.value(), rceParamHints, library.categories())) {
+            String target = RunRecord.target(base.method(), base.url());
+            String parameterKey = FindingEvidence.digest(parameter.type() + "\0" + parameter.name());
+            var selectedEncodings = encodings.stream().filter(encoding -> selectedProbeKeys.isEmpty() || selectedProbeKeys.contains(
+                    RunRecord.probeKey("CORPUS", "corpus-fuzz:" + category, target, parameterKey, encoding.name()))).sorted().toList();
+            if (selectedEncodings.isEmpty()) continue;
             RequestBudget categoryBudget = new RequestBudget(maxPerCategory);
             for (String rawPayload : library.get(category)) {
-                if (categoryBudget.exhausted() || run.requestBudget().exhausted() || !run.isRunning()) break;
+                if (categoryBudget.exhausted() || run.requestBudget().exhausted() || !run.isActive()) break;
                 if (isDestructive(rawPayload)) continue;
 
+                if (!run.awaitReady()) break;
                 EvidenceCapture prototype = new EvidenceCapture(run, base, "CORPUS", "corpus-fuzz:" + category);
                 String callbackHost = null;
                 boolean oastPayload = findCallbackHost(rawPayload).isPresent();
@@ -96,13 +108,14 @@ final class CorpusFuzzEngine {
                 }
 
                 boolean timeBased = mentionsSleep(rawPayload);
-                for (PayloadEncoder.Encoding encoding : encodings.stream().sorted().toList()) {
-                    if (categoryBudget.exhausted() || run.requestBudget().exhausted() || !run.isRunning()) break;
+                for (PayloadEncoder.Encoding encoding : selectedEncodings) {
+                    if (categoryBudget.exhausted() || run.requestBudget().exhausted() || !run.isActive()) break;
                     String encoded = encodedPayload(rawPayload, callbackHost, encoding);
                     EvidenceCapture capture = prototype.variant(base);
-                    evidenceCapture.set(capture); int firstFinding = out.size();
+                    evidenceCapture.set(capture); capture.startProbe(parameterKey, encoding.name(), maxPerCategory); int firstFinding = out.size();
+                    boolean crashed = true;
                     try {
-
+                        crashed = false;
                         if (timeBased) {
                             // Every matched pair needs two remaining local/global tokens. Each actual
                             // send still checks all quota dimensions, grants and cancellation at the gate.
@@ -110,7 +123,7 @@ final class CorpusFuzzEngine {
                             if (oastPayload) timingPermissions.add(RequestPolicy.Permission.OAST);
                             List<Long> baseline = new ArrayList<>(), payload = new ArrayList<>();
                             for (int sample = 0; sample < TimingVerification.SAMPLES; sample++) {
-                                if (categoryBudget.remaining() < 2 || run.requestBudget().remaining() < 2 || !run.isRunning()) break;
+                                if (categoryBudget.remaining() < 2 || run.requestBudget().remaining() < 2 || !run.isActive()) break;
                                 long control = timeRequest(base, parameter, parameter.value(), categoryBudget, run, gateway, category, timingPermissions);
                                 if (control < 0) break;
                                 long mutation = timeRequest(base, parameter, encoded, categoryBudget, run, gateway, category, timingPermissions);
@@ -150,7 +163,12 @@ final class CorpusFuzzEngine {
                                     "[" + encoding + "] payload reflected unencoded in response: " + truncate(rawPayload),
                                     VerificationState.CANDIDATE, base.url()));
                         }
-                    } finally { capture.attach(out, firstFinding); evidenceCapture.remove(); lastTransportMillis.remove(); }
+                    } catch (RuntimeException failure) { crashed = true; throw failure; }
+                    finally {
+                        capture.attach(out, firstFinding);
+                        capture.finishProbe(parameterKey, encoding.name(), maxPerCategory, out, firstFinding, crashed);
+                        evidenceCapture.remove(); lastTransportMillis.remove();
+                    }
                 }
             }
         }
@@ -261,7 +279,7 @@ final class CorpusFuzzEngine {
     private long timeRequest(HttpRequest base, HttpParameter parameter, String value,
                              RequestBudget categoryBudget, ScanRun run, ActiveRequestGateway gateway,
                              String category, Set<RequestPolicy.Permission> permissions) {
-        if (categoryBudget.exhausted() || run.requestBudget().exhausted() || !run.isRunning()) return -1;
+        if (categoryBudget.exhausted() || run.requestBudget().exhausted() || !run.isActive()) return -1;
         sendMutated(base, parameter, value, categoryBudget, run, gateway, category, permissions);
         return lastTransportMillis.get();
     }

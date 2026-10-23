@@ -25,6 +25,17 @@ final class PersistedState {
     static final String K_FINDINGS = "reconhound.findings";
     static final String K_ASSETS = "reconhound.assets";
 
+    static final String K_RUN_HISTORY = "reconhound.scan-runs";
+
+    static RunHistoryCodec.Loaded loadRunHistory(PersistedObject store) {
+        return RunHistoryCodec.decode(store.getString(K_RUN_HISTORY));
+    }
+    static boolean saveRunHistory(PersistedObject store, List<RunRecord> runs) {
+        if (!loadRunHistory(store).writable()) return false;
+        store.setString(K_RUN_HISTORY, RunHistoryCodec.encode(runs)); return true;
+    }
+    static void resetRunHistory(PersistedObject store) { store.setString(K_RUN_HISTORY, RunHistoryCodec.encode(List.of())); }
+
     static final String K_ACTIVE_EVIDENCE = "reconhound.active-evidence";
 
     static ActiveEvidenceCodec.Loaded loadActiveEvidence(PersistedObject store) {
@@ -57,7 +68,7 @@ final class PersistedState {
         StringBuilder out = new StringBuilder();
         for (ReconModel.FindingRow r : rows) {
             if (out.length() > 0) out.append('\n');
-            out.append(join(r.severity(), r.provider(), r.rule(), r.location(), r.value(), r.url(), r.triage()));
+            out.append(join(r.severity(), r.provider(), r.rule(), r.location(), r.value(), r.url(), r.triage(), r.runId()));
         }
         store.setString(K_FINDINGS, out.toString());
     }
@@ -72,6 +83,11 @@ final class PersistedState {
                 out.add(new ReconModel.FindingRow(p[0], p[1], p[2], p[3], p[4], p[5]));
             } else if (p.length == 7) {
                 out.add(new ReconModel.FindingRow(p[0], p[1], p[2], p[3], p[4], p[5], p[6]));
+            } else if (p.length == 8) {
+                try {
+                    if (!p[7].isEmpty() && !java.util.UUID.fromString(p[7]).toString().equals(p[7])) continue;
+                    out.add(new ReconModel.FindingRow(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]));
+                } catch (IllegalArgumentException invalid) { /* Preserve no invented run provenance. */ }
             }
         }
         return out;

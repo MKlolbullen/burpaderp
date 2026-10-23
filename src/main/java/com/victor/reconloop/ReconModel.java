@@ -6,7 +6,11 @@ import java.util.List;
 
 final class ReconModel {
     record FindingRow(String severity, String provider, String rule, String location, String value, String url,
-                      String triage) {
+                      String triage, String runId) {
+        FindingRow(String severity, String provider, String rule, String location, String value, String url, String triage) {
+            this(severity, provider, rule, location, value, url, triage, "");
+        }
+        FindingRow withRun(String id) { return new FindingRow(severity, provider, rule, location, value, url, triage, id); }
         FindingRow(String severity, String provider, String rule, String location, String value, String url) {
             this(severity, provider, rule, location, value, url, "");
         }
@@ -30,7 +34,7 @@ final class ReconModel {
                             String estInput, String estOutput, String summary) {}
 
     static final class FindingTableModel extends AbstractTableModel {
-        private final String[] columns = {"Severity", "Provider", "Rule", "Location", "Value", "URL", "AI Triage"};
+        private final String[] columns = {"Severity", "Provider", "Rule", "Location", "Value", "URL", "AI Triage", "Run ID"};
         private final List<FindingRow> rows = new ArrayList<>();
         @Override public int getRowCount() { return rows.size(); }
         @Override public int getColumnCount() { return columns.length; }
@@ -40,11 +44,13 @@ final class ReconModel {
             return switch (col) {
                 case 0 -> r.severity(); case 1 -> r.provider(); case 2 -> r.rule();
                 case 3 -> r.location(); case 4 -> r.value(); case 5 -> r.url();
-                default -> r.triage().isBlank() ? "(not triaged)" : r.triage();
+                case 6 -> r.triage().isBlank() ? "(not triaged)" : r.triage();
+                default -> r.runId();
             };
         }
         void add(FindingRow row) { rows.add(0, row); fireTableRowsInserted(0, 0); }
         void clear() { int n = rows.size(); rows.clear(); if (n > 0) fireTableDataChanged(); }
+        FindingRow row(int index) { return rows.get(index); }
         List<FindingRow> snapshot() { return new ArrayList<>(rows); }
 
         /** Rows not yet triaged, oldest-added first (stable order for building a numbered batch prompt). */
@@ -69,7 +75,7 @@ final class ReconModel {
                 FindingRow r = rows.get(i);
                 String verdict = verdictsByKey.get(correlationKey(r));
                 if (verdict != null && !verdict.equals(r.triage())) {
-                    rows.set(i, new FindingRow(r.severity(), r.provider(), r.rule(), r.location(), r.value(), r.url(), verdict));
+                    rows.set(i, new FindingRow(r.severity(), r.provider(), r.rule(), r.location(), r.value(), r.url(), verdict, r.runId()));
                     changed = true;
                 }
             }
@@ -133,7 +139,7 @@ final class ReconModel {
     static final class ActiveTableModel extends AbstractTableModel {
         static final int MAX_ROWS = 500;
         static final int MAX_RETAINED_BYTES = 16 * 1024 * 1024;
-        private final String[] columns = {"Severity", "Class", "Parameter", "Observation", "Evidence", "URL", "Verification", "Capture"};
+        private final String[] columns = {"Severity", "Class", "Parameter", "Observation", "Evidence", "URL", "Verification", "Capture", "Run ID"};
         private final List<ActiveRow> rows = new ArrayList<>();
         @Override public int getRowCount() { return rows.size(); }
         @Override public int getColumnCount() { return columns.length; }
@@ -144,7 +150,8 @@ final class ReconModel {
                 case 0 -> r.severity(); case 1 -> r.testClass(); case 2 -> r.parameter();
                 case 3 -> r.status(); case 4 -> r.evidence(); case 5 -> r.url();
                 case 6 -> r.verificationState().displayLabel();
-                default -> r.evidenceRecord().complete() ? "complete" : "partial / metadata";
+                case 7 -> r.evidenceRecord().complete() ? "complete" : "partial / metadata";
+                default -> r.evidenceRecord().runId();
             };
         }
         void add(ActiveRow row) {

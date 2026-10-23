@@ -59,6 +59,8 @@ final class RequestPlan {
         return Set.copyOf(required);
     }
 
+    String requestHash() { return binding == null ? "" : java.util.HexFormat.of().formatHex(binding.digest()); }
+
     RequestPolicy.PlannedRequest policyRequest() { return policyRequest; }
 
     boolean matches(HttpRequest request) {

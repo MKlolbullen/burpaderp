@@ -1,0 +1,152 @@
+package com.victor.reconloop;
+
+import org.junit.Test;
+import javax.swing.SwingUtilities;
+import java.util.*;
+import static org.junit.Assert.*;
+
+public class RunRetryIntegrationTest {
+    private static final String URL = "https://api.example.test/search?q=a";
+
+    @Test public void failedNativeProbeRetriesInAChildRunUsingCurrentSessionAndCurrentQuotas() throws Exception {
+        try (var fake = new FakeMontoya()) {
+            var executor = new ManualExecutor(); var controller = ReconControllerRunLifecycleTest.controller(fake, executor);
+            try {
+                var old = fake.request(URL).withHeader("Authorization", "Bearer old-session");
+                fake.siteMap.add(FakeMontoya.pair(old, FakeMontoya.response(200, "", Map.of())));
+                fake.onSend = ignored -> { throw new IllegalStateException("transport unavailable"); };
+                controller.setActiveTestsEnabled(true); controller.setActiveRequestBudget(2);
+                controller.runActiveTests(); executor.runAll();
+                var first = controller.runHistory().snapshot().getFirst();
+                assertEquals(RunStatus.COMPLETED, first.status()); assertEquals(2, first.metrics().errors());
+                var eligible = controller.runHistory().retries(first.id()); assertFalse(eligible.isEmpty());
+                fake.siteMap.clear(); var current = fake.request(URL).withHeader("Authorization", "Bearer refreshed-session");
+                fake.siteMap.add(FakeMontoya.pair(current, FakeMontoya.response(200, "", Map.of())));
+                fake.onSend = ignored -> {}; int before = fake.sent.size();
+                controller.setActiveRequestBudget(1); assertTrue(controller.retryFailedProbes(first.id())); executor.runAll();
+                var child = controller.runHistory().snapshot().stream().filter(r -> r.parentId().equals(first.id())).findFirst().orElseThrow();
+                assertNotEquals(first.id(), child.id()); assertEquals(1, child.metrics().admitted()); assertEquals(1, child.limits().global());
+                assertEquals(Set.of("api.example.test"), child.scope().domains()); assertEquals(before + 1, fake.sent.size());
+                assertEquals("Bearer refreshed-session", fake.sent.getLast().headerValue("Authorization"));
+                Set<String> eligibleIds = new HashSet<>(); eligible.forEach(p -> eligibleIds.add(p.probe()));
+                assertTrue(child.audit().stream().filter(e -> e.kind().equals("REQUEST")).allMatch(e -> eligibleIds.contains(e.probe())));
+            } finally { controller.shutdown(); }
+        }
+    }
+
+    @Test public void retryDoesNotSendWhenScopeIsRevokedAndQueuedRetryCannotSurvivePermissionChanges() throws Exception {
+        try (var fake = new FakeMontoya()) {
+            var executor = new ManualExecutor(); var controller = ReconControllerRunLifecycleTest.controller(fake, executor);
+            try {
+                fake.siteMap.add(FakeMontoya.pair(fake.request(URL), FakeMontoya.response(200, "", Map.of())));
+                fake.onSend = ignored -> { throw new IllegalStateException("offline"); };
+                controller.setActiveTestsEnabled(true); controller.setActiveRequestBudget(1);
+                controller.runActiveTests(); executor.runAll(); var parent = controller.runHistory().snapshot().getFirst();
+                int sent = fake.sent.size(); fake.inScope = ignored -> false;
+                assertTrue(controller.retryFailedProbes(parent.id())); executor.runAll(); assertEquals(sent, fake.sent.size());
+                fake.inScope = ignored -> true; assertTrue(controller.retryFailedProbes(parent.id()));
+                controller.setOastActiveRequests(true); controller.setOastActiveRequests(false);
+                executor.runAll(); assertEquals(sent, fake.sent.size());
+                controller.setActiveTestsEnabled(false); assertFalse(controller.retryFailedProbes(parent.id()));
+            } finally { controller.shutdown(); }
+        }
+    }
+
+    @Test public void restoredHistoryDoesNotSendOrRestoreAuthorizationAndCanBeRetriedExplicitly() throws Exception {
+        try (var fake = new FakeMontoya()) {
+            var executor = new ManualExecutor(); var first = ReconControllerRunLifecycleTest.controller(fake, executor);
+            fake.siteMap.add(FakeMontoya.pair(fake.request(URL), FakeMontoya.response(200, "", Map.of())));
+            fake.onSend = ignored -> { throw new IllegalStateException("offline"); };
+            first.setActiveTestsEnabled(true); first.setActiveRequestBudget(1); first.runActiveTests(); executor.runAll();
+            var record = first.runHistory().snapshot().getFirst(); first.shutdown();
+            assertTrue(fake.persisted.containsKey(PersistedState.K_RUN_HISTORY)); int sent = fake.sent.size();
+            var restoredExecutor = new ManualExecutor(); var restored = ReconControllerRunLifecycleTest.controller(fake, restoredExecutor);
+            try {
+                SwingUtilities.invokeAndWait(() -> {}); restoredExecutor.runAll();
+                assertEquals(sent, fake.sent.size()); assertEquals(record.id(), restored.runHistory().snapshot().getFirst().id());
+                assertFalse(restored.controlRun(record.id(), "resume")); assertFalse(restored.retryFailedProbes(record.id()));
+                restored.setActiveTestsEnabled(true); restored.setActiveRequestBudget(1);
+                fake.onSend = ignored -> {}; assertTrue(restored.retryFailedProbes(record.id())); restoredExecutor.runAll();
+                assertEquals(sent + 1, fake.sent.size()); assertTrue(restored.runHistory().snapshot().stream().anyMatch(r -> r.parentId().equals(record.id())));
+            } finally { restored.shutdown(); }
+        }
+    }
+
+    @Test public void nativeRetrySelectsBodyPointWhenQueryUsesTheSameName() {
+        try (var fake = new FakeMontoya()) {
+            var base = fake.request(URL).withAddedParameters(FakeMontoya.parameter("q", "body-original", burp.api.montoya.http.message.params.HttpParameterType.BODY));
+            var points = InsertionPoint.enumerate(base).stream().filter(p -> p.kind() == InsertionPoint.Kind.PARAM).toList();
+            var body = points.stream().filter(p -> p.paramType() == burp.api.montoya.http.message.params.HttpParameterType.BODY).findFirst().orElseThrow();
+            var query = points.stream().filter(p -> p.paramType() == burp.api.montoya.http.message.params.HttpParameterType.URL).findFirst().orElseThrow();
+            assertEquals(query.label(), body.label()); assertNotEquals(RunRecord.pointIdentity(query), RunRecord.pointIdentity(body));
+            String target = RunRecord.target(base.method(), base.url()); String parameter = RunRecord.pointIdentity(body);
+            var probe = new RunRecord.Probe(RunRecord.probeKey("NATIVE_ACTIVE", "reflected-xss", target, parameter, ""), "NATIVE_ACTIVE", "reflected-xss", target, parameter, "", 0, RunRecord.ProbeStatus.FAILED);
+            var plan = RunRetry.plan(UUID.randomUUID().toString(), List.of(probe), List.of(base), ignored -> true);
+            var run = ScanRun.begin(ScanProfile.ACTIVE_SAFE, plan.scope(), 5);
+            RunRetry.execute(plan, run, new ActiveRequestGateway(RequestPolicy.safeDefault(ignored -> true), fake.transport()), new ActiveTestEngine(fake.api, 0),
+                    new CorpusFuzzEngine(fake.api, new PayloadLibrary(), 0), (f, r) -> {});
+            assertEquals(1, fake.sent.size());
+            assertEquals("a", fake.sent.getFirst().parameters().stream().filter(p -> p.type() == burp.api.montoya.http.message.params.HttpParameterType.URL).findFirst().orElseThrow().value());
+            assertNotEquals("body-original", fake.sent.getFirst().parameters().stream().filter(p -> p.type() == burp.api.montoya.http.message.params.HttpParameterType.BODY).findFirst().orElseThrow().value());
+        }
+    }
+
+    @Test public void blindXssRetryStillNeedsBothGrantsAndGeneratesFreshCallbacks() {
+        try (var fake = new FakeMontoya()) {
+            var base = fake.request(URL); String target = RunRecord.target(base.method(), base.url());
+            String parameter = RunRecord.pointIdentity(InsertionPoint.enumerate(base).getFirst());
+            var probe = new RunRecord.Probe(RunRecord.probeKey("NATIVE_ACTIVE", "blind-xss", target, parameter, ""),
+                    "NATIVE_ACTIVE", "blind-xss", target, parameter, "", 0, RunRecord.ProbeStatus.INCONCLUSIVE);
+            String parent = UUID.randomUUID().toString();
+            var plan = RunRetry.plan(parent, List.of(probe), List.of(base), ignored -> true);
+            var active = new ActiveTestEngine(fake.api, 0); var correlations = new ArrayList<String>();
+            active.setCollaborator(NativeEvidenceIntegrationTest.collaborator(correlations));
+            var corpus = new CorpusFuzzEngine(fake.api, new PayloadLibrary(), 0);
+            var denied = ScanRun.begin(ScanProfile.ACTIVE_SAFE, plan.scope(), 2);
+            RunRetry.execute(plan, denied, new ActiveRequestGateway(new RequestPolicy(ignored -> true, Set.of(RequestPolicy.Permission.OAST)), fake.transport()), active, corpus, (f, r) -> {});
+            assertTrue(fake.sent.isEmpty()); assertTrue(fake.dnsLookups.isEmpty()); assertEquals(0, denied.requestBudget().used());
+            var allowed = ScanRun.begin(ScanProfile.ACTIVE_SAFE, plan.scope(), 2); allowed.parent(parent);
+            var rows = new ArrayList<ActiveTestEngine.ActiveFinding>();
+            RunRetry.execute(plan, allowed, new ActiveRequestGateway(new RequestPolicy(ignored -> true,
+                    Set.of(RequestPolicy.Permission.OAST, RequestPolicy.Permission.PERSISTENT_PAYLOAD)), fake.transport()), active, corpus, (f, r) -> rows.add(f));
+            assertEquals(1, fake.sent.size()); assertEquals(2, correlations.size()); assertNotEquals(correlations.getFirst(), correlations.getLast());
+            assertTrue(rows.stream().allMatch(f -> f.evidenceRecord().runId().equals(allowed.id().toString())));
+            assertEquals(RunRecord.ProbeStatus.INCONCLUSIVE, allowed.snapshot().probes().getFirst().status());
+        }
+    }
+
+    @Test public void crawlPerRunPauseKeepsIdentityAndCancelDoesNotRefillFutureCrawls() {
+        try (var fake = new FakeMontoya()) {
+            var controller = ReconControllerRunLifecycleTest.controller(fake, new ManualExecutor());
+            try {
+                controller.setMaxRequests(3);
+                var uri = java.net.URI.create(URL);
+                var item = new ReconController.QueueItem(uri, uri, "run controls");
+                controller.crawlOne(item); var run = controller.currentCrawlRun();
+                assertTrue(controller.controlRun(run.id().toString(), "pause")); assertEquals(RunStatus.PAUSED, run.status());
+                assertTrue(controller.controlRun(run.id().toString(), "resume")); controller.crawlOne(item);
+                assertSame(run, controller.currentCrawlRun()); assertEquals(2, run.requestBudget().used());
+                assertTrue(controller.controlRun(run.id().toString(), "cancel")); assertNull(controller.currentCrawlRun());
+                controller.crawlOne(item); controller.crawlOne(item);
+                assertNotEquals(run.id(), controller.currentCrawlRun().id()); assertEquals(1, controller.currentCrawlRun().requestBudget().limit());
+                assertEquals(3, fake.sent.size());
+            } finally { controller.shutdown(); }
+        }
+    }
+
+    @Test public void corpusRetryRestrictsCategoryParameterAndEncodingAndKeepsRiskGates() {
+        try (var fake = new FakeMontoya()) {
+            var base = fake.request(URL); var parent = ScanRun.begin(ScanProfile.ACTIVE_SAFE, ScopeSnapshot.forTargetUrl(URL), 1);
+            var target = RunRecord.target(base.method(), base.url());
+            String parameter = FindingEvidence.digest(base.parameters().getFirst().type() + "\0" + base.parameters().getFirst().name());
+            var probe = new RunRecord.Probe(RunRecord.probeKey("CORPUS", "corpus-fuzz:sqli", target, parameter, "RAW"), "CORPUS", "corpus-fuzz:sqli", target, parameter, "RAW", 1, RunRecord.ProbeStatus.FAILED);
+            parent.probe(probe); parent.complete();
+            var plan = RunRetry.plan(parent.id().toString(), List.of(probe), List.of(base), ignored -> true);
+            var child = ScanRun.begin(ScanProfile.ACTIVE_SAFE, plan.scope(), 3); child.parent(parent.id().toString());
+            RunRetry.execute(plan, child, new ActiveRequestGateway(RequestPolicy.safeDefault(ignored -> true), fake.transport()),
+                    new ActiveTestEngine(fake.api, 0), new CorpusFuzzEngine(fake.api, new PayloadLibrary(), 0), (f, r) -> {});
+            assertEquals(1, fake.sent.size()); assertEquals(1, child.probeRequests("corpus-fuzz:sqli"));
+            assertEquals(1, child.snapshot().probes().size()); assertEquals("RAW", child.snapshot().probes().getFirst().encoding());
+        }
+    }
+}

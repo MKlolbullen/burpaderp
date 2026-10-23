@@ -119,9 +119,11 @@ final class ReconController implements HttpHandler {
 
     private volatile CollaboratorClient collaborator;
 
-    private final NativeRunRegistry activeRuns = new NativeRunRegistry(false);
-    private final NativeRunRegistry crawlRuns = new NativeRunRegistry(true);
-    private final NativeRunRegistry domainRuns = new NativeRunRegistry(true);
+    private final ThreadLocal<ScanRun> observationRun = new ThreadLocal<>();
+    private final RunHistory runHistory = new RunHistory();
+    private final NativeRunRegistry activeRuns = new NativeRunRegistry(false, runHistory::register);
+    private final NativeRunRegistry crawlRuns = new NativeRunRegistry(true, runHistory::register);
+    private final NativeRunRegistry domainRuns = new NativeRunRegistry(true, runHistory::register);
     private ScanRun crawlRun; // guarded by crawlRuns
     private int previousCrawlUsage; // retired sessions; pause/resume never refills the crawl cap
     private final ActiveRequestGateway.Sender targetTransport;
@@ -212,6 +214,7 @@ final class ReconController implements HttpHandler {
         } catch (Exception e) {
             api.logging().logToError("Persisted-state restore skipped", e);
         }
+        runHistory.onChange(this::scheduleRunSave);
         this.sqlmapClient = new SqlmapClient(null);
         if (startBackgroundWorkers) {
             worker.submit(this::workerLoop);
@@ -225,10 +228,10 @@ final class ReconController implements HttpHandler {
     private final java.util.concurrent.atomic.AtomicLong snapshotSequence = new java.util.concurrent.atomic.AtomicLong();
     private long lastSavedSnapshot;
     private record StateSnapshot(long generation, long sequence, List<ReconModel.FindingRow> findings,
-                                 List<ReconModel.AssetRow> assets, List<ReconModel.ActiveRow> active) {}
+                                 List<ReconModel.AssetRow> assets, List<ReconModel.ActiveRow> active, List<RunRecord> runs) {}
 
     private StateSnapshot snapshot(long generation) {
-        return new StateSnapshot(generation, snapshotSequence.incrementAndGet(), findingModel.snapshot(), assetModel.snapshot(), activeModel.snapshot());
+        return new StateSnapshot(generation, snapshotSequence.incrementAndGet(), findingModel.snapshot(), assetModel.snapshot(), activeModel.snapshot(), runHistory.snapshot());
     }
 
     private void writeSnapshot(StateSnapshot snapshot) {
@@ -242,6 +245,8 @@ final class ReconController implements HttpHandler {
             PersistedState.saveAssets(store, snapshot.assets());
             if (!PersistedState.saveActiveEvidence(store, snapshot.active()))
                 api.logging().logToOutput("[Recon Hound] Active evidence snapshot preserved: unsupported or corrupt format.");
+            if (!PersistedState.saveRunHistory(store, snapshot.runs()))
+                api.logging().logToOutput("[Recon Hound] Scan-run history preserved: unsupported or corrupt format.");
             lastSavedSnapshot = snapshot.sequence();
         }
     }
@@ -249,6 +254,9 @@ final class ReconController implements HttpHandler {
     /** Restores dedupe keys, asset inventory, and Findings/Hosts rows from the Burp project. */
     private void restoreState() {
         if (store == null) return;
+        var runs = PersistedState.loadRunHistory(store);
+        runHistory.restore(runs.runs());
+        if (!runs.writable()) api.logging().logToOutput("[Recon Hound] Scan-run history unsupported/corrupt; preserved without overwrite.");
         reporter.restore(PersistedState.loadStrings(store, PersistedState.K_FILED));
         assetHosts.addAll(PersistedState.loadStrings(store, PersistedState.K_HOSTS));
         assetIps.addAll(PersistedState.loadStrings(store, PersistedState.K_IPS));
@@ -266,6 +274,14 @@ final class ReconController implements HttpHandler {
         });
         api.logging().logToOutput("[Recon Hound] Restored " + findings.size() + " finding(s) and "
                 + (assetHosts.size() + assetIps.size()) + " asset(s) from the Burp project.");
+    }
+
+    private final AtomicBoolean runSavePending = new AtomicBoolean();
+    private void scheduleRunSave() {
+        if (!running.get() || store == null || !runSavePending.compareAndSet(false, true)) return;
+        try {
+            oobPoller.schedule(() -> { runSavePending.set(false); saveState(); }, 250, TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.RejectedExecutionException unloading) { runSavePending.set(false); }
     }
 
     /** Only copy model references on the EDT; encoding/writes use the existing background saver. */
@@ -526,9 +542,13 @@ final class ReconController implements HttpHandler {
         }
         assetWorker.submit(() -> {
             ScanRun run = ScanRun.begin(ScanProfile.EXTERNAL_TOOL, ScopeSnapshot.empty(), 0);
+            runHistory.register(run);
             try (Reader reader = Files.newBufferedReader(path)) {
                 SidecarEventImporter.ImportResult result = SidecarEventImporter.importJsonl(reader,
-                        this::sidecarEventInScope, event -> materializeSidecarEvent(event, run.id()));
+                        this::sidecarEventInScope, event -> {
+                            observationRun.set(run);
+                            try { materializeSidecarEvent(event, run.id()); } finally { observationRun.remove(); }
+                        });
                 run.complete();
                 String summary = "Imported " + result.accepted() + " typed sidecar record(s); rejected "
                         + result.rejected() + ". Run " + run.id() + ".";
@@ -675,7 +695,7 @@ final class ReconController implements HttpHandler {
 
             boolean allowMutating = mutatingActiveRequests.get();
             ScanProfile profile = allowMutating ? ScanProfile.ACTIVE_MUTATION : ScanProfile.ACTIVE_SAFE;
-            ScanRun run = activeRuns.begin(ticket, profile, ScopeSnapshot.empty(), activeRequestLimits());
+            ScanRun run = activeRuns.begin(ticket, profile, ScopeSnapshot.forTargets(targets.stream().map(HttpRequest::url).toList()), activeRequestLimits());
             ActiveRequestGateway gateway = newTargetGateway(allowMutating);
             api.logging().logToOutput("[Recon Hound] Active testing " + targets.size()
                     + " in-scope parameterised request(s) with quotas global/host/endpoint/probe="
@@ -701,13 +721,46 @@ final class ReconController implements HttpHandler {
                     publishStatus();
                 }
             } finally {
-                if (run.isRunning()) run.complete();
+                if (run.isActive()) run.complete();
             }
             api.logging().logToOutput("[Recon Hound] Active testing pass complete: "
                     + run.requestBudget().used() + "/" + run.requestBudget().limit()
                     + " request(s), status=" + run.status() + ", run=" + run.id()
                     + ". OOB results may arrive asynchronously.");
         });
+    }
+
+    RunHistory runHistory() { return runHistory; }
+
+    boolean controlRun(String id, String action) {
+        boolean changed = runHistory.control(id, action);
+        if (changed && "cancel".equals(action)) synchronized (crawlRuns) {
+            if (crawlRun != null && crawlRun.id().toString().equals(id)) {
+                previousCrawlUsage += crawlRun.requestBudget().used(); sentRequests.set(previousCrawlUsage);
+                crawlRun = null; queue.clear();
+            }
+        }
+        if (changed) saveState();
+        return changed;
+    }
+
+    boolean retryFailedProbes(String parentId) {
+        if (!activeTestsEnabled.get() || runHistory.retries(parentId).isEmpty()) return false;
+        submitNativeActive(ticket -> {
+            var plan = RunRetry.plan(parentId, runHistory.retries(parentId),
+                    api.siteMap().requestResponses().stream().map(HttpRequestResponse::request).filter(Objects::nonNull).toList(), api.scope()::isInScope);
+            if (plan.targets().isEmpty()) {
+                api.logging().logToOutput("[Recon Hound] No retry targets remain in the current in-scope site map."); return;
+            }
+            if (oastActiveRequests.get()) ensureCollaborator();
+            boolean mutating = mutatingActiveRequests.get();
+            var run = activeRuns.begin(ticket, mutating ? ScanProfile.ACTIVE_MUTATION : ScanProfile.ACTIVE_SAFE, plan.scope(), activeRequestLimits());
+            run.parent(parentId);
+            RunRetry.execute(plan, run, newTargetGateway(mutating), activeTestEngine, corpusFuzzEngine,
+                    (finding, base) -> { if (activeRuns.isCurrent(ticket)) reportActiveFinding(finding, base); });
+            api.logging().logToOutput("[Recon Hound] Retry run=" + run.id() + " parent=" + parentId + " unavailable probes=" + plan.unavailable());
+        });
+        return true;
     }
 
     /**
@@ -727,7 +780,7 @@ final class ReconController implements HttpHandler {
 
             boolean allowMutating = mutatingActiveRequests.get();
             ScanProfile profile = allowMutating ? ScanProfile.ACTIVE_MUTATION : ScanProfile.ACTIVE_SAFE;
-            ScanRun run = activeRuns.begin(ticket, profile, ScopeSnapshot.empty(), activeRequestLimits());
+            ScanRun run = activeRuns.begin(ticket, profile, ScopeSnapshot.forTargets(targets.stream().map(HttpRequest::url).toList()), activeRequestLimits());
             ActiveRequestGateway gateway = newTargetGateway(allowMutating);
             api.logging().logToOutput("[Recon Hound] Corpus-fuzzing " + targets.size()
                     + " in-scope parameterised request(s) (" + payloadLibrary.totalPayloads()
@@ -762,7 +815,7 @@ final class ReconController implements HttpHandler {
                     publishStatus();
                 }
             } finally {
-                if (run.isRunning()) run.complete();
+                if (run.isActive()) run.complete();
             }
             api.logging().logToOutput("[Recon Hound] Corpus fuzz pass complete: "
                     + run.requestBudget().used() + "/" + run.requestBudget().limit()
@@ -790,7 +843,7 @@ final class ReconController implements HttpHandler {
             List<JwtTarget> targets = jwtTargets();
             api.logging().logToOutput("[Recon Hound] JWT alg:none test on " + targets.size() + " JWT-bearing request(s).");
 
-            ScanRun run = activeRuns.begin(ticket, ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestLimits());
+            ScanRun run = activeRuns.begin(ticket, ScanProfile.ACTIVE_SAFE, ScopeSnapshot.forTargets(targets.stream().map(t -> t.request().url()).toList()), activeRequestLimits());
             ActiveRequestGateway gateway = newSafeTargetGateway();
             for (JwtTarget target : targets) {
                 if (!activeTestsEnabled.get()) { run.cancel(); break; }
@@ -907,7 +960,7 @@ final class ReconController implements HttpHandler {
                     api.logging().logToError("JWT attack failed for " + target.request().url(), e);
                 }
             }
-            if (run.isRunning()) run.complete();
+            if (run.isActive()) run.complete();
             api.logging().logToOutput("[Recon Hound] JWT alg:none test complete (" + run.requestBudget().used()
                     + " request(s), run " + run.id() + ").");
             publishStatus();
@@ -927,7 +980,7 @@ final class ReconController implements HttpHandler {
         submitNativeActive(ticket -> {
             List<String> hosts = assetHosts.stream().sorted().toList();
             api.logging().logToOutput("[Recon Hound] Subdomain-takeover check on " + hosts.size() + " enumerated host(s).");
-            ScanRun run = activeRuns.begin(ticket, ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestLimits());
+            ScanRun run = activeRuns.begin(ticket, ScanProfile.ACTIVE_SAFE, new ScopeSnapshot(Set.copyOf(hosts), Set.of()), activeRequestLimits());
             ActiveRequestGateway gateway = newSafeTargetGateway();
             try {
                 for (String host : hosts) {
@@ -977,7 +1030,7 @@ final class ReconController implements HttpHandler {
                     }
                 }
             } finally {
-                if (run.isRunning()) run.complete();
+                if (run.isActive()) run.complete();
             }
             api.logging().logToOutput("[Recon Hound] Subdomain-takeover check complete (" + run.requestBudget().used()
                     + " request(s), run " + run.id() + ").");
@@ -1020,7 +1073,7 @@ final class ReconController implements HttpHandler {
 
             api.logging().logToOutput("[Recon Hound] Access-control replay of " + targets.size()
                     + " safe (GET/HEAD/OPTIONS) in-scope request(s) under the alternate identity.");
-            ScanRun run = activeRuns.begin(ticket, ScanProfile.ACTIVE_SAFE, ScopeSnapshot.empty(), activeRequestLimits());
+            ScanRun run = activeRuns.begin(ticket, ScanProfile.ACTIVE_SAFE, ScopeSnapshot.forTargets(targets.stream().map(t -> t.request().url()).toList()), activeRequestLimits());
             ActiveRequestGateway gateway = newSafeTargetGateway();
 
             for (HttpRequestResponse original : targets) {
@@ -1079,7 +1132,7 @@ final class ReconController implements HttpHandler {
                     api.logging().logToError("Access-control replay failed", e);
                 }
             }
-            if (run.isRunning()) run.complete();
+            if (run.isActive()) run.complete();
             api.logging().logToOutput("[Recon Hound] Access-control test complete ("
                     + run.requestBudget().used() + " request(s), run " + run.id() + ").");
         });
@@ -1124,6 +1177,7 @@ final class ReconController implements HttpHandler {
         stateGeneration.incrementAndGet();
         activeRuns.invalidate();
         domainRuns.invalidate();
+        runHistory.clear();
         synchronized (crawlRuns) {
             crawlRuns.invalidate();
             crawlRun = null;
@@ -1151,7 +1205,7 @@ final class ReconController implements HttpHandler {
             parameterModel.clear();
             reflectionModel.clear();
             activeModel.clear();
-            if (store != null) synchronized (stateWriteLock) { PersistedState.resetActiveEvidence(store); }
+            if (store != null) synchronized (stateWriteLock) { PersistedState.resetActiveEvidence(store); PersistedState.resetRunHistory(store); }
             assetModel.clear();
         });
         saveState();
@@ -1302,14 +1356,14 @@ final class ReconController implements HttpHandler {
             if (!running.get() || !crawlEnabled.get()) return;
             if (crawlRun == null) {
                 int remaining = Math.max(0, maxRequests.get() - previousCrawlUsage);
-                crawlRun = crawlRuns.begin(crawlRuns.ticket(), ScanProfile.DISCOVERY, ScopeSnapshot.empty(),
+                crawlRun = crawlRuns.begin(crawlRuns.ticket(), ScanProfile.DISCOVERY, ScopeSnapshot.forTargets(java.util.stream.Stream.concat(java.util.stream.Stream.of(item.uri().toString()), queue.stream().map(q -> q.uri().toString())).toList()),
                         ScanRun.RequestLimits.globalOnly(remaining));
             }
             run = crawlRun;
         }
         ActiveRequestGateway gateway = newSafeTargetGateway();
         while (current != null && hop <= maxRedirects.get() && running.get()
-                && crawlEnabled.get() && run.isRunning()) {
+                && crawlEnabled.get() && run.isActive()) {
             if (sentRequests.get() >= maxRequests.get()) return;
             if (!redirectSeen.add(current.toString())) return;
 
@@ -1326,10 +1380,11 @@ final class ReconController implements HttpHandler {
             api.logging().logToOutput("[Recon Hound] GET " + current + (hop > 0 ? " [redirect hop " + hop + "]" : ""));
 
             HttpRequestResponse rr = result.response();
-            if (!run.isRunning() || rr == null || !rr.hasResponse() || rr.response() == null) return;
+            if (!run.isActive() || rr == null || !rr.hasResponse() || rr.response() == null) return;
 
             api.siteMap().add(rr);
-            processActivePair(rr, hop);
+            observationRun.set(run);
+            try { processActivePair(rr, hop); } finally { observationRun.remove(); }
 
             HttpResponse response = rr.response();
             short code = response.statusCode();
@@ -1351,8 +1406,12 @@ final class ReconController implements HttpHandler {
             if (!activeRuns.isCurrent(ticket)) return;
             try {
                 work.accept(ticket);
+            } catch (RuntimeException failure) {
+                activeRuns.fail(ticket);
+                throw failure;
             } finally {
                 activeRuns.finish(ticket);
+                saveState();
             }
         });
     }
@@ -1478,8 +1537,8 @@ final class ReconController implements HttpHandler {
             String url = request == null ? "" : request.url();
             String dedupe = "hygiene\0" + note.name() + "\0" + url;
             if (!issueDedupe.add(dedupe)) continue;
-            SwingUtilities.invokeLater(() -> findingModel.add(new ReconModel.FindingRow(
-                    note.severity(), "hygiene", note.name(), "response", note.detail(), url)));
+            addFindingRow(new ReconModel.FindingRow(
+                    note.severity(), "hygiene", note.name(), "response", note.detail(), url));
             addToSiteMap(buildHygieneIssue(note, url, pair));
         }
     }
@@ -2741,7 +2800,7 @@ final class ReconController implements HttpHandler {
                 run.fail(e.getMessage());
                 api.logging().logToError("GraphQL introspection failed for " + target, e);
             } finally {
-                if (run.isRunning()) run.complete();
+                if (run.isActive()) run.complete();
             }
         });
     }
@@ -2823,7 +2882,7 @@ final class ReconController implements HttpHandler {
                 run.fail(e.getMessage());
                 api.logging().logToError("GraphQL fuzzing failed for " + target, e);
             } finally {
-                if (run.isRunning()) run.complete();
+                if (run.isActive()) run.complete();
             }
             publishStatus();
         });
@@ -3039,13 +3098,13 @@ final class ReconController implements HttpHandler {
             for (String ip : RegexHound.extractIps(text)) recordIp(ip, location);
         }
         for (RegexHound.Finding finding : regexHound.scan(text, location, url, includeInfoFindings.get())) {
-            String dedupe = "hound\0" + finding.rule().id() + "\0" + finding.value() + "\0" + url;
+            String dedupe = "hound\0" + observationRunId() + "\0" + finding.rule().id() + "\0" + finding.value() + "\0" + url;
             if (!issueDedupe.add(dedupe)) continue;
 
-            SwingUtilities.invokeLater(() -> findingModel.add(new ReconModel.FindingRow(
+            addFindingRow(new ReconModel.FindingRow(
                     finding.rule().severity().name(), finding.rule().provider(), finding.rule().name(),
                     location, RegexHound.redact(finding.value()), url
-            )));
+            ));
 
             addAuditIssue(finding, pair);
         }
@@ -3053,7 +3112,7 @@ final class ReconController implements HttpHandler {
         if (scanGfPatterns.get()) {
             for (GfPatternLoader.GfMatch match : gfPatterns.scan(text)) {
                 if (!includeGfMatch(match)) continue;
-                String dedupe = "gf\0" + match.pack() + "\0" + match.ruleId() + "\0" + match.value() + "\0" + url;
+                String dedupe = "gf\0" + observationRunId() + "\0" + match.pack() + "\0" + match.ruleId() + "\0" + match.value() + "\0" + url;
                 if (!issueDedupe.add(dedupe)) continue;
                 addSyntheticFinding(match.severity(), "gf:" + match.provider(), "gf:" + match.ruleId(),
                         location, match.displayValue(), match.displaySourceUrl(url));
@@ -3067,7 +3126,7 @@ final class ReconController implements HttpHandler {
         VerificationState state = finding.verificationState() == null
                 ? VerificationState.SIGNAL : finding.verificationState();
         String status = state.displayLabel();
-        String dedupe = "active\0" + finding.testClass() + "\0" + finding.parameter()
+        String dedupe = "active\0" + (finding.evidenceRecord() == null ? "" : finding.evidenceRecord().runId()) + "\0" + finding.testClass() + "\0" + finding.parameter()
                 + "\0" + finding.url() + "\0" + finding.evidence();
         if (!activeDedupe.add(dedupe)) return;
 
@@ -3116,10 +3175,11 @@ final class ReconController implements HttpHandler {
         if (!running.get()) return;
         if (Set.of("NATIVE_ACTIVE", "CORPUS", "NATIVE_HELPER").contains(evidence.source())
                 && !activeRuns.ownsCurrentRun(evidence.runId())) return;
+        ReconModel.ActiveRow row = new ReconModel.ActiveRow(severity, testClass, parameter, status, summary, url, evidence);
+        runHistory.finding(row);
         long generation = stateGeneration.get();
         SwingUtilities.invokeLater(() -> {
-            if (generation == stateGeneration.get())
-                activeModel.add(new ReconModel.ActiveRow(severity, testClass, parameter, status, summary, url, evidence));
+            if (generation == stateGeneration.get()) activeModel.add(row);
         });
     }
 
@@ -3150,6 +3210,7 @@ final class ReconController implements HttpHandler {
                 SwingUtilities.invokeLater(() -> {
                     if (!running.get() || generation != stateGeneration.get() || oobDedupe.contains(event.fingerprint())) return;
                     ReconModel.ActiveRow row = OobEvidence.link(event, activeModel.snapshot());
+                    runHistory.finding(row);
                     activeModel.add(row); // Stable event ID upgrades a previously unlinked observation in place.
                     if (row.verificationState() != VerificationState.CONFIRMED) return;
                     oobDedupe.add(event.fingerprint());
@@ -3219,13 +3280,21 @@ final class ReconController implements HttpHandler {
         return h.matches("\\d{1,3}(?:\\.\\d{1,3}){3}") || h.contains(":");
     }
 
+    private String observationRunId() { ScanRun run = observationRun.get(); return run == null ? "" : run.id().toString(); }
+    private void addFindingRow(ReconModel.FindingRow observation) {
+        var row = observation.withRun(observationRunId());
+        runHistory.finding(row);
+        long generation = stateGeneration.get();
+        SwingUtilities.invokeLater(() -> { if (generation == stateGeneration.get()) findingModel.add(row); });
+    }
+
     private void addSyntheticFinding(String severity, String provider, String rule, String location, String value, String url) {
-        String dedupe = "synthetic\0" + provider + "\0" + rule + "\0" + value + "\0" + url;
+        String dedupe = "synthetic\0" + observationRunId() + "\0" + provider + "\0" + rule + "\0" + value + "\0" + url;
         if (!issueDedupe.add(dedupe)) return;
         String safe = value == null ? "" : (value.length() > 220 ? value.substring(0, 217) + "..." : value);
-        SwingUtilities.invokeLater(() -> findingModel.add(new ReconModel.FindingRow(
+        addFindingRow(new ReconModel.FindingRow(
                 severity, provider, rule, location, safe, url
-        )));
+        ));
     }
 
     private boolean includeGfMatch(GfPatternLoader.GfMatch match) {
