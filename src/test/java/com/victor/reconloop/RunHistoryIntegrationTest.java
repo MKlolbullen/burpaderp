@@ -143,6 +143,20 @@ public class RunHistoryIntegrationTest {
         assertEquals(RunHistoryCodec.Status.CORRUPT, RunHistoryCodec.decode(forged).status());
     }
 
+    @Test public void unfinishedProbeRestoresAsInconclusiveWithoutRevivingTheRun() {
+        var run = run(2); String target = RunRecord.target("GET", URL), parameter = FindingEvidence.digest("point");
+        String key = RunRecord.probeKey("NATIVE_ACTIVE", "ssti", target, parameter, "");
+        var pending = new RunRecord.Probe(key, "NATIVE_ACTIVE", "ssti", target, parameter, "", 0, RunRecord.ProbeStatus.IN_PROGRESS);
+        run.probeStarted(pending);
+        assertEquals(RunRecord.ProbeStatus.IN_PROGRESS, run.snapshot().probes().getFirst().status());
+        var restored = new RunHistory(); restored.restore(RunHistoryCodec.decode(RunHistoryCodec.encode(List.of(run.snapshot()))).runs());
+        assertEquals(RunStatus.INTERRUPTED, restored.get(run.id().toString()).status());
+        assertEquals(RunRecord.ProbeStatus.INCONCLUSIVE, restored.retries(run.id().toString()).getFirst().status());
+        assertFalse(restored.control(run.id().toString(), "resume"));
+        run.probe(new RunRecord.Probe(key, "NATIVE_ACTIVE", "ssti", target, parameter, "", 0, RunRecord.ProbeStatus.CHECKED));
+        assertEquals(RunRecord.ProbeStatus.CHECKED, run.snapshot().probes().getFirst().status());
+    }
+
     static ReconModel.ActiveRow evidenceInRun(ReconModel.ActiveRow row, ScanRun run, String url) {
         return new ReconModel.ActiveRow(row.severity(), row.testClass(), row.parameter(), row.status(), row.evidence(), url, withRun(row.evidenceRecord(), run.id().toString()));
     }

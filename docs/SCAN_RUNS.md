@@ -44,7 +44,7 @@ History uses a separate versioned/checksummed JSONL project key. Changes trigger
 (250 ms scheduling delay), with periodic and final unload saves. Abrupt process termination can lose
 the latest pending save. Unknown, damaged or future snapshots remain byte-for-byte intact until
 **Reset state**. Restore starts no HTTP, DNS, Collaborator polling or subprocess, restores no grants,
-and never creates a live ScanRun. Previously running/paused/planned records become **INTERRUPTED**.
+and never creates a live ScanRun. Previously running/paused/planned records become **INTERRUPTED**; checkpointed unfinished probes become retry-eligible **INCONCLUSIVE** outcomes.
 Completed/cancelled/failed status and quota usage are retained. Missing pre-upgrade runs are not
 fabricated from old evidence. Late retained callbacks can update their archived run's finding index.
 
@@ -60,7 +60,7 @@ unequal targets/profiles/grants/budgets also mean absence cannot establish a fix
 **Re-run failed / inconclusive probes** creates a new child run. Native and corpus probe outcomes
 are grouped by original method/URL identity, detector, insertion point/parameter (including location/type) and encoding.
 Transport failure, denied/missing observations and SIGNAL/CANDIDATE evidence remain retry eligible;
-a checked negative or reproduced/confirmed result alone is not. Corpus retries rebuild the selected
+a skipped prerequisite, checked negative or reproduced/confirmed result alone is not. Corpus retries rebuild the selected
 category/parameter/encoding with the original local category cap and current run quota. The corpus
 continues to exclude destructive entries. Helpers, external providers and subprocesses are not
 silently replayed by this button; use their explicit existing actions.

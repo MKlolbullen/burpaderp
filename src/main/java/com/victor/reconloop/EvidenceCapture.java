@@ -81,15 +81,21 @@ final class EvidenceCapture {
             findings.set(i, finding.withEvidence(snapshot(finding.verificationState(), finding.evidence()), messages));
         }
     }
+    void startProbe(String parameter, String encoding, int localLimit) {
+        if (owner != null) owner.probeStarted(probeRecord(parameter, encoding, localLimit, RunRecord.ProbeStatus.IN_PROGRESS));
+    }
+    private RunRecord.Probe probeRecord(String parameter, String encoding, int localLimit, RunRecord.ProbeStatus status) {
+        String target = RunRecord.target(targetMethod, targetUrl);
+        return new RunRecord.Probe(RunRecord.probeKey(source, probeId, target, parameter, encoding), source,
+                probeId, target, parameter, encoding, localLimit, status);
+    }
     void finishProbe(String parameter, String encoding, int localLimit, List<ActiveTestEngine.ActiveFinding> output, int from, boolean crashed) {
-        if (owner == null || attempted == 0 && !crashed) return;
+        if (owner == null) return;
         boolean inconclusive = blocked || !responded || output.subList(from, output.size()).stream()
                 .anyMatch(f -> f.verificationState() == VerificationState.SIGNAL || f.verificationState() == VerificationState.CANDIDATE);
-        var status = failed || crashed ? RunRecord.ProbeStatus.FAILED : inconclusive ? RunRecord.ProbeStatus.INCONCLUSIVE
+        var status = failed || crashed ? RunRecord.ProbeStatus.FAILED : attempted == 0 ? RunRecord.ProbeStatus.SKIPPED : inconclusive ? RunRecord.ProbeStatus.INCONCLUSIVE
                 : output.size() > from ? RunRecord.ProbeStatus.FINDING : RunRecord.ProbeStatus.CHECKED;
-        String target = RunRecord.target(targetMethod, targetUrl);
-        owner.probe(new RunRecord.Probe(RunRecord.probeKey(source, probeId, target, parameter, encoding), source,
-                probeId, target, parameter, encoding, localLimit, status));
+        owner.probe(probeRecord(parameter, encoding, localLimit, status));
     }
     void recordWithTokens(ActiveRequestGateway.Result result, HttpRequest request) {
         boolean contains = false;

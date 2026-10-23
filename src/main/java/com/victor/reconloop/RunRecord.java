@@ -16,7 +16,7 @@ record RunRecord(String id, String parentId, String startedAt, String finishedAt
     }
     record Event(String id, String at, String kind, String probe, String target, String requestHash,
                  String decision, boolean dispatched, long elapsedNanos, String detail) {}
-    enum ProbeStatus { CHECKED, FINDING, FAILED, INCONCLUSIVE }
+    enum ProbeStatus { IN_PROGRESS, SKIPPED, CHECKED, FINDING, FAILED, INCONCLUSIVE }
     record Probe(String key, String source, String probe, String target, String parameter,
                  String encoding, int localLimit, ProbeStatus status) {
         boolean retryable() { return status == ProbeStatus.FAILED || status == ProbeStatus.INCONCLUSIVE; }
@@ -27,9 +27,14 @@ record RunRecord(String id, String parentId, String startedAt, String finishedAt
         audit = List.copyOf(audit); probes = List.copyOf(probes); findings = List.copyOf(findings);
     }
     RunRecord interrupted() {
-        if (status != RunStatus.RUNNING && status != RunStatus.PAUSED && status != RunStatus.PLANNED) return this;
-        return new RunRecord(id, parentId, startedAt, java.time.Instant.now().toString(), RunStatus.INTERRUPTED,
-                profile, scope, limits, metrics, audit, omittedEvents, probes, omittedProbes, findings, omittedFindings);
+        boolean interrupted = status == RunStatus.RUNNING || status == RunStatus.PAUSED || status == RunStatus.PLANNED;
+        boolean pending = probes.stream().anyMatch(p -> p.status() == ProbeStatus.IN_PROGRESS);
+        if (!interrupted && !pending) return this;
+        var restoredProbes = probes.stream().map(p -> p.status() == ProbeStatus.IN_PROGRESS
+                ? new Probe(p.key(), p.source(), p.probe(), p.target(), p.parameter(), p.encoding(), p.localLimit(), ProbeStatus.INCONCLUSIVE) : p).toList();
+        return new RunRecord(id, parentId, startedAt, interrupted ? java.time.Instant.now().toString() : finishedAt,
+                interrupted ? RunStatus.INTERRUPTED : status, profile, scope, limits, metrics, audit, omittedEvents,
+                restoredProbes, omittedProbes, findings, omittedFindings);
     }
     Set<String> findingKeys() {
         Set<String> keys = new HashSet<>();

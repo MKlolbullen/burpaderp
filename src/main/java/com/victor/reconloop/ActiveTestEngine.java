@@ -809,7 +809,7 @@ final class ActiveTestEngine {
                 ? Set.of() : Set.copyOf(permissions));
         EvidenceCapture previous = evidenceCapture.get();
         EvidenceCapture capture = new EvidenceCapture(scanRun.get(), originalRequest.get(), "NATIVE_ACTIVE", currentProbeId.get());
-        evidenceCapture.set(capture);
+        evidenceCapture.set(capture); capture.startProbe(pointIdentity.get(), "", 0);
         List<ActiveFinding> output = findingOutput.get(); int before = output.size();
         boolean crashed = true;
         try {

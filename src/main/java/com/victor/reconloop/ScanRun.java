@@ -62,6 +62,7 @@ final class ScanRun {
     private String parentId = "";
     private long attempts, dispatched, responses, errors, denied, transportNanos, omittedEvents, omittedProbes, omittedFindings;
     private final List<RunRecord.Event> audit = new ArrayList<>();
+    private final java.util.Set<String> pendingProbes = new java.util.HashSet<>();
     private final Map<String, RunRecord.Probe> probes = new LinkedHashMap<>();
     private final Map<String, RunRecord.Finding> findings = new LinkedHashMap<>();
     private final UUID id;
@@ -254,12 +255,19 @@ final class ScanRun {
                 plan == null ? "" : plan.requestHash(), result.decision().code().name(), result.dispatched(),
                 Math.max(0, result.transportElapsedNanos()), hasResponse ? "RESPONSE" : result.dispatched() ? "NO_RESPONSE" : "DENIED");
     }
+    synchronized void probeStarted(RunRecord.Probe probe) {
+        if (!probes.containsKey(probe.key()) && probes.size() >= RunRecord.MAX_PROBES) { omittedProbes++; cachedSnapshot = null; onChange.run(); return; }
+        probes.putIfAbsent(probe.key(), probe); pendingProbes.add(probe.key());
+        event("PROBE", probe.probe(), probe.target(), "", "IN_PROGRESS", false, 0, probe.key());
+    }
     synchronized void probe(RunRecord.Probe probe) {
+        pendingProbes.remove(probe.key());
         cachedSnapshot = null;
         if (!probes.containsKey(probe.key()) && probes.size() >= RunRecord.MAX_PROBES) { omittedProbes++; return; }
         // A failure in any insertion point keeps the grouped retry eligible.
         var prior = probes.get(probe.key());
-        if (prior != null && prior.retryable() && !probe.retryable()) return;
+        if (prior != null && (prior.retryable() && !probe.retryable()
+                || prior.status() == RunRecord.ProbeStatus.FINDING && (probe.status() == RunRecord.ProbeStatus.CHECKED || probe.status() == RunRecord.ProbeStatus.SKIPPED))) { onChange.run(); return; }
         probes.put(probe.key(), probe);
         event("PROBE", probe.probe(), probe.target(), "", probe.status().name(), false, 0, probe.key());
     }
@@ -287,7 +295,8 @@ final class ScanRun {
         return cachedSnapshot = new RunRecord(id.toString(), parentId, startedAt.toString(), finishedAt() == null ? "" : finishedAt().toString(),
                 status(), profile, scope, requestLimits, new RunRecord.Metrics(attempts, requestBudget.used(), dispatched,
                 responses, errors, denied, transportNanos, hashed(hostUsage), hashed(endpointUsage), bounded(probeUsage)),
-                audit, omittedEvents, List.copyOf(probes.values()), omittedProbes, List.copyOf(findings.values()), omittedFindings);
+                audit, omittedEvents, probes.values().stream().map(p -> pendingProbes.contains(p.key()) && !p.retryable()
+                        ? new RunRecord.Probe(p.key(), p.source(), p.probe(), p.target(), p.parameter(), p.encoding(), p.localLimit(), RunRecord.ProbeStatus.IN_PROGRESS) : p).toList(), omittedProbes, List.copyOf(findings.values()), omittedFindings);
     }
     private static Map<String, Integer> hashed(Map<String, Integer> values) {
         var result = new HashMap<String, Integer>(); values.forEach((key, value) -> result.put(FindingEvidence.digest(key), value)); return bounded(result);

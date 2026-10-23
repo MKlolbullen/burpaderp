@@ -112,7 +112,7 @@ final class CorpusFuzzEngine {
                     if (categoryBudget.exhausted() || run.requestBudget().exhausted() || !run.isActive()) break;
                     String encoded = encodedPayload(rawPayload, callbackHost, encoding);
                     EvidenceCapture capture = prototype.variant(base);
-                    evidenceCapture.set(capture); int firstFinding = out.size();
+                    evidenceCapture.set(capture); capture.startProbe(parameterKey, encoding.name(), maxPerCategory); int firstFinding = out.size();
                     boolean crashed = true;
                     try {
                         crashed = false;
