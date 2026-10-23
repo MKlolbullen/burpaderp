@@ -138,7 +138,7 @@ final class ReconPanel extends JPanel {
         oastActive.setToolTipText("Allows Collaborator-backed payloads. Blind-XSS also requires the separate persistent / stored browser payload grant.");
         persistentPayloadActive.setToolTipText("Browser payloads may be stored and execute later. Blind-XSS requires both this grant and OAST; non-safe methods require the mutating replay grant too.");
         timeDelayActive.setToolTipText("Required before SLEEP/PG_SLEEP/WAITFOR-style timing payloads are dispatched.");
-        uploadActive.setToolTipText("Required before multipart upload filenames/bodies are actively replayed.");
+        uploadActive.setToolTipText("Required for every multipart replay, including an unchanged captured file body carried by another probe. Mutating methods require their separate grant too.");
         authLockoutActive.setToolTipText("Required before rate-limit, JWT forgery, or alternate-identity access-control replays are dispatched.");
         JSpinner activeBudget = new JSpinner(new SpinnerNumberModel(60, 1, 5000, 10));
         JSpinner activeHostBudget = new JSpinner(new SpinnerNumberModel(60, 1, 5000, 10));

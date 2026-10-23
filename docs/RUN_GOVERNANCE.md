@@ -74,6 +74,12 @@ spend a token but cannot dispatch. This binds the immutable Montoya message at t
 not bytes after Burp session handling, other extensions or connection establishment. The numeric
 service binding below handles the separate DNS-to-Montoya-destination step.
 
+Binding adds `UPLOAD` whenever any Content-Type header declares `multipart/*`, regardless of the
+probe label or HTTP method. A generic probe replaying an unchanged captured multipart file therefore
+needs the upload grant too. Missing upload permission denies before DNS preparation and quota
+acquisition. Native previews derive the same requirement, including runtime templates. Unavailable
+header inspection fails closed; a caller-supplied permission set cannot remove the inferred grant.
+
 The caller owns one run for an active/corpus pass, including its targets, parameters, baselines and
 payload categories. The crawler reuses one run across queued URLs and redirects. Pausing cancels that
 run; resuming uses only the unspent crawl cap. Reset explicitly starts new accounting. Host/endpoint/

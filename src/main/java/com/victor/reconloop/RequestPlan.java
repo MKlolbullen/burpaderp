@@ -7,6 +7,7 @@ import java.net.URI;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.Locale;
 import java.util.Set;
 
@@ -35,11 +36,27 @@ final class RequestPlan {
     static RequestPlan bind(HttpRequest request, RequestPolicy.PlannedRequest metadata) {
         try {
             Binding binding = Binding.capture(request);
-            return new RequestPlan(metadata, metadata != null && metadata.matches(request.method(), request.url())
-                    ? binding : null);
+            if (metadata == null || !metadata.matches(request.method(), request.url())) return new RequestPlan(metadata, null);
+            // A caller cannot waive upload permission by labeling a multipart replay as another probe.
+            var required = withUploadPermission(request, metadata.requiredPermissions());
+            return new RequestPlan(new RequestPolicy.PlannedRequest(metadata.method(), metadata.url(),
+                    metadata.probeId(), required), binding);
         } catch (RuntimeException e) {
             return new RequestPlan(metadata, null);
         }
+    }
+
+    /** All multipart replays need an upload grant, including preserved bodies and safe HTTP methods. */
+    static Set<RequestPolicy.Permission> withUploadPermission(HttpRequest request, Set<RequestPolicy.Permission> declared) {
+        EnumSet<RequestPolicy.Permission> required = EnumSet.noneOf(RequestPolicy.Permission.class);
+        if (declared != null) required.addAll(declared);
+        for (var header : request.headers()) {
+            if (header.name().equalsIgnoreCase("Content-Type")
+                    && header.value().stripLeading().toLowerCase(Locale.ROOT).startsWith("multipart/")) {
+                required.add(RequestPolicy.Permission.UPLOAD);
+            }
+        }
+        return Set.copyOf(required);
     }
 
     RequestPolicy.PlannedRequest policyRequest() { return policyRequest; }

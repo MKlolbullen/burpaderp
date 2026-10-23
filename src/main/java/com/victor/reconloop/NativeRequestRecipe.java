@@ -34,6 +34,6 @@ record NativeRequestRecipe(Supplier<HttpRequest> request, String probe,
             result.add(RequestPolicy.Permission.UNSAFE_HTTP_METHOD);
             result.add(RequestPolicy.Permission.STATE_CHANGING);
         }
-        return Set.copyOf(result);
+        return RequestPlan.withUploadPermission(request, result);
     }
 }
