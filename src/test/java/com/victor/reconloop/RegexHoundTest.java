@@ -108,4 +108,41 @@ public class RegexHoundTest {
         assertTrue(hound.scan(null, "response", "u", true).isEmpty());
         assertTrue(hound.scan("", "response", "u", true).isEmpty());
     }
+
+    @Test
+    public void telegramRejectsArnAccountResourcePairsInTheLegacyNativeDetector() {
+        String resource = "Ab3dE6gH9jK2mN5pQ8" + "sT1vW4yZ7cF0iLrUo";
+        for (String name : List.of("my-application-notification-topic-prod", resource)) {
+            var matches = hound.scan("arn:aws:sns:us-east-1:123456789012:" + name, "response", "u", true);
+            assertTrue(matches.stream().noneMatch(m -> m.rule().id().equals("telegram-bot-token")));
+        }
+    }
+
+    @Test
+    public void telegramLegacyNativeAndGfUseTheSameBoundedTokenExpression() {
+        String tail = "Ab3dE6gH9jK2mN5pQ8" + "sT1vW4yZ7cF0iLrU";
+        String token = "12345:" + tail + "-";
+        var rule = RegexHound.RULES.stream().filter(r -> r.id().equals("telegram-bot-token")).findFirst().orElseThrow();
+        var pack = Json.asObject(Json.parseStrict(readAuthPack()));
+        var catalogRule = Json.asArray(Json.asObject(pack.get("reconhound")).get("rules")).stream()
+                .map(Json::asObject).filter(r -> r.get("id").equals(rule.id())).findFirst().orElseThrow();
+        assertEquals(catalogRule.get("pattern"), rule.pattern().pattern());
+        assertEquals(((Number)catalogRule.get("capture")).intValue(), rule.capture());
+        for (String text : List.of(token, "https://api.telegram.org/bot" + token + "/getMe")) {
+            var match = hound.scan(text, "response", "u", false).stream()
+                    .filter(m -> m.rule().id().equals("telegram-bot-token")).findFirst().orElseThrow();
+            assertEquals(token, match.value());
+            assertEquals(token, text.substring(match.start(), match.end()));
+        }
+        String second = "1234567890123456:" + tail + "_";
+        assertEquals(List.of(token, second), hound.scan(token + "," + second, "response", "u", false).stream()
+                .filter(m -> m.rule().id().equals(rule.id())).map(RegexHound.Finding::value).toList());
+        for (String invalid : List.of("prefix" + token, token + "_", token + "EXTRA", "0".repeat(17) + ":" + tail + "-"))
+            assertTrue(hound.scan(invalid, "response", "u", false).stream().noneMatch(m -> m.rule().id().equals(rule.id())));
+    }
+
+    private static String readAuthPack() {
+        try { return java.nio.file.Files.readString(java.nio.file.Path.of("gf/packs/rh-auth-cs.json")); }
+        catch (java.io.IOException error) { throw new AssertionError(error); }
+    }
 }

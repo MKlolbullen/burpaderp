@@ -149,7 +149,7 @@ final class RegexHound {
             r("discord-webhook", "Discord webhook URL", "discord", "secret", Severity.CRITICAL, Confidence.HIGH,
                     cs("https://(?:canary\\.|ptb\\.)?discord(?:app)?\\.com/api/webhooks/\\d+/[A-Za-z0-9._-]{20,255}")),
             r("telegram-bot-token", "Telegram bot token", "telegram", "secret", Severity.CRITICAL, Confidence.MEDIUM,
-                    cs("\\b\\d{6,12}:[A-Za-z0-9_-]{30,64}\\b")),
+                    cs("(^|[^A-Za-z0-9_:-])(?:https://api[.]telegram[.]org/bot)?([0-9]{5,16}:A[A-Za-z0-9_-]{34})(?=$|[^A-Za-z0-9_-])"), 2, 0),
             r("twilio-auth-token", "Twilio auth token in context", "twilio", "secret", Severity.CRITICAL, Confidence.MEDIUM,
                     ci("\\b(?:TWILIO_AUTH_TOKEN|twilio[_-]?auth[_-]?token)\\b\\s*(?:=|:)\\s*[\\\"']?([A-Fa-f0-9]{32})\\b"), 1, 0),
             r("datadog-api-or-app-key", "Datadog API/application key in context", "datadog", "secret", Severity.CRITICAL, Confidence.MEDIUM,

@@ -28,6 +28,8 @@ rule or external command is executed during installation. Use a trusted checkout
 The installer also copies `GITLEAKS-LICENSE.txt` beside the packs and checks notice conflicts before
 copying any files. Both JARs bundle the same notice at `gf-packs/GITLEAKS-LICENSE.txt`; CI checks its
 contents against the source notice.
+Installation writes the notice first, rejects non-regular destinations and rolls back files created
+by the attempt on a write error or Python interruption, preserving pre-existing files and replacements.
 
 The exports use **GNU grep with PCRE support (`-P`)**, with `-i` only in the case-insensitive packs.
 This avoids slow POSIX-ERE compilation of large bounded token formats and handles the JSON/quote
@@ -54,6 +56,9 @@ permissions, endpoint exposure or exploitability. Native issues use tentative co
 identifiers/resource locations have INFO severity and follow the UI's information-finding toggle.
 Generic unclassified community packs retain informational reporting, with values redacted by default.
 No validity checking, provider API use, replay, scope expansion or automatic target probing is added.
+The Telegram format rule is shared with the legacy native detector and rejects ARN account/resource
+pairs. A complete token-shaped value inside an ARN object key remains a credential candidate: an
+identifier wrapper does not establish that an embedded credential is harmless.
 
 Matched secret values are redacted before entering native finding tables, persistence, issue detail,
 SARIF/Markdown export and the offline CLI's report text. GF source URLs omit query/userinfo/fragment,

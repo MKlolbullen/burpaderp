@@ -6931,7 +6931,7 @@
       "provider": "telegram",
       "category": "credential",
       "severity": "HIGH",
-      "pattern": "(^|[^A-Za-z0-9_:-])(?:https://api[.]telegram[.]org/bot)?([0-9]{5,16}:A[A-Za-z0-9_-]{34})($|[^A-Za-z0-9_-])",
+      "pattern": "(^|[^A-Za-z0-9_:-])(?:https://api[.]telegram[.]org/bot)?([0-9]{5,16}:A[A-Za-z0-9_-]{34})(?=$|[^A-Za-z0-9_-])",
       "capture": 2,
       "ignoreCase": false,
       "minEntropy": 0,
@@ -6978,6 +6978,15 @@
             "7cF0iLrUo"
           ],
           "suffix": "/getMe"
+        },
+        {
+          "prefix": "arn:aws:s3:::example-bucket/",
+          "valueParts": [
+            "123456789:Ab3dE6",
+            "gH9jK2mN5pQ8sT1v",
+            "W4yZ7cF0iLrUo"
+          ],
+          "suffix": "/report.json"
         }
       ],
       "negative": [

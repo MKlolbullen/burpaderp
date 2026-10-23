@@ -8,7 +8,7 @@
     "(^|[^A-Za-z0-9_.-])(eyJ[A-Za-z0-9_-]{5,1024}\\.[A-Za-z0-9_-]{2,8192}\\.[A-Za-z0-9_-]{0,2048})($|[^A-Za-z0-9_.-])",
     "(https://hooks\\.slack\\.com/(services|workflows|triggers)/[A-Za-z0-9_/-]{40,256})",
     "(EAAA[A-Za-z0-9_-]{60})",
-    "(^|[^A-Za-z0-9_:-])(?:https://api[.]telegram[.]org/bot)?([0-9]{5,16}:A[A-Za-z0-9_-]{34})($|[^A-Za-z0-9_-])"
+    "(^|[^A-Za-z0-9_:-])(?:https://api[.]telegram[.]org/bot)?([0-9]{5,16}:A[A-Za-z0-9_-]{34})(?=$|[^A-Za-z0-9_-])"
   ],
   "reconhound": {
     "schemaVersion": 1,
@@ -119,7 +119,7 @@
         "provider": "telegram",
         "category": "credential",
         "severity": "HIGH",
-        "pattern": "(^|[^A-Za-z0-9_:-])(?:https://api[.]telegram[.]org/bot)?([0-9]{5,16}:A[A-Za-z0-9_-]{34})($|[^A-Za-z0-9_-])",
+        "pattern": "(^|[^A-Za-z0-9_:-])(?:https://api[.]telegram[.]org/bot)?([0-9]{5,16}:A[A-Za-z0-9_-]{34})(?=$|[^A-Za-z0-9_-])",
         "capture": 2,
         "minEntropy": 0,
         "validator": "none",
