@@ -117,7 +117,7 @@ func NewScope(domains, cidrs []string, allowDerivedIPs bool) (Scope, error) {
 	return s, nil
 }
 
-func (s Scope) Domains() []string { return append([]string(nil), s.domains...) }
+func (s Scope) Domains() []string     { return append([]string(nil), s.domains...) }
 func (s Scope) CIDRs() []netip.Prefix { return append([]netip.Prefix(nil), s.cidrs...) }
 func (s Scope) AllowDerivedIPs() bool { return s.allowDerivedIPs }
 
@@ -419,6 +419,9 @@ func NormalizeFQDN(raw string) (string, error) {
 }
 
 func NormalizeHTTPURL(raw string) (string, error) {
+	if len(raw) > 8192 {
+		return "", errors.New("HTTP URL exceeds 8192 bytes")
+	}
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return "", fmt.Errorf("invalid URL: %w", err)
@@ -460,15 +463,28 @@ func NormalizeHTTPURL(raw string) (string, error) {
 	}
 	u.Scheme = scheme
 	u.Fragment = ""
+	u.RawFragment = ""
+	if u.User != nil {
+		return "", errors.New("URL userinfo is not supported")
+	}
 	if u.Path == "" {
 		u.Path = "/"
 	}
-	q := u.Query()
-	for key := range q {
-		sort.Strings(q[key])
+	// Query ordering, duplicate value ordering and escape spelling may be signed
+	// or meaningful to the server. Dedupe must not silently mutate the request.
+	if _, err := url.QueryUnescape(u.RawQuery); err != nil {
+		return "", errors.New("invalid URL query escape")
 	}
-	u.RawQuery = q.Encode()
-	return u.String(), nil
+	value := u.String()
+	for _, r := range value {
+		if r <= 32 || r == 127 || strings.ContainsRune("\"<>\\^`{|}", r) {
+			return "", errors.New("URL contains unescaped request-target characters")
+		}
+	}
+	if len(value) > 8192 {
+		return "", errors.New("canonical URL exceeds 8192 bytes")
+	}
+	return value, nil
 }
 
 func firstNonBlank(values ...string) string {

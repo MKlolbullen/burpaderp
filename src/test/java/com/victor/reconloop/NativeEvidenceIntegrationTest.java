@@ -168,6 +168,82 @@ public class NativeEvidenceIntegrationTest {
         }
     }
 
+    @Test public void controllerMigratesLegacyAndSchemaOneSnapshotsWithoutSideEffects() throws Exception {
+        var legacy = List.of(true, false).stream().map(confirmed -> Json.write(Map.of(
+                "severity", "HIGH", "testClass", "XSS", "parameter", confirmed.toString(),
+                "status", "confirmed exploitable", "evidence", "legacy observation", "url", ROOT,
+                "confirmed", confirmed))).toList();
+        String schemaZero = "{\"schemaVersion\":0,\"recordCount\":2}\n" + String.join("\n", legacy);
+        String schemaOne = Files.readString(java.nio.file.Path.of("src/test/resources/active-evidence-v1.jsonl"));
+        for (String snapshot : List.of(schemaZero, schemaOne)) {
+            try (var fake = new FakeMontoya()) {
+                fake.persisted.put(PersistedState.K_ACTIVE_EVIDENCE, snapshot);
+                var active = new ReconModel.ActiveTableModel();
+                var first = controller(fake, new ManualExecutor(), active, new ReconModel.FindingTableModel());
+                List<ReconModel.ActiveRow> rows;
+                try {
+                    flush(); rows = active.snapshot();
+                    assertEquals(snapshot.equals(schemaZero) ? 2 : 1, rows.size());
+                    SwingUtilities.invokeAndWait(() -> {
+                        for (int i = 0; i < active.getRowCount(); i++)
+                            assertEquals(active.row(i).verificationState().displayLabel(), active.getValueAt(i, 6));
+                    });
+                    if (snapshot.equals(schemaZero)) {
+                        for (var row : rows) {
+                            assertEquals(row.parameter().equals("true") ? VerificationState.REPRODUCED : VerificationState.SIGNAL,
+                                    row.verificationState());
+                            assertEquals("unknown", row.evidenceRecord().detectorVersion());
+                            assertEquals("", row.evidenceRecord().runId());
+                            assertTrue(row.evidenceRecord().exchanges().isEmpty());
+                            assertEquals(FindingEvidence.Capture.UNAVAILABLE, row.evidenceRecord().originalRequest().capture());
+                        }
+                    } else {
+                        assertEquals(ActiveEvidenceCodec.decode(schemaOne).rows(), rows);
+                        assertEquals(-1, rows.getFirst().evidenceRecord().exchanges().getFirst().transportElapsedNanos());
+                    }
+                } finally { first.shutdown(); }
+                String migrated = fake.persisted.get(PersistedState.K_ACTIVE_EVIDENCE);
+                assertEquals(ActiveEvidenceCodec.Status.CURRENT, ActiveEvidenceCodec.decode(migrated).status());
+                assertEquals(rows, ActiveEvidenceCodec.decode(migrated).rows());
+                var restored = new ReconModel.ActiveTableModel();
+                var second = controller(fake, new ManualExecutor(), restored, new ReconModel.FindingTableModel());
+                try { flush(); assertEquals(rows, restored.snapshot()); }
+                finally { second.shutdown(); }
+                assertEquals(migrated, fake.persisted.get(PersistedState.K_ACTIVE_EVIDENCE));
+                assertTrue(fake.sent.isEmpty()); assertTrue(fake.dnsLookups.isEmpty()); assertTrue(fake.issues.isEmpty());
+                assertFalse(fake.apiAccesses.contains("http")); assertFalse(fake.apiAccesses.contains("collaborator"));
+                assertTrue(fake.errors.toString(), fake.errors.isEmpty());
+            }
+        }
+    }
+
+    @Test public void reflectedXssAndUnthrottledLoginObservationsNeverBecomeReportableIssues() throws Exception {
+        try (var fake = new FakeMontoya()) {
+            var active = new ReconModel.ActiveTableModel(); var executor = new ManualExecutor();
+            var controller = controller(fake, executor, active, new ReconModel.FindingTableModel());
+            try {
+                var request = fake.request(ROOT + "/login?q=seed");
+                fake.siteMap.add(FakeMontoya.pair(request, FakeMontoya.response(200, "captured", Map.of())));
+                fake.responder = r -> FakeMontoya.response(200, r.parameterValue("q"), Map.of());
+                controller.setActiveTestsEnabled(true); controller.setAuthLockoutActiveRequests(true);
+                controller.setActiveRequestBudget(100); controller.setActivePerHostBudget(100);
+                controller.setActivePerEndpointBudget(100); controller.setActivePerProbeBudget(1);
+                controller.runActiveTests(); executor.runAll(); flush();
+                for (String type : List.of("XSS", "RateLimit")) {
+                    var observed = active.snapshot().stream().filter(row -> row.testClass().equals(type)).toList();
+                    assertFalse(type + " must actually be observed", observed.isEmpty());
+                    for (var row : observed) {
+                        assertEquals(type.equals("XSS") ? VerificationState.CANDIDATE : VerificationState.SIGNAL,
+                                row.verificationState());
+                        assertFalse(row.verificationState().isReportable());
+                    }
+                    assertFalse(fake.issues.stream().map(AuditIssue.class::cast).anyMatch(i -> i.name().contains(type + " (")));
+                }
+                assertTrue(fake.errors.toString(), fake.errors.isEmpty());
+            } finally { controller.shutdown(); }
+        }
+    }
+
     @Test public void unloadPreservesUnreadableSnapshotAndResetExplicitlyRecoversIt() throws Exception {
         try (FakeMontoya fake = new FakeMontoya()) {
             for (String old : List.of("{\"schemaVersion\":99}\nfuture", "broken snapshot")) {

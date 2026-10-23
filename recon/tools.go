@@ -31,7 +31,7 @@ type ToolSpec struct {
 	Description string    `json:"description,omitempty"`
 }
 
-func (t ToolSpec) Accepts(kind Kind) bool { return containsKind(t.Consumes, kind) }
+func (t ToolSpec) Accepts(kind Kind) bool      { return containsKind(t.Consumes, kind) }
 func (t ToolSpec) ProducesKind(kind Kind) bool { return containsKind(t.Produces, kind) }
 
 // ToolRegistry is intentionally explicit instead of discovering binaries and
@@ -64,6 +64,12 @@ func DefaultToolRegistry() ToolRegistry {
 		{Name: "nmap", Binary: "nmap", Consumes: []Kind{KindIP, KindCIDR, KindService}, Produces: []Kind{KindService, KindFinding}, Risk: RiskNetworkProbe, Description: "service discovery and explicitly selected NSE checks; adapter intentionally fail-closed until XML parsing is pinned"},
 
 		{Name: "httpx", Binary: "httpx", Consumes: []Kind{KindHostname, KindService, KindURL}, Produces: []Kind{KindHTTPTarget}, Risk: RiskHTTPProbe, Description: "HTTP service probing and normalization"},
+		{Name: "whatweb", Binary: "whatweb", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindHTTPTarget}, Risk: RiskHTTPProbe, Description: "Technology fingerprint JSON report; live execution blocked"},
+		{Name: "gospider", Binary: "gospider", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindURL}, Risk: RiskHTTPProbe, Description: "JSON crawler events; live execution blocked"},
+		{Name: "jsfinder", Binary: "JSFinder.py", Consumes: []Kind{KindURL}, Produces: []Kind{KindURL}, Risk: RiskHTTPProbe, Description: "URL export file adapter; live execution blocked"},
+		{Name: "waybackurls", Binary: "waybackurls", Consumes: []Kind{KindDomain}, Produces: []Kind{KindURL}, Risk: RiskPassiveOSINT, Description: "Historical URL provider collection"},
+		{Name: "urlfinder", Binary: "urlfinder", Consumes: []Kind{KindDomain}, Produces: []Kind{KindURL}, Risk: RiskPassiveOSINT, Description: "Passive URL discovery with source JSONL"},
+		{Name: "waybackpy", Binary: "waybackpy", Consumes: []Kind{KindDomain}, Produces: []Kind{KindURL}, Risk: RiskPassiveOSINT, Description: "Read-only CDX original URL collection"},
 
 		{Name: "katana", Binary: "katana", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindURL}, Risk: RiskHTTPProbe, Description: "active web crawler"},
 		{Name: "gau", Binary: "gau", Consumes: []Kind{KindHTTPTarget, KindURL}, Produces: []Kind{KindURL}, Risk: RiskPassiveOSINT, Description: "known/historical URL collection"},

@@ -11,7 +11,7 @@ claim about TCP attempts, delivery, physical peer, browser execution or exploit 
 | --- | --- |
 | `ActiveRequestGateway.Result.exchange` | Immutable receipt for an inspected request: run/probe IDs, method/logical URL, policy decision, dispatch-attempt flag, elapsed nanoseconds, exception class, intended request and returned request/response bytes. Denials do not manufacture responses or consume quota. `elapsedNanos` includes preparation/admission. Separate `transportElapsedNanos` measures only the admitted transport invocation; `-1` means unknown/not invoked, never an inferred zero. Both use a monotonic clock and are API observations, not wire RTT. Capturing optional evidence cannot change the send result. |
 | `EvidenceCapture` | One native probe/insertion point or corpus encoding variant. Captures the original request and ordered receipts; retains real `HttpRequestResponse` objects only for immediate native issue attachment. No replay or approval capability. |
-| `FindingEvidence` | Stable evidence ID, capture ID, run ID, source, detector ID/version, typed `VerificationState`, UTC observation time, rationale, reproduction guidance, bounded byte observations, omission counts, issued OAST payload IDs and associated OOB records. Original cached response is included where the comparison uses it, notably access control. Detector revision is independent of storage/repository versions. Native SQLi and corpus captures now use revision `2`; other detectors retain their previous revision. |
+| `FindingEvidence` | Stable evidence ID, capture ID, run ID, source, detector ID/version, typed `VerificationState`, UTC observation time, rationale, reproduction guidance, bounded byte observations, omission counts, issued OAST payload IDs and associated OOB records. Original cached response is included where the comparison uses it, notably access control. Detector revision is independent of storage/repository versions. Native SQLi, native file-upload and corpus captures now use revision `2`; other detectors retain their previous revision. |
 | `ActiveEvidenceCodec` | Schema `2` JSONL snapshot: version/count/SHA-256 header, then one JSON object per active table row. Bytes use Base64, full length/hash, captured-prefix hash and capture status. Strict fields/types/enums, run consistency, IDs, timestamp syntax, counts, canonical Base64 and captured hashes are checked before writes and restores. The digest detects accidental changes; it is not an authenticity signature. |
 | `PersistedState` | Separate project extension-data string `reconhound.active-evidence`. Encodes before one `setString` replacement. Existing Findings/Hosts/assets/hashed-dedupe keys and AI triage format remain compatible. The snapshot is not a transaction across all those keys or a crash-proof write-ahead log. |
 | `ReconController` | Snapshots table references on the EDT; periodic serialization/writes run on the existing background executor. A generation and monotonic snapshot sequence reject pre-reset or superseded saves. Unload performs a final synchronous save. Restore only restores data/deduplication; it starts no run, HTTP, DNS, Collaborator client, poll or issue re-filing. |
@@ -28,6 +28,7 @@ variants can be associated with one payload and remain explicitly ambiguous.
 | Production path | Retained evidence / interpretation |
 | --- | --- |
 | `ActiveTestEngine` | Per-probe, per-insertion-point original and gateway sequence, including available baseline/control/mutation responses. Existing typed detector states remain; runtime HTTP evidence is attached to reportable native issues. |
+| Native file-upload bypass | A 2xx upload response remains SIGNAL even when it reports a dangerous file path. The reported path is an unverified hint: the probe does not retrieve the file or establish execution. New captures use detector revision `2`; historical states and revisions remain unchanged on restore. |
 | `CorpusFuzzEngine` | Exact encoded request actually submitted, not just the source corpus string. Timing cases keep up to three alternating baseline/mutation pairs, valid transport samples and median/MAD rationale; see [timing verification](TIMING_VERIFICATION.md). An attempted OAST mutation creates a pending SIGNAL case even when there is no response/reflection. |
 | Parameter discovery | Baseline plus candidate request; reflected generated canary is REPRODUCED discovery, a lone status/length change is CANDIDATE. This is not vulnerability confirmation. |
 | JWT none / weak-secret replay | Valid-token baseline and forged request/response; response acceptance is REPRODUCED, rejection is REJECTED. Status/length similarity does not prove privileged access. |
@@ -103,6 +104,12 @@ explicit prefix/omission handling, retention and strict JSON. `NativeEvidenceInt
 actual production engine/controller paths with in-memory Montoya to compare raw observations,
 denied/failed attempts, per-probe isolation, encoded corpus/OAST, bounded sequences, helper evidence,
 unload/reload without traffic, stale-save ordering and reset during an in-flight response.
+Controller migration tests exercise schema 0/1 through the UI model, schema-2 saving and a second
+reload without HTTP, DNS, Collaborator access or issue re-filing. Native XSS reflection and rate-limit
+observations are checked as CANDIDATE and SIGNAL respectively, with no reportable native issue.
+`UploadEvidenceIntegrationTest` checks accepted uploads and reported paths remain SIGNAL, exact
+mutation/response observations survive controller reload, no file retrieval or native issue is
+triggered, and historical upload evidence retains its original state and detector revision.
 `OobEvidenceTest` covers DNS/HTTP/SMTP observations, exact association requirements, ambiguous variants,
 callback distinctions, late association and deduplication after restore. All existing transport,
 quota, preview, lifecycle and external-egress architecture tests remain in the normal suite.

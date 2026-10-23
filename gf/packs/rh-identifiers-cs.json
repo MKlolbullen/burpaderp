@@ -1,0 +1,230 @@
+{
+  "flags": "-P",
+  "patterns": [
+    "(^|[^A-Za-z0-9_])(AKIA[A-Z0-9]{16})($|[^A-Za-z0-9_.+-])",
+    "(arn:(aws|aws-cn|aws-us-gov):[a-z0-9-]{1,63}:[a-z0-9-]{0,32}:[0-9]{0,12}:[A-Za-z0-9_./:=+-]{1,512})",
+    "(^|[^A-Za-z0-9_])(ASIA[A-Z0-9]{16})($|[^A-Za-z0-9_.+-])",
+    "([0-9]{6,24}-[A-Za-z0-9_-]{10,128}\\.apps\\.googleusercontent\\.com)",
+    "(^|[^A-Za-z0-9_])(6L[A-Za-z0-9_-]{38})($|[^A-Za-z0-9_.+-])",
+    "\"private_key_id\"[ \\t]*:[ \\t]*\"([a-f0-9]{40})\"",
+    "(ocid1\\.[a-z0-9_-]{1,64}\\.[a-z0-9_-]{0,32}\\.[a-z0-9_-]{0,32}\\.[a-z0-9._-]{10,256})",
+    "(^|[^A-Za-z0-9_])(pk_live_[A-Za-z0-9]{16,128})($|[^A-Za-z0-9_.+-])",
+    "(^|[^A-Za-z0-9_])(pk_test_[A-Za-z0-9]{16,128})($|[^A-Za-z0-9_.+-])",
+    "(^|[^A-Za-z0-9_])(sb_publishable_[A-Za-z0-9_-]{20,255})($|[^A-Za-z0-9_.+-])",
+    "(^|[^A-Za-z0-9_])(AC[a-fA-F0-9]{32})($|[^A-Za-z0-9_.+-])",
+    "(^|[^A-Za-z0-9_])(SK[a-fA-F0-9]{32})($|[^A-Za-z0-9_.+-])",
+    "(^|[^A-Za-z0-9_])(AP[a-fA-F0-9]{32})($|[^A-Za-z0-9_.+-])"
+  ],
+  "reconhound": {
+    "schemaVersion": 1,
+    "catalogVersion": "1.0.0",
+    "rules": [
+      {
+        "id": "aws-access-key",
+        "provider": "aws",
+        "category": "identifier",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_])(AKIA[A-Z0-9]{16})($|[^A-Za-z0-9_.+-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [
+          "AKIA"
+        ],
+        "sources": [
+          "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+        ]
+      },
+      {
+        "id": "aws-arn",
+        "provider": "aws",
+        "category": "identifier",
+        "severity": "INFO",
+        "pattern": "(arn:(aws|aws-cn|aws-us-gov):[a-z0-9-]{1,63}:[a-z0-9-]{0,32}:[0-9]{0,12}:[A-Za-z0-9_./:=+-]{1,512})",
+        "capture": 1,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [
+          "arn:"
+        ],
+        "sources": [
+          "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+        ]
+      },
+      {
+        "id": "aws-temporary-access-key",
+        "provider": "aws",
+        "category": "identifier",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_])(ASIA[A-Z0-9]{16})($|[^A-Za-z0-9_.+-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [
+          "ASIA"
+        ],
+        "sources": [
+          "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+        ]
+      },
+      {
+        "id": "google-oauth-client-id",
+        "provider": "google",
+        "category": "identifier",
+        "severity": "INFO",
+        "pattern": "([0-9]{6,24}-[A-Za-z0-9_-]{10,128}\\.apps\\.googleusercontent\\.com)",
+        "capture": 1,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [
+          "googleusercontent.com"
+        ],
+        "sources": [
+          "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+        ]
+      },
+      {
+        "id": "google-recaptcha-site-key",
+        "provider": "google",
+        "category": "identifier",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_])(6L[A-Za-z0-9_-]{38})($|[^A-Za-z0-9_.+-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [
+          "6L"
+        ],
+        "sources": [
+          "https://developers.google.com/recaptcha/docs/display"
+        ]
+      },
+      {
+        "id": "google-service-account-id",
+        "provider": "google",
+        "category": "identifier",
+        "severity": "INFO",
+        "pattern": "\"private_key_id\"[ \\t]*:[ \\t]*\"([a-f0-9]{40})\"",
+        "capture": 1,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+        ]
+      },
+      {
+        "id": "oci-ocid",
+        "provider": "oracle",
+        "category": "identifier",
+        "severity": "INFO",
+        "pattern": "(ocid1\\.[a-z0-9_-]{1,64}\\.[a-z0-9_-]{0,32}\\.[a-z0-9_-]{0,32}\\.[a-z0-9._-]{10,256})",
+        "capture": 1,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [
+          "ocid1."
+        ],
+        "sources": [
+          "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+        ]
+      },
+      {
+        "id": "stripe-pk-live",
+        "provider": "stripe",
+        "category": "identifier",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_])(pk_live_[A-Za-z0-9]{16,128})($|[^A-Za-z0-9_.+-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [
+          "pk_live_"
+        ],
+        "sources": [
+          "https://docs.stripe.com/keys"
+        ]
+      },
+      {
+        "id": "stripe-pk-test",
+        "provider": "stripe",
+        "category": "identifier",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_])(pk_test_[A-Za-z0-9]{16,128})($|[^A-Za-z0-9_.+-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [
+          "pk_test_"
+        ],
+        "sources": [
+          "https://docs.stripe.com/keys"
+        ]
+      },
+      {
+        "id": "supabase-publishable",
+        "provider": "supabase",
+        "category": "identifier",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_])(sb_publishable_[A-Za-z0-9_-]{20,255})($|[^A-Za-z0-9_.+-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [
+          "sb_publishable_"
+        ],
+        "sources": [
+          "https://supabase.com/docs/guides/api/api-keys"
+        ]
+      },
+      {
+        "id": "twilio-account",
+        "provider": "twilio",
+        "category": "identifier",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_])(AC[a-fA-F0-9]{32})($|[^A-Za-z0-9_.+-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [
+          "AC"
+        ],
+        "sources": [
+          "https://www.twilio.com/docs/iam/api-keys/key-resource-v1"
+        ]
+      },
+      {
+        "id": "twilio-api-key-id",
+        "provider": "twilio",
+        "category": "identifier",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_])(SK[a-fA-F0-9]{32})($|[^A-Za-z0-9_.+-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [
+          "SK"
+        ],
+        "sources": [
+          "https://www.twilio.com/docs/iam/api-keys/key-resource-v1"
+        ]
+      },
+      {
+        "id": "twilio-application",
+        "provider": "twilio",
+        "category": "identifier",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_])(AP[a-fA-F0-9]{32})($|[^A-Za-z0-9_.+-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [
+          "AP"
+        ],
+        "sources": [
+          "https://www.twilio.com/docs/iam/api-keys/key-resource-v1"
+        ]
+      }
+    ]
+  }
+}

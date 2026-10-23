@@ -311,7 +311,8 @@ final class ReconPanel extends JPanel {
         activeResults.add(viewEvidence, BorderLayout.SOUTH);
         tabs.addTab("Active tests", activeResults);
         tabs.addTab("Hosts / IPs", buildAssetPanel(controller, assetTable, assetModel));
-        domainReconTab = new DomainReconPanel(controller::enumerateDomain, controller::importSidecarJsonl);
+        domainReconTab = new DomainReconPanel(controller::enumerateDomain, controller::importSidecarJsonl,
+                sources->stageAiSources(sources,"Review the captured recon requests/responses and JavaScript for source-anchored vulnerability candidates and manual PoC suggestions."));
         tabs.addTab("Recon chain", domainReconTab);
         tabs.addTab("XSS vector library", new JScrollPane(vectorTable));
         aiTab = buildAiPanel(controller);

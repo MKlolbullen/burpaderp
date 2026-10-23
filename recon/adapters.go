@@ -59,12 +59,43 @@ func ParseToolOutputLine(toolName, line string) ([]Record, error) {
 		return parseNaabu(line)
 	case "httpx":
 		return parseHTTPX(line)
-	case "katana", "gau", "cariddi":
+	case "katana", "gau", "cariddi", "jsfinder", "waybackurls", "waybackpy", "urlfinder":
 		u, err := parseURLLine(line)
 		if err != nil {
 			return nil, err
 		}
+		source := tool
+		if tool == "urlfinder" && strings.HasPrefix(line, "{") {
+			if obj, e := decodeObject(line); e == nil {
+				provider := stringField(obj, "source")
+				if len(provider) > 0 && len(provider) <= 80 && strings.Trim(provider, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") == "" {
+					source = tool + ":" + provider
+				}
+			}
+		}
+		return []Record{{Kind: KindURL, URL: u, Value: u, Tool: tool, Source: source}}, nil
+	case "gospider":
+		obj, err := decodeObject(line)
+		if err != nil {
+			return nil, fmt.Errorf("gospider JSON required: %w", err)
+		}
+		u := stringField(obj, "output")
+		if !looksHTTPURL(u) {
+			return nil, errors.New("gospider event has no HTTP URL output")
+		}
 		return []Record{{Kind: KindURL, URL: u, Value: u, Tool: tool, Source: tool}}, nil
+	case "whatweb":
+		obj, err := decodeObject(line)
+		if err != nil {
+			return nil, err
+		}
+		u := stringField(obj, "target")
+		if !looksHTTPURL(u) {
+			return nil, errors.New("whatweb record requires target URL")
+		}
+		status, _ := intField(obj, "http_status")
+		plugins, _ := json.Marshal(obj["plugins"])
+		return []Record{{Kind: KindHTTPTarget, URL: u, Value: u, Status: status, Tool: tool, Source: tool, Evidence: boundedEvidence(string(plugins), 8192)}}, nil
 	case "gf":
 		return parseGF(line)
 	case "nuclei":

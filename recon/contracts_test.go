@@ -78,7 +78,7 @@ func TestNormalizeHTTPURLCanonicalizesPortFragmentAndQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "https://api.example.com/path?a=1&a=2&b=2"
+	want := "https://api.example.com/path?b=2&a=2&a=1"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
@@ -92,7 +92,7 @@ func TestResolvedHostRequiresDNSMaterial(t *testing.T) {
 	got, err := scope.Validate(Record{
 		Kind: KindResolvedHost, Hostname: "www.example.com",
 		Addresses: []string{"2001:db8::1", "203.0.113.5", "203.0.113.5"},
-		CNAMEs: []string{"shared.cdn.example.net."},
+		CNAMEs:    []string{"shared.cdn.example.net."},
 	})
 	if err != nil {
 		t.Fatal(err)

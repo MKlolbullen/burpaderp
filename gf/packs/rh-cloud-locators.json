@@ -1,0 +1,266 @@
+{
+  "flags": "-Pi",
+  "patterns": [
+    "(^|[^A-Za-z0-9_.-])([a-z0-9]{8,32}\\.execute-api\\.[a-z0-9-]{5,32}\\.amazonaws\\.com)($|[^A-Za-z0-9_.-])",
+    "(^|[^A-Za-z0-9_.-])([a-z0-9-]{8,64}\\.cloudfront\\.net)($|[^A-Za-z0-9_.-])",
+    "(^|[^A-Za-z0-9_.-])([a-z0-9-]{1,63}\\.auth\\.[a-z0-9-]{5,32}\\.amazoncognito\\.com)($|[^A-Za-z0-9_.-])",
+    "(^|[^A-Za-z0-9_.-])([a-z0-9][a-z0-9.-]{1,61}\\.s3([.-](dualstack\\.)?[a-z0-9-]{1,32})?\\.amazonaws\\.com(\\.cn)?)($|[^A-Za-z0-9_.-])",
+    "(^|[^A-Za-z0-9_.-])(s3([.-][a-z0-9-]{1,32})?\\.amazonaws\\.com(\\.cn)?/[a-z0-9.-]{3,63})($|[^A-Za-z0-9_.-])",
+    "(^|[^A-Za-z0-9_.-])([a-z0-9-]{2,63}\\.azurewebsites\\.net)($|[^A-Za-z0-9_.-])",
+    "(^|[^A-Za-z0-9_.-])([a-z0-9-]{3,63}\\.documents\\.azure\\.com)($|[^A-Za-z0-9_.-])",
+    "(^|[^A-Za-z0-9_.-])([a-z0-9]{3,24}\\.(blob|queue|table|file|dfs)\\.core\\.windows\\.net)($|[^A-Za-z0-9_.-])",
+    "(^|[^A-Za-z0-9_.-])([a-z0-9-]{3,24}\\.vault\\.azure\\.net)($|[^A-Za-z0-9_.-])",
+    "(^|[^A-Za-z0-9_.-])([a-z0-9.-]{2,100}\\.workers\\.dev)($|[^A-Za-z0-9_.-])",
+    "(^|[^A-Za-z0-9_.-])([a-z0-9.-]{2,100}\\.digitaloceanspaces\\.com)($|[^A-Za-z0-9_.-])",
+    "(^|[^A-Za-z0-9_.-])([a-z0-9-]{2,63}\\.appspot\\.com)($|[^A-Za-z0-9_.-])",
+    "(^|[^A-Za-z0-9_.-])([a-z0-9-]{2,100}\\.cloudfunctions\\.net)($|[^A-Za-z0-9_.-])",
+    "(^|[^A-Za-z0-9_.-])([a-z0-9-]{2,100}(\\.[a-z])?\\.run\\.app)($|[^A-Za-z0-9_.-])",
+    "(^|[^A-Za-z0-9_.-])([a-z0-9-]{2,63}\\.(firebaseio\\.com|[a-z0-9.-]{1,64}firebasedatabase\\.app))($|[^A-Za-z0-9_.-])",
+    "(^|[^A-Za-z0-9_.-])((storage\\.googleapis\\.com/[a-z0-9._-]{3,63}|[a-z0-9._-]{3,63}\\.storage\\.googleapis\\.com))($|[^A-Za-z0-9_.-])",
+    "(^|[^A-Za-z0-9_.-])([a-z0-9-]{5,64}\\.supabase\\.(co|in))($|[^A-Za-z0-9_.-])"
+  ],
+  "reconhound": {
+    "schemaVersion": 1,
+    "catalogVersion": "1.0.0",
+    "rules": [
+      {
+        "id": "aws-api-gateway",
+        "provider": "aws",
+        "category": "endpoint",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9]{8,32}\\.execute-api\\.[a-z0-9-]{5,32}\\.amazonaws\\.com)($|[^A-Za-z0-9_.-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      },
+      {
+        "id": "aws-cloudfront",
+        "provider": "aws",
+        "category": "endpoint",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9-]{8,64}\\.cloudfront\\.net)($|[^A-Za-z0-9_.-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      },
+      {
+        "id": "aws-cognito",
+        "provider": "aws",
+        "category": "endpoint",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9-]{1,63}\\.auth\\.[a-z0-9-]{5,32}\\.amazoncognito\\.com)($|[^A-Za-z0-9_.-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      },
+      {
+        "id": "aws-s3-host",
+        "provider": "aws",
+        "category": "endpoint",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9][a-z0-9.-]{1,61}\\.s3([.-](dualstack\\.)?[a-z0-9-]{1,32})?\\.amazonaws\\.com(\\.cn)?)($|[^A-Za-z0-9_.-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      },
+      {
+        "id": "aws-s3-path",
+        "provider": "aws",
+        "category": "endpoint",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_.-])(s3([.-][a-z0-9-]{1,32})?\\.amazonaws\\.com(\\.cn)?/[a-z0-9.-]{3,63})($|[^A-Za-z0-9_.-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      },
+      {
+        "id": "azure-app-service",
+        "provider": "microsoft",
+        "category": "endpoint",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9-]{2,63}\\.azurewebsites\\.net)($|[^A-Za-z0-9_.-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      },
+      {
+        "id": "azure-cosmos",
+        "provider": "microsoft",
+        "category": "endpoint",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9-]{3,63}\\.documents\\.azure\\.com)($|[^A-Za-z0-9_.-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      },
+      {
+        "id": "azure-storage",
+        "provider": "microsoft",
+        "category": "endpoint",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9]{3,24}\\.(blob|queue|table|file|dfs)\\.core\\.windows\\.net)($|[^A-Za-z0-9_.-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      },
+      {
+        "id": "azure-vault",
+        "provider": "microsoft",
+        "category": "endpoint",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9-]{3,24}\\.vault\\.azure\\.net)($|[^A-Za-z0-9_.-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      },
+      {
+        "id": "cloudflare-workers",
+        "provider": "cloudflare",
+        "category": "endpoint",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9.-]{2,100}\\.workers\\.dev)($|[^A-Za-z0-9_.-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      },
+      {
+        "id": "digitalocean-spaces",
+        "provider": "digitalocean",
+        "category": "endpoint",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9.-]{2,100}\\.digitaloceanspaces\\.com)($|[^A-Za-z0-9_.-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      },
+      {
+        "id": "gcp-appspot",
+        "provider": "google",
+        "category": "endpoint",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9-]{2,63}\\.appspot\\.com)($|[^A-Za-z0-9_.-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      },
+      {
+        "id": "gcp-cloud-functions",
+        "provider": "google",
+        "category": "endpoint",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9-]{2,100}\\.cloudfunctions\\.net)($|[^A-Za-z0-9_.-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      },
+      {
+        "id": "gcp-cloud-run",
+        "provider": "google",
+        "category": "endpoint",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9-]{2,100}(\\.[a-z])?\\.run\\.app)($|[^A-Za-z0-9_.-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      },
+      {
+        "id": "gcp-firebase",
+        "provider": "google",
+        "category": "endpoint",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9-]{2,63}\\.(firebaseio\\.com|[a-z0-9.-]{1,64}firebasedatabase\\.app))($|[^A-Za-z0-9_.-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      },
+      {
+        "id": "gcp-storage",
+        "provider": "google",
+        "category": "endpoint",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_.-])((storage\\.googleapis\\.com/[a-z0-9._-]{3,63}|[a-z0-9._-]{3,63}\\.storage\\.googleapis\\.com))($|[^A-Za-z0-9_.-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      },
+      {
+        "id": "supabase-host",
+        "provider": "supabase",
+        "category": "endpoint",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9-]{5,64}\\.supabase\\.(co|in))($|[^A-Za-z0-9_.-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      }
+    ]
+  }
+}

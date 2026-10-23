@@ -51,11 +51,18 @@ jobs:
           RECONCTL_TEST_BINARY: /tmp/reconctl
         run: ./gradlew clean build --no-daemon --stacktrace
 
+      - name: Validate curated GF catalog and installer
+        run: |
+          python3 tools/gf/manage.py check
+          python3 tools/gf/manage.py test-grep
+          python3 -m unittest discover -s tools/gf/tests -v
+
       - name: Package and smoke-check passive recon sidecar
         run: |
           mkdir -p build/recon
           cp /tmp/reconctl build/recon/reconctl-linux-amd64
           /tmp/reconctl enumerate --help
+          /tmp/reconctl workflow --help
           /tmp/reconctl chain --domain example.com > build/recon/example-chain.json
 
       - name: Test runtime verification receiver and offline comparison

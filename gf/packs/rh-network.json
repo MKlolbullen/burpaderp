@@ -1,0 +1,86 @@
+{
+  "flags": "-P",
+  "patterns": [
+    "(^|[^A-Za-z0-9_.+-])([A-Za-z0-9_.+-]{1,64}@[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?){1,15})($|[^A-Za-z0-9_.-])",
+    "(^|[^A-Za-z0-9_.-])([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?){1,15})($|[^A-Za-z0-9_.-])",
+    "(^|[^A-Za-z0-9_.])((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3})($|[^A-Za-z0-9_.])",
+    "(^|[^A-Za-z0-9_.])((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}/(3[0-2]|[12]?[0-9]))($|[^A-Za-z0-9_./])",
+    "(^|[^A-Za-z0-9_:.])(([A-Fa-f0-9]{0,4}:){2,7}[A-Fa-f0-9:.]{0,45}(%[A-Za-z0-9_.-]{1,20})?)($|[^A-Za-z0-9_:.%])"
+  ],
+  "reconhound": {
+    "schemaVersion": 1,
+    "catalogVersion": "1.0.0",
+    "rules": [
+      {
+        "id": "email",
+        "provider": "generic",
+        "category": "network",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_.+-])([A-Za-z0-9_.+-]{1,64}@[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?){1,15})($|[^A-Za-z0-9_.-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "none",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      },
+      {
+        "id": "hostname",
+        "provider": "generic",
+        "category": "network",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_.-])([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?){1,15})($|[^A-Za-z0-9_.-])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "hostname",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      },
+      {
+        "id": "ipv4",
+        "provider": "generic",
+        "category": "network",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_.])((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3})($|[^A-Za-z0-9_.])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "ipv4",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      },
+      {
+        "id": "ipv4-cidr",
+        "provider": "generic",
+        "category": "network",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_.])((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}/(3[0-2]|[12]?[0-9]))($|[^A-Za-z0-9_./])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "cidr",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      },
+      {
+        "id": "ipv6",
+        "provider": "generic",
+        "category": "network",
+        "severity": "INFO",
+        "pattern": "(^|[^A-Za-z0-9_:.])(([A-Fa-f0-9]{0,4}:){2,7}[A-Fa-f0-9:.]{0,45}(%[A-Za-z0-9_.-]{1,20})?)($|[^A-Za-z0-9_:.%])",
+        "capture": 2,
+        "minEntropy": 0,
+        "validator": "ipv6",
+        "keywords": [],
+        "sources": [
+          "authored:offline-inventory-heuristic"
+        ]
+      }
+    ]
+  }
+}

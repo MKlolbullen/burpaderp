@@ -440,14 +440,13 @@ the checkout and its metadata URL; it performs no target download.
 
 ## Run governance & the `reconctl` sidecar
 
-The **Recon chain** tab previews and exports a dependency plan covering subfinder, assetfinder,
-chaos-client, Amass, dnsx, httpx, WhatWeb, Katana, GoSpider, Cariddi, JSFinder, Waybackpy,
-waybackurls and urlfinder. Its first runnable stage accepts a domain and runs bounded passive
-assetfinder/subfinder/chaos queries through the Go sidecar, producing deduplicated `subs.txt`,
-`sorted_subs.txt`, typed `hosts.jsonl` and per-tool status files. Import is a separate action that
-rechecks current Burp scope. The complete chain is a planning manifest: additional adapters remain
-planned, and target HTTP tools remain blocked by #44. See the
-[domain workflow and tool-support table](recon/README.md#domain-form-and-chained-recon-plan).
+The **Recon chain** tab runs a bounded provider/DNS/archive workflow using subfinder, assetfinder,
+chaos-client, pinned passive Amass, dnsx, waybackurls, urlfinder and Waybackpy. Its optional native
+HTTP phase probes, fingerprints, crawls and extracts JavaScript endpoints through the shared Burp
+gateway with one quota ledger. Captured requests/responses and JS can be staged locally for the
+existing AI/five-agent review. The original httpx, WhatWeb, Katana, GoSpider, Cariddi and JSFinder
+processes remain blocked pending governed egress; offline report adapters are available. See the
+[runnable chain, limits and tool-support table](recon/README.md#runnable-recon-chain).
 
 Active behaviour is governed by an explicit control plane: a per-run request policy and hard request
 **budget** gate every native Montoya target dispatch. Each active run carries a scope snapshot.
@@ -513,9 +512,20 @@ destructive entries filtered and callback hosts rewritten to your Collaborator.
 
 ## gf patterns
 
-Normal gf-json files are discovered from `$GF_PATTERNS_DIR` or `~/.gf/*.json`. The lightweight loader
-supports both a single `"pattern"` and an array of `"patterns"`, plus case-insensitive `flags`
-containing `i`.
+The plugin and offline CLI bundle **167 curated detectors in ten GF packs** for cloud/SaaS/LLM
+credentials, private-key markers, authentication material, IPs, hostnames, cloud endpoints and recon
+variables. Captured values have rule IDs/categories; secret candidates are redacted and remain
+unverified SIGNALs. Existing local packs still load, with real JSON parsing and bounded matching.
+
+```bash
+python3 tools/gf/manage.py install --directory ~/.gf
+gf rh-secrets-prefixed response.js
+gf rh-secrets-context source.env
+gf rh-cloud-locators urls.txt
+```
+
+Exports require GNU grep's `-P` support. The installer preserves existing conflicting files. See
+[coverage, format distinctions, limits, provenance and maintenance](docs/GF_PATTERNS.md).
 
 ## Project layout
 

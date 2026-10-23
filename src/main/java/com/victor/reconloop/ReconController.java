@@ -90,6 +90,9 @@ final class ReconController implements HttpHandler {
     private final ExecutorService domainReconWorker = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "Burp-Recon-Hound-Domain"); t.setDaemon(true); return t;
     });
+    private final ExecutorService assetWorker = Executors.newSingleThreadExecutor(r -> {
+        Thread t=new Thread(r,"Burp-Recon-Hound-Assets");t.setDaemon(true);return t;
+    });
 
     private static ExecutorService newActiveWorker() {
         return Executors.newSingleThreadExecutor(r -> {
@@ -118,9 +121,11 @@ final class ReconController implements HttpHandler {
 
     private final NativeRunRegistry activeRuns = new NativeRunRegistry(false);
     private final NativeRunRegistry crawlRuns = new NativeRunRegistry(true);
+    private final NativeRunRegistry domainRuns = new NativeRunRegistry(true);
     private ScanRun crawlRun; // guarded by crawlRuns
     private int previousCrawlUsage; // retired sessions; pause/resume never refills the crawl cap
     private final ActiveRequestGateway.Sender targetTransport;
+    private final DestinationGuard targetDestinations;
 
     private final AtomicBoolean running = new AtomicBoolean(true);
     private final AtomicBoolean crawlEnabled = new AtomicBoolean(true);
@@ -188,6 +193,7 @@ final class ReconController implements HttpHandler {
         this.activeWorker = Objects.requireNonNull(activeWorker, "activeWorker");
         this.api = api;
         this.targetTransport = new MontoyaTargetTransport(api, destinations);
+        this.targetDestinations=destinations;
         this.reporter = new IssueReporter(api);
         this.findingModel = findingModel;
         this.discoveryModel = discoveryModel;
@@ -478,9 +484,32 @@ final class ReconController implements HttpHandler {
     /** Separate worker for the fixed passive sidecar; it never occupies the target request queue. */
     Future<?> enumerateDomain(DomainReconProcess.Plan plan, Consumer<DomainReconProcess.Event> events,
                               Consumer<DomainReconProcess.Outcome> completion) {
+        NativeRunRegistry.Ticket ticket=domainRuns.ticket();
         return domainReconWorker.submit(() -> {
             var outcome = new DomainReconProcess().run(plan, event -> SwingUtilities.invokeLater(() -> events.accept(event)));
-            SwingUtilities.invokeLater(() -> completion.accept(outcome));
+            String sidecarState=outcome.state(),nativeState="SKIPPED";int nativeDispatches=0;
+            if(plan.workflow()&&plan.httpBudget()>0&&Set.of("SUCCESS","PARTIAL").contains(outcome.state())) {
+                ScanRun run=domainRuns.begin(ticket,ScanProfile.DISCOVERY,new ScopeSnapshot(Set.of(plan.domain()),Set.of()),
+                        new ScanRun.RequestLimits(plan.httpBudget(),plan.perHost(),3,plan.httpBudget()));
+                try {
+                    var inputs=ReconWorkflowInputs.load(plan);
+                    var gateway=new ActiveRequestGateway(RequestPolicy.safeDefault(url -> NativeReconChain.canonical(url,plan.domain())!=null&&api.scope().isInScope(url)),
+                            new MontoyaTargetTransport(api,targetDestinations,15000));
+                    var nativeResult=new NativeReconChain(gateway,url->httpRequestFromUrl(url).withMethod("GET")).run(plan,inputs,run,
+                            event->SwingUtilities.invokeLater(()->events.accept(event)));
+                    String state=nativeResult.state().equals("SUCCESS")?outcome.state():nativeResult.state().equals("FAILED")?"PARTIAL":nativeResult.state();
+                    nativeState=nativeResult.state();nativeDispatches=nativeResult.dispatched();
+                    outcome=new DomainReconProcess.Outcome(state,outcome.count(),outcome.detail()+" Native phase: "+nativeResult.dispatched()+" dispatches; "+nativeResult.responses()+" responses. "+nativeResult.detail());
+                } catch(Exception e){run.fail("workflow inputs or native phase failed");nativeState="FAILED";outcome=new DomainReconProcess.Outcome("PARTIAL",outcome.count(),"Native inputs or HTTP phase failed validation; provider artifacts remain available.");}
+                finally {domainRuns.finish(ticket);}
+            }
+            boolean interrupted=Thread.interrupted();
+            try {
+                if(Files.isDirectory(plan.runDir(),java.nio.file.LinkOption.NOFOLLOW_LINKS))NativeReconChain.writeJson(plan.runDir().resolve("chain-result.json"),Map.of("schema_version",1,"workflow_run_id",plan.runId(),"state",outcome.state(),"sidecar_state",sidecarState,"native_state",nativeState,"native_dispatches",nativeDispatches,"host_candidates",outcome.count(),"native_http_enabled",plan.httpBudget()>0));
+            }catch(IOException e){outcome=new DomainReconProcess.Outcome("FAILED",outcome.count(),"Could not save the overall chain result; partial phase artifacts remain.");}
+            finally {if(interrupted)Thread.currentThread().interrupt();}
+            var finished=outcome;
+            SwingUtilities.invokeLater(() -> completion.accept(finished));
         });
     }
 
@@ -493,7 +522,7 @@ final class ReconController implements HttpHandler {
             deliverImportCompletion(completion, "[error] Choose a reconctl JSONL file first.");
             return;
         }
-        worker.submit(() -> {
+        assetWorker.submit(() -> {
             ScanRun run = ScanRun.begin(ScanProfile.EXTERNAL_TOOL, ScopeSnapshot.empty(), 0);
             try (Reader reader = Files.newBufferedReader(path)) {
                 SidecarEventImporter.ImportResult result = SidecarEventImporter.importJsonl(reader,
@@ -1068,7 +1097,7 @@ final class ReconController implements HttpHandler {
     }
 
     void queueCurrentInScopeSiteMap() {
-        worker.submit(() -> {
+        assetWorker.submit(() -> {
             api.siteMap().requestResponses().stream()
                     .map(HttpRequestResponse::request)
                     .filter(Objects::nonNull)
@@ -1091,6 +1120,7 @@ final class ReconController implements HttpHandler {
     void reset() {
         stateGeneration.incrementAndGet();
         activeRuns.invalidate();
+        domainRuns.invalidate();
         synchronized (crawlRuns) {
             crawlRuns.invalidate();
             crawlRun = null;
@@ -1129,6 +1159,7 @@ final class ReconController implements HttpHandler {
         running.set(false);
         activeRuns.close();
         crawlRuns.close();
+        domainRuns.close();
         // Stop the periodic saver first so it can't race the final blocking save on the PersistedObject.
         oobPoller.shutdownNow();
         saveStateBlocking();
@@ -1136,6 +1167,7 @@ final class ReconController implements HttpHandler {
         activeWorker.shutdownNow();
         llmWorker.shutdownNow();
         domainReconWorker.shutdownNow();
+        assetWorker.shutdownNow();
     }
 
     /** Synchronous save for extension unload, when the async EDT task might not run in time. */
@@ -1159,7 +1191,7 @@ final class ReconController implements HttpHandler {
                 + " | Reflections: " + reflectionDedupe.size()
                 + " | Active: " + activeDedupe.size()
                 + " | Assets: " + (assetHosts.size() + assetIps.size())
-                + " | GF packs: " + gfPatterns.packCount()
+                + " | GF packs/rules/warnings: " + gfPatterns.packCount() + "/" + gfPatterns.ruleCount() + "/" + gfPatterns.diagnostics().size()
                 + " | Payloads: " + payloadLibrary.totalPayloads();
     }
 
@@ -3016,21 +3048,12 @@ final class ReconController implements HttpHandler {
 
         if (scanGfPatterns.get()) {
             for (GfPatternLoader.GfMatch match : gfPatterns.scan(text)) {
-                String dedupe = "gf\0" + match.pack() + "\0" + match.value() + "\0" + url;
+                if (!includeGfMatch(match)) continue;
+                String dedupe = "gf\0" + match.pack() + "\0" + match.ruleId() + "\0" + match.value() + "\0" + url;
                 if (!issueDedupe.add(dedupe)) continue;
-                addSyntheticFinding("INFO", "gf", "gf:" + match.pack(), location, match.value(), url);
-                reporter.report("gf-issue\0" + match.pack() + "\0" + match.value() + "\0" + url,
-                        "gf pattern match (" + match.pack() + ")",
-                        "<b>gf pattern <code>" + escape(match.pack()) + "</code> matched</b><br>"
-                                + "Location: " + escape(location) + "<br>"
-                                + "Matched value: <code>" + escape(match.value()) + "</code><br><br>"
-                                + "gf packs flag parameters/patterns commonly associated with a vulnerability class "
-                                + "(SSRF, LFI, redirect, SQLi, XSS, etc.). This is an attack-surface hint, not a confirmed issue.",
-                        "Manually assess the flagged parameter/pattern for the associated vulnerability class.",
-                        url, AuditIssueSeverity.INFORMATION, AuditIssueConfidence.TENTATIVE,
-                        "Recon Hound scans in-scope traffic against community gf pattern packs to surface likely-vulnerable inputs.",
-                        "gf matches are heuristic attack-surface hints; confirm exploitability manually.",
-                        pair);
+                addSyntheticFinding(match.severity(), "gf:" + match.provider(), "gf:" + match.ruleId(),
+                        location, match.displayValue(), match.displaySourceUrl(url));
+                addToSiteMap(buildGfIssue(match, location, url, pair));
             }
         }
         publishStatus();
@@ -3201,6 +3224,27 @@ final class ReconController implements HttpHandler {
         )));
     }
 
+    private boolean includeGfMatch(GfPatternLoader.GfMatch match) {
+        return !"INFO".equals(match.severity()) || match.category().equals("unclassified") || includeInfoFindings.get();
+    }
+
+    private AuditIssue buildGfIssue(GfPatternLoader.GfMatch match, String location, String url, HttpRequestResponse pair) {
+        boolean sensitive = match.sensitive();
+        String detail = "<b>GF pattern candidate</b><br>Pack: <code>" + escape(match.pack())
+                + "</code><br>Rule: <code>" + escape(match.ruleId()) + "</code><br>Provider: " + escape(match.provider())
+                + "<br>Category: " + escape(match.category()) + "<br>Location: " + escape(location)
+                + "<br>Matched value: <code>" + escape(match.displayValue()) + "</code><br>"
+                + "Verification state: <b>SIGNAL</b>. This is a passive format/context match; credential validity, permissions "
+                + "and vulnerability impact have not been verified. Public identifiers and resource locations are inventory hints.";
+        return reporter.buildIfNew("gf-issue\0" + match.pack() + "\0" + match.ruleId() + "\0" + match.value() + "\0" + url,
+                "GF " + match.category() + " candidate (" + match.ruleId() + ")", detail,
+                sensitive ? "Review the original evidence; rotate and restrict a credential if its exposure is confirmed."
+                        : "Review the inventory/context before investigating the associated resource.",
+                match.displaySourceUrl(url), IssueReporter.severity(match.severity()), AuditIssueConfidence.TENTATIVE,
+                "Passive matching against local versioned GF patterns; no external engine or provider validation runs.",
+                "A pattern match does not establish a usable credential or a vulnerability.", pair);
+    }
+
     private void addAuditIssue(RegexHound.Finding finding, HttpRequestResponse pair) {
         addToSiteMap(buildRegexIssue(finding, pair));
     }
@@ -3299,6 +3343,12 @@ final class ReconController implements HttpHandler {
             }
             for (RegexHound.Finding f : regexHound.scan(request.toString(), "scan-request", url, includeInfoFindings.get())) {
                 addIfPresent(issues, buildRegexIssue(f, rr));
+            }
+            if (scanGfPatterns.get()) {
+                for (var match : gfPatterns.scan(response.toString())) if (includeGfMatch(match))
+                    addIfPresent(issues, buildGfIssue(match, "scan-response", url, rr));
+                for (var match : gfPatterns.scan(request.toString())) if (includeGfMatch(match))
+                    addIfPresent(issues, buildGfIssue(match, "scan-request", url, rr));
             }
             for (WebHygieneEngine.Note note : webHygiene.analyze(request, response)) {
                 addIfPresent(issues, buildHygieneIssue(note, url, rr));

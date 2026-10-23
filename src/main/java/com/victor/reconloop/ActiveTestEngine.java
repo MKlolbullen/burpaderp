@@ -741,9 +741,8 @@ final class ActiveTestEngine {
      * Replays an already-observed multipart file-upload request with its filename renamed to a small
      * set of extension-bypass variants (double extensions, case variants, alternate PHP-executable
      * extensions, legacy null-byte truncation). Only mutates the filename -- the rest of the request,
-     * including the actual file bytes, is left exactly as observed. A 2xx response is a lead; finding
-     * the renamed filename echoed back with its dangerous extension intact in the response body
-     * confirms it.
+     * including the actual file bytes, is left exactly as observed. A 2xx response and any reported
+     * dangerous path remain signals: this probe never retrieves the file or verifies its execution.
      */
     private int testFileUploadBypass(HttpRequest base, List<ActiveFinding> out) {
         String contentType = base.headerValue("Content-Type");
@@ -767,13 +766,14 @@ final class ActiveTestEngine {
                     if (rr == null || rr.response() == null) continue;
                     int status = rr.response().statusCode();
                     if (status >= 200 && status < 300) {
-                        Optional<String> stored = FileUploadEngine.findStoredDangerousPath(rr.response().bodyToString(), variant);
-                        out.add(new ActiveFinding(stored.isPresent() ? "HIGH" : "MEDIUM", "FileUpload", file.partName(),
+                        Optional<String> reportedPath = FileUploadEngine.findStoredDangerousPath(rr.response().bodyToString(), variant);
+                        out.add(new ActiveFinding(reportedPath.isPresent() ? "HIGH" : "MEDIUM", "FileUpload", file.partName(),
                                 "Renamed upload \"" + file.filename() + "\" -> \"" + variant + "\" was accepted (status "
-                                        + status + ")" + stored.map(p -> "; stored at " + p).orElse(""),
-                                stored.isPresent() ? VerificationState.REPRODUCED : VerificationState.SIGNAL,
+                                        + status + ")" + reportedPath.map(p -> "; reported path: " + p).orElse("")
+                                        + "; retrieval not verified",
+                                VerificationState.SIGNAL,
                                 base.url()));
-                        if (stored.isPresent()) break; // strongest possible signal for this file already found
+                        if (reportedPath.isPresent()) break; // A reported path needs separate retrieval verification.
                     }
                 } catch (Exception e) {
                     api.logging().logToError("File-upload bypass probe failed for " + base.url(), e);

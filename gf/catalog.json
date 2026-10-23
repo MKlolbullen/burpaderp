@@ -1,0 +1,7284 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "1.0.0",
+  "provenance": {
+    "reviewedAt": "2026-10-23",
+    "gitleaksCommit": "b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b",
+    "note": "Curated/adapted detectors, with authored heuristic origins identified per rule. Token lengths are detection heuristics; no validity checks or full Gitleaks compatibility."
+  },
+  "rules": [
+    {
+      "id": "github-classic",
+      "pack": "rh-secrets-prefixed",
+      "provider": "github",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(ghp_[A-Za-z0-9]{36})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "ghp_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "ghp_aB3dE6gH9jK2mN",
+            "5pQ8sT1vW4yZ7cF0iL",
+            "rUoX"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ghp_short"
+          ]
+        },
+        {
+          "parts": [
+            "ghp_",
+            "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoX",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "github-oauth",
+      "pack": "rh-secrets-prefixed",
+      "provider": "github",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(gho_[A-Za-z0-9]{36})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "gho_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "gho_aB3dE6gH9jK2mN",
+            "5pQ8sT1vW4yZ7cF0iL",
+            "rUoX"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "gho_short"
+          ]
+        },
+        {
+          "parts": [
+            "gho_",
+            "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoX",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "github-app-user",
+      "pack": "rh-secrets-prefixed",
+      "provider": "github",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(ghu_[A-Za-z0-9]{36})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "ghu_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "ghu_aB3dE6gH9jK2mN",
+            "5pQ8sT1vW4yZ7cF0iL",
+            "rUoX"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ghu_short"
+          ]
+        },
+        {
+          "parts": [
+            "ghu_",
+            "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoX",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "github-app-installation",
+      "pack": "rh-secrets-prefixed",
+      "provider": "github",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(ghs_[A-Za-z0-9]{36})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "ghs_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "ghs_aB3dE6gH9jK2mN",
+            "5pQ8sT1vW4yZ7cF0iL",
+            "rUoX"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ghs_short"
+          ]
+        },
+        {
+          "parts": [
+            "ghs_",
+            "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoX",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "github-refresh",
+      "pack": "rh-secrets-prefixed",
+      "provider": "github",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(ghr_[A-Za-z0-9]{36})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "ghr_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "ghr_aB3dE6gH9jK2mN",
+            "5pQ8sT1vW4yZ7cF0iL",
+            "rUoX"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ghr_short"
+          ]
+        },
+        {
+          "parts": [
+            "ghr_",
+            "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoX",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "github-fine-grained",
+      "pack": "rh-secrets-prefixed",
+      "provider": "github",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(github_pat_[A-Za-z0-9_]{82})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "github_pat_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "github_pat_aB3dE6g",
+            "H9jK2mN5pQ8sT1vW4y",
+            "Z7cF0iLrUoXaB3dE6g",
+            "H9jK2mN5pQ8sT1vW4y",
+            "Z7cF0iLrUoXaB3dE6g",
+            "H9j"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "github_pat_short"
+          ]
+        },
+        {
+          "parts": [
+            "github_pat_",
+            "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoXaB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoXaB3dE6gH9j",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gitlab-personal",
+      "pack": "rh-secrets-prefixed",
+      "provider": "gitlab",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(glpat\\-[A-Za-z0-9_-]{20})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "glpat-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "glpat-aB3dE6gH9jK2",
+            "mN5pQ8sT"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "glpat-short"
+          ]
+        },
+        {
+          "parts": [
+            "glpat-",
+            "aB3dE6gH9jK2mN5pQ8sT",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gitlab-deploy",
+      "pack": "rh-secrets-prefixed",
+      "provider": "gitlab",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(gldt\\-[A-Za-z0-9_-]{20})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "gldt-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "gldt-aB3dE6gH9jK2m",
+            "N5pQ8sT"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "gldt-short"
+          ]
+        },
+        {
+          "parts": [
+            "gldt-",
+            "aB3dE6gH9jK2mN5pQ8sT",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gitlab-runner",
+      "pack": "rh-secrets-prefixed",
+      "provider": "gitlab",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(glrt\\-[A-Za-z0-9_-]{20})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "glrt-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "glrt-aB3dE6gH9jK2m",
+            "N5pQ8sT"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "glrt-short"
+          ]
+        },
+        {
+          "parts": [
+            "glrt-",
+            "aB3dE6gH9jK2mN5pQ8sT",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gitlab-feature-flag",
+      "pack": "rh-secrets-prefixed",
+      "provider": "gitlab",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(glffct\\-[A-Za-z0-9_-]{20})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "glffct-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "glffct-aB3dE6gH9jK",
+            "2mN5pQ8sT"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "glffct-short"
+          ]
+        },
+        {
+          "parts": [
+            "glffct-",
+            "aB3dE6gH9jK2mN5pQ8sT",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gitlab-feed",
+      "pack": "rh-secrets-prefixed",
+      "provider": "gitlab",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(glft\\-[A-Za-z0-9_-]{20})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "glft-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "glft-aB3dE6gH9jK2m",
+            "N5pQ8sT"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "glft-short"
+          ]
+        },
+        {
+          "parts": [
+            "glft-",
+            "aB3dE6gH9jK2mN5pQ8sT",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gitlab-incoming-mail",
+      "pack": "rh-secrets-prefixed",
+      "provider": "gitlab",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(glimt\\-[A-Za-z0-9_-]{25})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "glimt-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "glimt-aB3dE6gH9jK2",
+            "mN5pQ8sT1vW4y"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "glimt-short"
+          ]
+        },
+        {
+          "parts": [
+            "glimt-",
+            "aB3dE6gH9jK2mN5pQ8sT1vW4y",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gitlab-kubernetes-agent",
+      "pack": "rh-secrets-prefixed",
+      "provider": "gitlab",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(glagent\\-[A-Za-z0-9_-]{50})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "glagent-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "glagent-aB3dE6gH9j",
+            "K2mN5pQ8sT1vW4yZ7c",
+            "F0iLrUoXaB3dE6gH9j",
+            "K2mN"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "glagent-short"
+          ]
+        },
+        {
+          "parts": [
+            "glagent-",
+            "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoXaB3dE6gH9jK2mN",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gitlab-oauth-secret",
+      "pack": "rh-secrets-prefixed",
+      "provider": "gitlab",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(gloas\\-[A-Za-z0-9_-]{64})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "gloas-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "gloas-aB3dE6gH9jK2",
+            "mN5pQ8sT1vW4yZ7cF0",
+            "iLrUoXaB3dE6gH9jK2",
+            "mN5pQ8sT1vW4yZ7c"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "gloas-short"
+          ]
+        },
+        {
+          "parts": [
+            "gloas-",
+            "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoXaB3dE6gH9jK2mN5pQ8sT1vW4yZ7c",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gitlab-pipeline-trigger",
+      "pack": "rh-secrets-prefixed",
+      "provider": "gitlab",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(glptt\\-[A-Za-z0-9_-]{40})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "glptt-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "glptt-aB3dE6gH9jK2",
+            "mN5pQ8sT1vW4yZ7cF0",
+            "iLrUoXaB3d"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "glptt-short"
+          ]
+        },
+        {
+          "parts": [
+            "glptt-",
+            "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoXaB3d",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gitlab-scim",
+      "pack": "rh-secrets-prefixed",
+      "provider": "gitlab",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(glsoat\\-[A-Za-z0-9_-]{20})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "glsoat-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "glsoat-aB3dE6gH9jK",
+            "2mN5pQ8sT"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "glsoat-short"
+          ]
+        },
+        {
+          "parts": [
+            "glsoat-",
+            "aB3dE6gH9jK2mN5pQ8sT",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gitlab-routable",
+      "pack": "rh-secrets-prefixed",
+      "provider": "gitlab",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(glpat\\-[A-Za-z0-9_-]{27,300}\\.[a-z0-9]{9})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "glpat-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "glpat-aB3dE6gH9jK2",
+            "mN5pQ8sT1vW4yZ7cF0",
+            ".ab1234567"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "glpat-short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aws-access-key",
+      "pack": "rh-identifiers",
+      "provider": "aws",
+      "category": "identifier",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_])(AKIA[A-Z0-9]{16})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "AKIA"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "AKIAABCDEFGHJKLMNP",
+            "QR"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "AKIAshort"
+          ]
+        },
+        {
+          "parts": [
+            "AKIA",
+            "ABCDEFGHJKLMNPQR",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aws-temporary-access-key",
+      "pack": "rh-identifiers",
+      "provider": "aws",
+      "category": "identifier",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_])(ASIA[A-Z0-9]{16})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "ASIA"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "ASIAABCDEFGHJKLMNP",
+            "QR"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ASIAshort"
+          ]
+        },
+        {
+          "parts": [
+            "ASIA",
+            "ABCDEFGHJKLMNPQR",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aws-bedrock-key",
+      "pack": "rh-secrets-prefixed",
+      "provider": "aws",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(ABSK[A-Za-z0-9+/]{109,269}={0,2})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "ABSK"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "ABSKaB3dE6gH9jK2mN",
+            "5pQ8sT1vW4yZ7cF0iL",
+            "rUoXaB3dE6gH9jK2mN",
+            "5pQ8sT1vW4yZ7cF0iL",
+            "rUoXaB3dE6gH9jK2mN",
+            "5pQ8sT1vW4yZ7cF0iL",
+            "rUoXaB3dE6gH9jK2"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ABSKshort"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "google-api-key",
+      "pack": "rh-secrets-prefixed",
+      "provider": "google",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(AIza[A-Za-z0-9_-]{35})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "AIza"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "AIzaaB3dE6gH9jK2mN",
+            "5pQ8sT1vW4yZ7cF0iL",
+            "rUo"
+          ],
+          "suffix": " "
+        },
+        {
+          "prefix": " ",
+          "valueParts": [
+            "AIzaaB3dE6gH9jK2mN",
+            "5pQ8sT1vW4yZ7cF0iL",
+            "rU-"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "AIzashort"
+          ]
+        },
+        {
+          "parts": [
+            "AIza",
+            "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUo",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "google-oauth-access-token",
+      "pack": "rh-secrets-prefixed",
+      "provider": "google",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(ya29\\.[A-Za-z0-9_-]{20,1024})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "ya29."
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "ya29.aB3dE6gH9jK2m",
+            "N5pQ8sT1vW4yZ7cF0i",
+            "LrUoXaB3dE6gH9jK2m",
+            "N5pQ8sT1vW4yZ7cF0i",
+            "LrUoXaB3dE6gH"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ya29.short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "google-oauth-client-secret",
+      "pack": "rh-secrets-prefixed",
+      "provider": "google",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(GOCSPX\\-[A-Za-z0-9_-]{20,128})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "GOCSPX-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "GOCSPX-aB3dE6gH9jK",
+            "2mN5pQ8sT1vW4yZ7cF",
+            "0iL"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "GOCSPX-short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "google-recaptcha-site-key",
+      "pack": "rh-identifiers",
+      "provider": "google",
+      "category": "identifier",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_])(6L[A-Za-z0-9_-]{38})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "6L"
+      ],
+      "sources": [
+        "https://developers.google.com/recaptcha/docs/display"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "6LaB3dE6gH9jK2mN5p",
+            "Q8sT1vW4yZ7cF0iLrU",
+            "oXaB"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "6Lshort"
+          ]
+        },
+        {
+          "parts": [
+            "6L",
+            "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoXaB",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "digitalocean-pat",
+      "pack": "rh-secrets-prefixed",
+      "provider": "digitalocean",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(dop_v1_[a-f0-9]{64})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "dop_v1_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "dop_v1_a13bc58d79e",
+            "0246fa13bc58d79e02",
+            "46fa13bc58d79e0246",
+            "fa13bc58d79e0246f"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "dop_v1_short"
+          ]
+        },
+        {
+          "parts": [
+            "dop_v1_",
+            "a13bc58d79e0246fa13bc58d79e0246fa13bc58d79e0246fa13bc58d79e0246f",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "digitalocean-access",
+      "pack": "rh-secrets-prefixed",
+      "provider": "digitalocean",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(doo_v1_[a-f0-9]{64})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "doo_v1_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "doo_v1_a13bc58d79e",
+            "0246fa13bc58d79e02",
+            "46fa13bc58d79e0246",
+            "fa13bc58d79e0246f"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "doo_v1_short"
+          ]
+        },
+        {
+          "parts": [
+            "doo_v1_",
+            "a13bc58d79e0246fa13bc58d79e0246fa13bc58d79e0246fa13bc58d79e0246f",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "digitalocean-refresh",
+      "pack": "rh-secrets-prefixed",
+      "provider": "digitalocean",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(dor_v1_[a-f0-9]{64})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "dor_v1_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "dor_v1_a13bc58d79e",
+            "0246fa13bc58d79e02",
+            "46fa13bc58d79e0246",
+            "fa13bc58d79e0246f"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "dor_v1_short"
+          ]
+        },
+        {
+          "parts": [
+            "dor_v1_",
+            "a13bc58d79e0246fa13bc58d79e0246fa13bc58d79e0246fa13bc58d79e0246f",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "stripe-sk-live",
+      "pack": "rh-secrets-prefixed",
+      "provider": "stripe",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(sk_live_[A-Za-z0-9]{16,128})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "sk_live_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "sk_live_aB3dE6gH9j",
+            "K2mN5pQ8sT1vW4yZ7c",
+            "F0iLrUoXaB3dE6gH9j",
+            "K2"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "sk_live_short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "stripe-rk-live",
+      "pack": "rh-secrets-prefixed",
+      "provider": "stripe",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(rk_live_[A-Za-z0-9]{16,128})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "rk_live_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "rk_live_aB3dE6gH9j",
+            "K2mN5pQ8sT1vW4yZ7c",
+            "F0iLrUoXaB3dE6gH9j",
+            "K2"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "rk_live_short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "stripe-sk-test",
+      "pack": "rh-secrets-prefixed",
+      "provider": "stripe",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(sk_test_[A-Za-z0-9]{16,128})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "sk_test_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "sk_test_aB3dE6gH9j",
+            "K2mN5pQ8sT1vW4yZ7c",
+            "F0iLrUoXaB3dE6gH9j",
+            "K2"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "sk_test_short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "stripe-rk-test",
+      "pack": "rh-secrets-prefixed",
+      "provider": "stripe",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(rk_test_[A-Za-z0-9]{16,128})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "rk_test_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "rk_test_aB3dE6gH9j",
+            "K2mN5pQ8sT1vW4yZ7c",
+            "F0iLrUoXaB3dE6gH9j",
+            "K2"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "rk_test_short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "stripe-sk-org",
+      "pack": "rh-secrets-prefixed",
+      "provider": "stripe",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(sk_org_[A-Za-z0-9]{16,128})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "sk_org_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "sk_org_aB3dE6gH9jK",
+            "2mN5pQ8sT1vW4yZ7cF",
+            "0iLrUoXaB3dE6gH9jK",
+            "2"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "sk_org_short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "stripe-pk-live",
+      "pack": "rh-identifiers",
+      "provider": "stripe",
+      "category": "identifier",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_])(pk_live_[A-Za-z0-9]{16,128})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "pk_live_"
+      ],
+      "sources": [
+        "https://docs.stripe.com/keys"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "pk_live_aB3dE6gH9j",
+            "K2mN5pQ8sT1vW4yZ7c",
+            "F0iLrUoXaB3dE6gH9j",
+            "K2"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "pk_live_short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "stripe-pk-test",
+      "pack": "rh-identifiers",
+      "provider": "stripe",
+      "category": "identifier",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_])(pk_test_[A-Za-z0-9]{16,128})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "pk_test_"
+      ],
+      "sources": [
+        "https://docs.stripe.com/keys"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "pk_test_aB3dE6gH9j",
+            "K2mN5pQ8sT1vW4yZ7c",
+            "F0iLrUoXaB3dE6gH9j",
+            "K2"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "pk_test_short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "stripe-webhook-secret",
+      "pack": "rh-secrets-prefixed",
+      "provider": "stripe",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(whsec_[A-Za-z0-9]{32,128})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "whsec_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "whsec_aB3dE6gH9jK2",
+            "mN5pQ8sT1vW4yZ7cF0",
+            "iLrUoXaB3dE6gH9jK2"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "whsec_short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "square-sq0atp",
+      "pack": "rh-secrets-prefixed",
+      "provider": "square",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(sq0atp\\-[A-Za-z0-9_-]{22,64})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "sq0atp-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "sq0atp-aB3dE6gH9jK",
+            "2mN5pQ8sT1vW4yZ7cF",
+            "0iLrUoXaB3dE6g"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "sq0atp-short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "square-sq0csp",
+      "pack": "rh-secrets-prefixed",
+      "provider": "square",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(sq0csp\\-[A-Za-z0-9_-]{22,64})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "sq0csp-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "sq0csp-aB3dE6gH9jK",
+            "2mN5pQ8sT1vW4yZ7cF",
+            "0iLrUoXaB3dE6g"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "sq0csp-short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "braintree-access-token",
+      "pack": "rh-secrets-prefixed",
+      "provider": "braintree",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(access_token\\$production\\$[a-z0-9]{16}\\$[a-f0-9]{32})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "access_token$production$"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "access_token$produ",
+            "ction$ab3de6gh9jk2",
+            "mn5p$a13bc58d79e02",
+            "46fa13bc58d79e0246",
+            "f"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "access_token$production$short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mailgun-private-key",
+      "pack": "rh-secrets-prefixed",
+      "provider": "mailgun",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(key\\-[a-f0-9]{32})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "key-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "key-a13bc58d79e024",
+            "6fa13bc58d79e0246f"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "key-short"
+          ]
+        },
+        {
+          "parts": [
+            "key-",
+            "a13bc58d79e0246fa13bc58d79e0246f",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sendgrid-key",
+      "pack": "rh-secrets-prefixed",
+      "provider": "sendgrid",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(SG\\.[A-Za-z0-9_-]{22}\\.[A-Za-z0-9_-]{43})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "SG."
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "SG.aB3dE6gH9jK2mN5",
+            "pQ8sT1v.aB3dE6gH9j",
+            "K2mN5pQ8sT1vW4yZ7c",
+            "F0iLrUoXaB3dE6g"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "SG.short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "twilio-account",
+      "pack": "rh-identifiers",
+      "provider": "twilio",
+      "category": "identifier",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_])(AC[a-fA-F0-9]{32})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "AC"
+      ],
+      "sources": [
+        "https://www.twilio.com/docs/iam/api-keys/key-resource-v1"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "ACa13bc58d79e0246f",
+            "a13bc58d79e0246f"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ACshort"
+          ]
+        },
+        {
+          "parts": [
+            "AC",
+            "a13bc58d79e0246fa13bc58d79e0246f",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "twilio-application",
+      "pack": "rh-identifiers",
+      "provider": "twilio",
+      "category": "identifier",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_])(AP[a-fA-F0-9]{32})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "AP"
+      ],
+      "sources": [
+        "https://www.twilio.com/docs/iam/api-keys/key-resource-v1"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "APa13bc58d79e0246f",
+            "a13bc58d79e0246f"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "APshort"
+          ]
+        },
+        {
+          "parts": [
+            "AP",
+            "a13bc58d79e0246fa13bc58d79e0246f",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "twilio-api-key-id",
+      "pack": "rh-identifiers",
+      "provider": "twilio",
+      "category": "identifier",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_])(SK[a-fA-F0-9]{32})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "SK"
+      ],
+      "sources": [
+        "https://www.twilio.com/docs/iam/api-keys/key-resource-v1"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "SKa13bc58d79e0246f",
+            "a13bc58d79e0246f"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "SKshort"
+          ]
+        },
+        {
+          "parts": [
+            "SK",
+            "a13bc58d79e0246fa13bc58d79e0246f",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "npm-token",
+      "pack": "rh-secrets-prefixed",
+      "provider": "npm",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(npm_[A-Za-z0-9]{36})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "npm_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "npm_aB3dE6gH9jK2mN",
+            "5pQ8sT1vW4yZ7cF0iL",
+            "rUoX"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "npm_short"
+          ]
+        },
+        {
+          "parts": [
+            "npm_",
+            "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoX",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pypi-token",
+      "pack": "rh-secrets-prefixed",
+      "provider": "pypi",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(pypi\\-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,1000})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "pypi-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "pypi-AgEIcHlwaS5vc",
+            "mcaB3dE6gH9jK2mN5p",
+            "Q8sT1vW4yZ7cF0iLrU",
+            "oXaB3dE6gH9jK2mN5p",
+            "Q8sT1vW4yZ7cF0iLrU",
+            "oXaB3dE6gH"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "pypi-short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "shopify-admin",
+      "pack": "rh-secrets-prefixed",
+      "provider": "shopify",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(shpat_[A-Fa-f0-9]{32})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "shpat_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "shpat_a13bc58d79e0",
+            "246fa13bc58d79e024",
+            "6f"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "shpat_short"
+          ]
+        },
+        {
+          "parts": [
+            "shpat_",
+            "a13bc58d79e0246fa13bc58d79e0246f",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "shopify-custom",
+      "pack": "rh-secrets-prefixed",
+      "provider": "shopify",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(shpca_[A-Fa-f0-9]{32})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "shpca_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "shpca_a13bc58d79e0",
+            "246fa13bc58d79e024",
+            "6f"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "shpca_short"
+          ]
+        },
+        {
+          "parts": [
+            "shpca_",
+            "a13bc58d79e0246fa13bc58d79e0246f",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "shopify-private",
+      "pack": "rh-secrets-prefixed",
+      "provider": "shopify",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(shppa_[A-Fa-f0-9]{32})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "shppa_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "shppa_a13bc58d79e0",
+            "246fa13bc58d79e024",
+            "6f"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "shppa_short"
+          ]
+        },
+        {
+          "parts": [
+            "shppa_",
+            "a13bc58d79e0246fa13bc58d79e0246f",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "shopify-shared-secret",
+      "pack": "rh-secrets-prefixed",
+      "provider": "shopify",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(shpss_[A-Fa-f0-9]{32})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "shpss_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "shpss_a13bc58d79e0",
+            "246fa13bc58d79e024",
+            "6f"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "shpss_short"
+          ]
+        },
+        {
+          "parts": [
+            "shpss_",
+            "a13bc58d79e0246fa13bc58d79e0246f",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "huggingface-token",
+      "pack": "rh-secrets-prefixed",
+      "provider": "huggingface",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(hf_[A-Za-z]{34})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "hf_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "hf_AbCdEfGhIjKlMnO",
+            "pQrStUvWxYzAbCdEfG",
+            "h"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "hf_short"
+          ]
+        },
+        {
+          "parts": [
+            "hf_",
+            "AbCdEfGhIjKlMnOpQrStUvWxYzAbCdEfGh",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "linear-api-key",
+      "pack": "rh-secrets-prefixed",
+      "provider": "linear",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(lin_api_[A-Za-z0-9]{40})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "lin_api_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "lin_api_aB3dE6gH9j",
+            "K2mN5pQ8sT1vW4yZ7c",
+            "F0iLrUoXaB3d"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "lin_api_short"
+          ]
+        },
+        {
+          "parts": [
+            "lin_api_",
+            "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoXaB3d",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "figma-token",
+      "pack": "rh-secrets-prefixed",
+      "provider": "figma",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(figd_[A-Za-z0-9_-]{40,255})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "figd_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "figd_aB3dE6gH9jK2m",
+            "N5pQ8sT1vW4yZ7cF0i",
+            "LrUoXaB3dE6gH9jK2"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "figd_short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "notion-token",
+      "pack": "rh-secrets-prefixed",
+      "provider": "notion",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(ntn_[0-9]{11}[A-Za-z0-9]{35})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "ntn_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "ntn_01234567890aB3",
+            "dE6gH9jK2mN5pQ8sT1",
+            "vW4yZ7cF0iLrUo"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ntn_short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "databricks-token",
+      "pack": "rh-secrets-prefixed",
+      "provider": "databricks",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(dapi[a-f0-9]{32})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "dapi"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "dapia13bc58d79e024",
+            "6fa13bc58d79e0246f"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "dapishort"
+          ]
+        },
+        {
+          "parts": [
+            "dapi",
+            "a13bc58d79e0246fa13bc58d79e0246f",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vault-service",
+      "pack": "rh-secrets-prefixed",
+      "provider": "hashicorp",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(hvs\\.[A-Za-z0-9_-]{90,120})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "hvs."
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "hvs.aB3dE6gH9jK2mN",
+            "5pQ8sT1vW4yZ7cF0iL",
+            "rUoXaB3dE6gH9jK2mN",
+            "5pQ8sT1vW4yZ7cF0iL",
+            "rUoXaB3dE6gH9jK2mN",
+            "5pQ8sT1vW4"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "hvs.short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vault-batch",
+      "pack": "rh-secrets-prefixed",
+      "provider": "hashicorp",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(hvb\\.[A-Za-z0-9_-]{138,300})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "hvb."
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "hvb.aB3dE6gH9jK2mN",
+            "5pQ8sT1vW4yZ7cF0iL",
+            "rUoXaB3dE6gH9jK2mN",
+            "5pQ8sT1vW4yZ7cF0iL",
+            "rUoXaB3dE6gH9jK2mN",
+            "5pQ8sT1vW4yZ7cF0iL",
+            "rUoXaB3dE6gH9jK2mN",
+            "5pQ8sT1vW4yZ7cF0iL",
+            "rUoXaB3dE6gH9jK2mN",
+            "5p"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "hvb.short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "doppler-personal",
+      "pack": "rh-secrets-prefixed",
+      "provider": "doppler",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(dp\\.pt\\.[A-Za-z0-9]{40,44})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "dp.pt."
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "dp.pt.aB3dE6gH9jK2",
+            "mN5pQ8sT1vW4yZ7cF0",
+            "iLrUoXaB3dE6g"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "dp.pt.short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "doppler-service",
+      "pack": "rh-secrets-prefixed",
+      "provider": "doppler",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(dp\\.st\\.[A-Za-z0-9]{40,44})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "dp.st."
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "dp.st.aB3dE6gH9jK2",
+            "mN5pQ8sT1vW4yZ7cF0",
+            "iLrUoXaB3dE6g"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "dp.st.short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "planetscale-password",
+      "pack": "rh-secrets-prefixed",
+      "provider": "planetscale",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(pscale_pw_[A-Za-z0-9_.=-]{32,64})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "pscale_pw_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "pscale_pw_aB3dE6gH",
+            "9jK2mN5pQ8sT1vW4yZ",
+            "7cF0iLrUoXaB3d"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "pscale_pw_short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "planetscale-token",
+      "pack": "rh-secrets-prefixed",
+      "provider": "planetscale",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(pscale_tkn_[A-Za-z0-9_.=-]{32,64})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "pscale_tkn_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "pscale_tkn_aB3dE6g",
+            "H9jK2mN5pQ8sT1vW4y",
+            "Z7cF0iLrUoXaB3d"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "pscale_tkn_short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "groq-api-key",
+      "pack": "rh-secrets-prefixed",
+      "provider": "groq",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(gsk_[A-Za-z0-9]{40,128})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "gsk_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "gsk_aB3dE6gH9jK2mN",
+            "5pQ8sT1vW4yZ7cF0iL",
+            "rUoXaB3dE6gH9jK2mN",
+            "5p"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "gsk_short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "replicate-api-token",
+      "pack": "rh-secrets-prefixed",
+      "provider": "replicate",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(r8_[A-Za-z0-9]{37,128})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "r8_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "r8_aB3dE6gH9jK2mN5",
+            "pQ8sT1vW4yZ7cF0iLr",
+            "UoXaB3d"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "r8_short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "resend-api-key",
+      "pack": "rh-secrets-prefixed",
+      "provider": "resend",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(re_[A-Za-z0-9_]{32,128})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "re_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "re_aB3dE6gH9jK2mN5",
+            "pQ8sT1vW4yZ7cF0iLr",
+            "UoXaB3d"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "re_short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "supabase-secret",
+      "pack": "rh-secrets-prefixed",
+      "provider": "supabase",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(sb_secret_[A-Za-z0-9_-]{20,255})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "sb_secret_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "sb_secret_aB3dE6gH",
+            "9jK2mN5pQ8sT1vW4yZ",
+            "7cF0iLrUoXaB3d"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "sb_secret_short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "supabase-publishable",
+      "pack": "rh-identifiers",
+      "provider": "supabase",
+      "category": "identifier",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_])(sb_publishable_[A-Za-z0-9_-]{20,255})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "sb_publishable_"
+      ],
+      "sources": [
+        "https://supabase.com/docs/guides/api/api-keys"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "sb_publishable_aB3",
+            "dE6gH9jK2mN5pQ8sT1",
+            "vW4yZ7cF0iLrUoXaB3",
+            "d"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "sb_publishable_short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "heroku-key",
+      "pack": "rh-secrets-prefixed",
+      "provider": "heroku",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(HRKU\\-AA[A-Za-z0-9_-]{58})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "HRKU-AA"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "HRKU-AAaB3dE6gH9jK",
+            "2mN5pQ8sT1vW4yZ7cF",
+            "0iLrUoXaB3dE6gH9jK",
+            "2mN5pQ8sT1v"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "HRKU-AAshort"
+          ]
+        },
+        {
+          "parts": [
+            "HRKU-AA",
+            "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoXaB3dE6gH9jK2mN5pQ8sT1v",
+            "X"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "postman-key",
+      "pack": "rh-secrets-prefixed",
+      "provider": "postman",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(PMAK\\-[a-f0-9]{24}-[a-f0-9]{34})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "PMAK-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "PMAK-a13bc58d79e02",
+            "46fa13bc58d-a13bc5",
+            "8d79e0246fa13bc58d",
+            "79e0246fa1"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "PMAK-short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "grafana-service",
+      "pack": "rh-secrets-prefixed",
+      "provider": "grafana",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(glsa_[A-Za-z0-9]{32}_[a-fA-F0-9]{8})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "glsa_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "glsa_aB3dE6gH9jK2m",
+            "N5pQ8sT1vW4yZ7cF0i",
+            "L_a13bc58d"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "glsa_short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "grafana-cloud",
+      "pack": "rh-secrets-prefixed",
+      "provider": "grafana",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(glc_[A-Za-z0-9+/]{32,400}={0,3})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "glc_"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "glc_aB3dE6gH9jK2mN",
+            "5pQ8sT1vW4yZ7cF0iL",
+            "rUoXaB3dE6gH9jK2mN",
+            "5pQ8sT1vW4yZ7c"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "glc_short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "slack-bot",
+      "pack": "rh-secrets-prefixed",
+      "provider": "slack",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(xoxb\\-[0-9]{10,13}-[0-9]{10,13}-[A-Za-z0-9-]{20,80})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "xoxb-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "xoxb-123456789012-",
+            "123456789012-aB3dE",
+            "6gH9jK2mN5pQ8sT1vW",
+            "4yZ7cF0"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "xoxb-short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "slack-user",
+      "pack": "rh-secrets-prefixed",
+      "provider": "slack",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(xoxp\\-[0-9]{10,13}-[0-9]{10,13}-[0-9]{10,13}-[A-Za-z0-9-]{28,34})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "xoxp-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "xoxp-123456789012-",
+            "123456789012-12345",
+            "6789012-aB3dE6gH9j",
+            "K2mN5pQ8sT1vW4yZ7c",
+            "F0iL"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "xoxp-short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "slack-app",
+      "pack": "rh-secrets-prefixed",
+      "provider": "slack",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(xapp\\-[0-9]-[A-Za-z0-9]{8,32}-[0-9]{10,16}-[A-Za-z0-9]{32,128})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "xapp-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "xapp-1-A1B2C3D4-12",
+            "3456789012-aB3dE6g",
+            "H9jK2mN5pQ8sT1vW4y",
+            "Z7cF0iLrUoXaB3d"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "xapp-short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "facebook-page-token",
+      "pack": "rh-secrets-prefixed",
+      "provider": "facebook",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(EAACEdEose0cBA[A-Za-z0-9]{20,512})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "EAACEdEose0cBA"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "EAACEdEose0cBAaB3d",
+            "E6gH9jK2mN5pQ8sT1v",
+            "W4yZ7cF0iLrUoXaB3d",
+            "E6gH9jK2mN5pQ8sT1v",
+            "W4yZ7cF0iLrUoXaB3d",
+            "E6gH"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "EAACEdEose0cBAshort"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "openai-proj",
+      "pack": "rh-secrets-prefixed",
+      "provider": "openai",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(sk\\-proj\\-[A-Za-z0-9_-]{40,255})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "sk-proj-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "sk-proj-aB3dE6gH9j",
+            "K2mN5pQ8sT1vW4yZ7c",
+            "F0iLrUoXaB3dE6gH9j",
+            "K2mN5pQ8sT1vW4yZ7c",
+            "F0iLrUoXaB3dE6gH9j",
+            "K2mN5pQ8sT1vW4yZ7c"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "sk-proj-short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "openai-svcacct",
+      "pack": "rh-secrets-prefixed",
+      "provider": "openai",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(sk\\-svcacct\\-[A-Za-z0-9_-]{40,255})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "sk-svcacct-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "sk-svcacct-aB3dE6g",
+            "H9jK2mN5pQ8sT1vW4y",
+            "Z7cF0iLrUoXaB3dE6g",
+            "H9jK2mN5pQ8sT1vW4y",
+            "Z7cF0iLrUoXaB3dE6g",
+            "H9jK2mN5pQ8sT1vW4y",
+            "Z7c"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "sk-svcacct-short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "openai-admin",
+      "pack": "rh-secrets-prefixed",
+      "provider": "openai",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(sk\\-admin\\-[A-Za-z0-9_-]{40,255})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "sk-admin-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "sk-admin-aB3dE6gH9",
+            "jK2mN5pQ8sT1vW4yZ7",
+            "cF0iLrUoXaB3dE6gH9",
+            "jK2mN5pQ8sT1vW4yZ7",
+            "cF0iLrUoXaB3dE6gH9",
+            "jK2mN5pQ8sT1vW4yZ7",
+            "c"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "sk-admin-short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "openai-legacy",
+      "pack": "rh-secrets-prefixed",
+      "provider": "openai",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(sk\\-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20})($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "sk-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "sk-aB3dE6gH9jK2mN5",
+            "pQ8sTT3BlbkFJaB3dE",
+            "6gH9jK2mN5pQ8sT"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "sk-short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "anthropic-api03",
+      "pack": "rh-secrets-prefixed",
+      "provider": "anthropic",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(sk\\-ant\\-api03\\-[A-Za-z0-9_-]{93}AA)($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "sk-ant-api03-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "sk-ant-api03-aB3dE",
+            "6gH9jK2mN5pQ8sT1vW",
+            "4yZ7cF0iLrUoXaB3dE",
+            "6gH9jK2mN5pQ8sT1vW",
+            "4yZ7cF0iLrUoXaB3dE",
+            "6gH9jK2mN5pQ8sT1AA"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "sk-ant-api03-short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "anthropic-admin01",
+      "pack": "rh-secrets-prefixed",
+      "provider": "anthropic",
+      "category": "secret",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(sk\\-ant\\-admin01\\-[A-Za-z0-9_-]{93}AA)($|[^A-Za-z0-9_.+-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "sk-ant-admin01-"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "sk-ant-admin01-aB3",
+            "dE6gH9jK2mN5pQ8sT1",
+            "vW4yZ7cF0iLrUoXaB3",
+            "dE6gH9jK2mN5pQ8sT1",
+            "vW4yZ7cF0iLrUoXaB3",
+            "dE6gH9jK2mN5pQ8sT1",
+            "AA"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "sk-ant-admin01-short"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aws-secret",
+      "pack": "rh-secrets-context",
+      "provider": "aws",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(AWS_SECRET_ACCESS_KEY|aws_secret_access_key|SecretAccessKey|AWS\\-SECRET\\-ACCESS\\-KEY|aws\\-secret\\-access\\-key|AWSSECRETACCESSKEY|awssecretaccesskey)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9/+=]{40})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "AWS_SECRET_ACCESS_KEY",
+        "aws_secret_access_key",
+        "SecretAccessKey",
+        "AWS-SECRET-ACCESS-KEY",
+        "aws-secret-access-key",
+        "AWSSECRETACCESSKEY",
+        "awssecretaccesskey"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "AWS_SECRET_ACCESS_KEY=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"AWS_SECRET_ACCESS_KEY\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "AWS_SECRET_ACCESS_KEY=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3d",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aws-session",
+      "pack": "rh-secrets-context",
+      "provider": "aws",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(AWS_SESSION_TOKEN|SessionToken|AWS\\-SESSION\\-TOKEN|AWSSESSIONTOKEN)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9/+=]{80,4096})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "AWS_SESSION_TOKEN",
+        "SessionToken",
+        "AWS-SESSION-TOKEN",
+        "AWSSESSIONTOKEN"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "AWS_SESSION_TOKEN=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5p"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"AWS_SESSION_TOKEN\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5p"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "AWS_SESSION_TOKEN=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoXaB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoXaB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoXaB3dE6gH9jK2mN5p",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "azure-client-secret",
+      "pack": "rh-secrets-context",
+      "provider": "microsoft",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(AZURE_CLIENT_SECRET|ARM_CLIENT_SECRET|AZURE\\-CLIENT\\-SECRET|ARM\\-CLIENT\\-SECRET|AZURECLIENTSECRET|ARMCLIENTSECRET)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_~.-]{16,256})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "AZURE_CLIENT_SECRET",
+        "ARM_CLIENT_SECRET",
+        "AZURE-CLIENT-SECRET",
+        "ARM-CLIENT-SECRET",
+        "AZURECLIENTSECRET",
+        "ARMCLIENTSECRET"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "AZURE_CLIENT_SECRET=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"AZURE_CLIENT_SECRET\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "AZURE_CLIENT_SECRET=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3d",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "azure-account-key",
+      "pack": "rh-secrets-context",
+      "provider": "microsoft",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(AccountKey|AZURE_STORAGE_KEY|AZURE\\-STORAGE\\-KEY|AZURESTORAGEKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9+/]{80,100}={0,2})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "AccountKey",
+        "AZURE_STORAGE_KEY",
+        "AZURE-STORAGE-KEY",
+        "AZURESTORAGEKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "AccountKey=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5p"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"AccountKey\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5p"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "AccountKey=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoXaB3dE6gH9jK2mN5p",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "azure-servicebus-key",
+      "pack": "rh-secrets-context",
+      "provider": "microsoft",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(SharedAccessKey)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9+/]{40,100}={0,2})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "SharedAccessKey"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "SharedAccessKey=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"SharedAccessKey\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "SharedAccessKey=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3dE6gH",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "github-variable",
+      "pack": "rh-secrets-context",
+      "provider": "github",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(GITHUB_TOKEN|GH_TOKEN|GITHUB_API_KEY|GITHUB\\-TOKEN|GH\\-TOKEN|GITHUB\\-API\\-KEY|GITHUBTOKEN|GHTOKEN|GITHUBAPIKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_.-]{20,512})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "GITHUB_API_KEY",
+        "GITHUB-TOKEN",
+        "GH-TOKEN",
+        "GITHUB-API-KEY",
+        "GITHUBTOKEN",
+        "GHTOKEN",
+        "GITHUBAPIKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "GITHUB_TOKEN=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"GITHUB_TOKEN\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "GITHUB_TOKEN=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3dE6gH9jK2mN",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gitlab-variable",
+      "pack": "rh-secrets-context",
+      "provider": "gitlab",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(GITLAB_TOKEN|PRIVATE\\-TOKEN|CI_JOB_TOKEN|GITLAB\\-TOKEN|CI\\-JOB\\-TOKEN|GITLABTOKEN|CIJOBTOKEN)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_.-]{20,512})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "GITLAB_TOKEN",
+        "PRIVATE-TOKEN",
+        "CI_JOB_TOKEN",
+        "GITLAB-TOKEN",
+        "CI-JOB-TOKEN",
+        "GITLABTOKEN",
+        "CIJOBTOKEN"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "GITLAB_TOKEN=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"GITLAB_TOKEN\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "GITLAB_TOKEN=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3dE6gH9jK2mN",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "google-client-secret",
+      "pack": "rh-secrets-context",
+      "provider": "google",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(GOOGLE_CLIENT_SECRET|GCP_CLIENT_SECRET|GOOGLE\\-CLIENT\\-SECRET|GCP\\-CLIENT\\-SECRET|GOOGLECLIENTSECRET|GCPCLIENTSECRET)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_.-]{16,512})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "GOOGLE_CLIENT_SECRET",
+        "GCP_CLIENT_SECRET",
+        "GOOGLE-CLIENT-SECRET",
+        "GCP-CLIENT-SECRET",
+        "GOOGLECLIENTSECRET",
+        "GCPCLIENTSECRET"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "GOOGLE_CLIENT_SECRET=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"GOOGLE_CLIENT_SECRET\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "GOOGLE_CLIENT_SECRET=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3d",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "google-refresh-token",
+      "pack": "rh-secrets-context",
+      "provider": "google",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(GOOGLE_REFRESH_TOKEN|GOOGLE\\-REFRESH\\-TOKEN|GOOGLEREFRESHTOKEN)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_./=-]{20,1024})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "GOOGLE_REFRESH_TOKEN",
+        "GOOGLE-REFRESH-TOKEN",
+        "GOOGLEREFRESHTOKEN"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "GOOGLE_REFRESH_TOKEN=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrU"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"GOOGLE_REFRESH_TOKEN\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrU"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "GOOGLE_REFRESH_TOKEN=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrU",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cloudflare-api-token",
+      "pack": "rh-secrets-context",
+      "provider": "cloudflare",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(CLOUDFLARE_API_TOKEN|CF_API_TOKEN|CLOUDFLARE_API_KEY|CLOUDFLARE\\-API\\-TOKEN|CF\\-API\\-TOKEN|CLOUDFLARE\\-API\\-KEY|CLOUDFLAREAPITOKEN|CFAPITOKEN|CLOUDFLAREAPIKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_-]{37,64})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "CLOUDFLARE_API_TOKEN",
+        "CF_API_TOKEN",
+        "CLOUDFLARE_API_KEY",
+        "CLOUDFLARE-API-TOKEN",
+        "CF-API-TOKEN",
+        "CLOUDFLARE-API-KEY",
+        "CLOUDFLAREAPITOKEN",
+        "CFAPITOKEN",
+        "CLOUDFLAREAPIKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "CLOUDFLARE_API_TOKEN=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"CLOUDFLARE_API_TOKEN\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "CLOUDFLARE_API_TOKEN=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3d",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "twilio-auth-token",
+      "pack": "rh-secrets-context",
+      "provider": "twilio",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(TWILIO_AUTH_TOKEN|TWILIO\\-AUTH\\-TOKEN|TWILIOAUTHTOKEN)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([a-f0-9]{32})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "TWILIO_AUTH_TOKEN",
+        "TWILIO-AUTH-TOKEN",
+        "TWILIOAUTHTOKEN"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "TWILIO_AUTH_TOKEN=\"",
+          "valueParts": [
+            "a13bc58d79e0246fa1",
+            "3bc58d79e0246f"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"TWILIO_AUTH_TOKEN\": \"",
+          "valueParts": [
+            "a13bc58d79e0246fa1",
+            "3bc58d79e0246f"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "TWILIO_AUTH_TOKEN=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "a13bc58d79e0246fa1",
+            "3bc58d79e0246f",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "datadog-key",
+      "pack": "rh-secrets-context",
+      "provider": "datadog",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(DD_API_KEY|DD_APP_KEY|DATADOG_API_KEY|DATADOG_APP_KEY|DD\\-API\\-KEY|DD\\-APP\\-KEY|DATADOG\\-API\\-KEY|DATADOG\\-APP\\-KEY|DDAPIKEY|DDAPPKEY|DATADOGAPIKEY|DATADOGAPPKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([a-f0-9]{32,40})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "DD_API_KEY",
+        "DD_APP_KEY",
+        "DATADOG_API_KEY",
+        "DATADOG_APP_KEY",
+        "DD-API-KEY",
+        "DD-APP-KEY",
+        "DATADOG-API-KEY",
+        "DATADOG-APP-KEY",
+        "DDAPIKEY",
+        "DDAPPKEY",
+        "DATADOGAPIKEY",
+        "DATADOGAPPKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "DD_API_KEY=\"",
+          "valueParts": [
+            "a13bc58d79e0246fa1",
+            "3bc58d79e0246fa13b",
+            "c58d"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"DD_API_KEY\": \"",
+          "valueParts": [
+            "a13bc58d79e0246fa1",
+            "3bc58d79e0246fa13b",
+            "c58d"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "DD_API_KEY=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "a13bc58d79e0246fa1",
+            "3bc58d79e0246fa13bc58d",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "trello-token",
+      "pack": "rh-secrets-context",
+      "provider": "trello",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(TRELLO_TOKEN|TRELLO_API_TOKEN|TRELLO\\-TOKEN|TRELLO\\-API\\-TOKEN|TRELLOTOKEN|TRELLOAPITOKEN)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([a-f0-9]{40,128})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "TRELLO_TOKEN",
+        "TRELLO_API_TOKEN",
+        "TRELLO-TOKEN",
+        "TRELLO-API-TOKEN",
+        "TRELLOTOKEN",
+        "TRELLOAPITOKEN"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "TRELLO_TOKEN=\"",
+          "valueParts": [
+            "a13bc58d79e0246fa1",
+            "3bc58d79e0246fa13b",
+            "c58d79e0246fa13bc5",
+            "8d79e0246f"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"TRELLO_TOKEN\": \"",
+          "valueParts": [
+            "a13bc58d79e0246fa1",
+            "3bc58d79e0246fa13b",
+            "c58d79e0246fa13bc5",
+            "8d79e0246f"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "TRELLO_TOKEN=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "a13bc58d79e0246fa1",
+            "3bc58d79e0246fa13bc58d79e0246fa13bc58d79e0246f",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fastly-token",
+      "pack": "rh-secrets-context",
+      "provider": "fastly",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(FASTLY_API_TOKEN|FASTLY_API_KEY|FASTLY\\-API\\-TOKEN|FASTLY\\-API\\-KEY|FASTLYAPITOKEN|FASTLYAPIKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_=-]{32,64})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "FASTLY_API_TOKEN",
+        "FASTLY_API_KEY",
+        "FASTLY-API-TOKEN",
+        "FASTLY-API-KEY",
+        "FASTLYAPITOKEN",
+        "FASTLYAPIKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "FASTLY_API_TOKEN=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"FASTLY_API_TOKEN\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "FASTLY_API_TOKEN=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3d",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "netlify-token",
+      "pack": "rh-secrets-context",
+      "provider": "netlify",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(NETLIFY_AUTH_TOKEN|NETLIFY_ACCESS_TOKEN|NETLIFY\\-AUTH\\-TOKEN|NETLIFY\\-ACCESS\\-TOKEN|NETLIFYAUTHTOKEN|NETLIFYACCESSTOKEN)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_=-]{40,64})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "NETLIFY_AUTH_TOKEN",
+        "NETLIFY_ACCESS_TOKEN",
+        "NETLIFY-AUTH-TOKEN",
+        "NETLIFY-ACCESS-TOKEN",
+        "NETLIFYAUTHTOKEN",
+        "NETLIFYACCESSTOKEN"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "NETLIFY_AUTH_TOKEN=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"NETLIFY_AUTH_TOKEN\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "NETLIFY_AUTH_TOKEN=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3dE6gH",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vercel-token",
+      "pack": "rh-secrets-context",
+      "provider": "vercel",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(VERCEL_TOKEN|VERCEL_ACCESS_TOKEN|VERCEL\\-TOKEN|VERCEL\\-ACCESS\\-TOKEN|VERCELTOKEN|VERCELACCESSTOKEN)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_-]{20,128})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "VERCEL_TOKEN",
+        "VERCEL_ACCESS_TOKEN",
+        "VERCEL-TOKEN",
+        "VERCEL-ACCESS-TOKEN",
+        "VERCELTOKEN",
+        "VERCELACCESSTOKEN"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "VERCEL_TOKEN=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"VERCEL_TOKEN\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "VERCEL_TOKEN=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3d",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "digitalocean-context",
+      "pack": "rh-secrets-context",
+      "provider": "digitalocean",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(DIGITALOCEAN_ACCESS_TOKEN|DIGITALOCEAN\\-ACCESS\\-TOKEN|DIGITALOCEANACCESSTOKEN)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_-]{32,128})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "DIGITALOCEAN_ACCESS_TOKEN",
+        "DIGITALOCEAN-ACCESS-TOKEN",
+        "DIGITALOCEANACCESSTOKEN"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "DIGITALOCEAN_ACCESS_TOKEN=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7c"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"DIGITALOCEAN_ACCESS_TOKEN\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7c"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "DIGITALOCEAN_ACCESS_TOKEN=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3dE6gH9jK2mN5pQ8sT1vW4yZ7c",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "oci-auth",
+      "pack": "rh-secrets-context",
+      "provider": "oracle",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(OCI_AUTH_TOKEN|ORACLE_AUTH_TOKEN|OCI\\-AUTH\\-TOKEN|ORACLE\\-AUTH\\-TOKEN|OCIAUTHTOKEN|ORACLEAUTHTOKEN)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_./+=-]{16,256})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "OCI_AUTH_TOKEN",
+        "ORACLE_AUTH_TOKEN",
+        "OCI-AUTH-TOKEN",
+        "ORACLE-AUTH-TOKEN",
+        "OCIAUTHTOKEN",
+        "ORACLEAUTHTOKEN"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "OCI_AUTH_TOKEN=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"OCI_AUTH_TOKEN\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "OCI_AUTH_TOKEN=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3d",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "openai-context",
+      "pack": "rh-secrets-context",
+      "provider": "openai",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(OPENAI_API_KEY|OPENAI\\-API\\-KEY|OPENAIAPIKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_-]{32,255})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "OPENAI_API_KEY",
+        "OPENAI-API-KEY",
+        "OPENAIAPIKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "OPENAI_API_KEY=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"OPENAI_API_KEY\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "OPENAI_API_KEY=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoXaB3dE6gH",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "anthropic-context",
+      "pack": "rh-secrets-context",
+      "provider": "anthropic",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(ANTHROPIC_API_KEY|ANTHROPIC\\-API\\-KEY|ANTHROPICAPIKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_-]{32,255})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC-API-KEY",
+        "ANTHROPICAPIKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "ANTHROPIC_API_KEY=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"ANTHROPIC_API_KEY\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ANTHROPIC_API_KEY=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoXaB3dE6gH",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gemini-context",
+      "pack": "rh-secrets-context",
+      "provider": "google",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(GEMINI_API_KEY|GOOGLE_API_KEY|GEMINI\\-API\\-KEY|GOOGLE\\-API\\-KEY|GEMINIAPIKEY|GOOGLEAPIKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_-]{20,255})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "GEMINI-API-KEY",
+        "GOOGLE-API-KEY",
+        "GEMINIAPIKEY",
+        "GOOGLEAPIKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "GEMINI_API_KEY=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"GEMINI_API_KEY\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "GEMINI_API_KEY=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3d",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "xai-context",
+      "pack": "rh-secrets-context",
+      "provider": "xai",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(XAI_API_KEY|GROK_API_KEY|XAI\\-API\\-KEY|GROK\\-API\\-KEY|XAIAPIKEY|GROKAPIKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_-]{20,255})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "XAI_API_KEY",
+        "GROK_API_KEY",
+        "XAI-API-KEY",
+        "GROK-API-KEY",
+        "XAIAPIKEY",
+        "GROKAPIKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "XAI_API_KEY=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"XAI_API_KEY\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "XAI_API_KEY=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoXaB3dE6gH",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "venice-context",
+      "pack": "rh-secrets-context",
+      "provider": "venice",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(VENICE_API_KEY|VENICE\\-API\\-KEY|VENICEAPIKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_-]{20,255})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "VENICE_API_KEY",
+        "VENICE-API-KEY",
+        "VENICEAPIKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "VENICE_API_KEY=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"VENICE_API_KEY\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "VENICE_API_KEY=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoXaB3dE6gH",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cohere-context",
+      "pack": "rh-secrets-context",
+      "provider": "cohere",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(COHERE_API_KEY|COHERE\\-API\\-KEY|COHEREAPIKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_-]{20,255})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "COHERE_API_KEY",
+        "COHERE-API-KEY",
+        "COHEREAPIKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "COHERE_API_KEY=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"COHERE_API_KEY\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "COHERE_API_KEY=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3d",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mistral-context",
+      "pack": "rh-secrets-context",
+      "provider": "mistral",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(MISTRAL_API_KEY|MISTRAL\\-API\\-KEY|MISTRALAPIKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_-]{20,255})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "MISTRAL_API_KEY",
+        "MISTRAL-API-KEY",
+        "MISTRALAPIKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "MISTRAL_API_KEY=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"MISTRAL_API_KEY\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "MISTRAL_API_KEY=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3d",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "together-context",
+      "pack": "rh-secrets-context",
+      "provider": "together",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(TOGETHER_API_KEY|TOGETHER\\-API\\-KEY|TOGETHERAPIKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_-]{20,255})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "TOGETHER_API_KEY",
+        "TOGETHER-API-KEY",
+        "TOGETHERAPIKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "TOGETHER_API_KEY=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7c"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"TOGETHER_API_KEY\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7c"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "TOGETHER_API_KEY=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3dE6gH9jK2mN5pQ8sT1vW4yZ7c",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "shodan-context",
+      "pack": "rh-secrets-context",
+      "provider": "shodan",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(SHODAN_API_KEY|SHODAN\\-API\\-KEY|SHODANAPIKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9]{32})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "SHODAN_API_KEY",
+        "SHODAN-API-KEY",
+        "SHODANAPIKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "SHODAN_API_KEY=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iL"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"SHODAN_API_KEY\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iL"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "SHODAN_API_KEY=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iL",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "censys-context",
+      "pack": "rh-secrets-context",
+      "provider": "censys",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(CENSYS_API_SECRET|CENSYS_API_TOKEN|CENSYS\\-API\\-SECRET|CENSYS\\-API\\-TOKEN|CENSYSAPISECRET|CENSYSAPITOKEN)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_./=-]{20,512})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "CENSYS_API_SECRET",
+        "CENSYS_API_TOKEN",
+        "CENSYS-API-SECRET",
+        "CENSYS-API-TOKEN",
+        "CENSYSAPISECRET",
+        "CENSYSAPITOKEN"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "CENSYS_API_SECRET=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"CENSYS_API_SECRET\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "CENSYS_API_SECRET=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3d",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "virustotal-context",
+      "pack": "rh-secrets-context",
+      "provider": "virustotal",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(VIRUSTOTAL_API_KEY|VT_API_KEY|VIRUSTOTAL\\-API\\-KEY|VT\\-API\\-KEY|VIRUSTOTALAPIKEY|VTAPIKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([a-f0-9]{64})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "VIRUSTOTAL_API_KEY",
+        "VT_API_KEY",
+        "VIRUSTOTAL-API-KEY",
+        "VT-API-KEY",
+        "VIRUSTOTALAPIKEY",
+        "VTAPIKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "VIRUSTOTAL_API_KEY=\"",
+          "valueParts": [
+            "a13bc58d79e0246fa1",
+            "3bc58d79e0246fa13b",
+            "c58d79e0246fa13bc5",
+            "8d79e0246f"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"VIRUSTOTAL_API_KEY\": \"",
+          "valueParts": [
+            "a13bc58d79e0246fa1",
+            "3bc58d79e0246fa13b",
+            "c58d79e0246fa13bc5",
+            "8d79e0246f"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "VIRUSTOTAL_API_KEY=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "a13bc58d79e0246fa1",
+            "3bc58d79e0246fa13bc58d79e0246fa13bc58d79e0246f",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "securitytrails-context",
+      "pack": "rh-secrets-context",
+      "provider": "securitytrails",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(SECURITYTRAILS_API_KEY|SECURITYTRAILS\\-API\\-KEY|SECURITYTRAILSAPIKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_-]{32,128})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "SECURITYTRAILS_API_KEY",
+        "SECURITYTRAILS-API-KEY",
+        "SECURITYTRAILSAPIKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "SECURITYTRAILS_API_KEY=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"SECURITYTRAILS_API_KEY\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "SECURITYTRAILS_API_KEY=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3d",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fofa-context",
+      "pack": "rh-secrets-context",
+      "provider": "fofa",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(FOFA_API_KEY|FOFA\\-API\\-KEY|FOFAAPIKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_-]{20,128})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "FOFA_API_KEY",
+        "FOFA-API-KEY",
+        "FOFAAPIKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "FOFA_API_KEY=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"FOFA_API_KEY\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "FOFA_API_KEY=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3d",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "zoomeye-context",
+      "pack": "rh-secrets-context",
+      "provider": "zoomeye",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(ZOOMEYE_API_KEY|ZOOMEYE\\-API\\-KEY|ZOOMEYEAPIKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_-]{20,128})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "ZOOMEYE_API_KEY",
+        "ZOOMEYE-API-KEY",
+        "ZOOMEYEAPIKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "ZOOMEYE_API_KEY=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"ZOOMEYE_API_KEY\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ZOOMEYE_API_KEY=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3d",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "urlscan-context",
+      "pack": "rh-secrets-context",
+      "provider": "urlscan",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(URLSCAN_API_KEY|URLSCAN\\-API\\-KEY|URLSCANAPIKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_-]{20,128})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "URLSCAN_API_KEY",
+        "URLSCAN-API-KEY",
+        "URLSCANAPIKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "URLSCAN_API_KEY=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"URLSCAN_API_KEY\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "URLSCAN_API_KEY=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3d",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hunter-context",
+      "pack": "rh-secrets-context",
+      "provider": "hunter",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(HUNTER_API_KEY|HUNTER\\-API\\-KEY|HUNTERAPIKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_-]{20,128})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "HUNTER_API_KEY",
+        "HUNTER-API-KEY",
+        "HUNTERAPIKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "HUNTER_API_KEY=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"HUNTER_API_KEY\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "HUNTER_API_KEY=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3d",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pdcp-context",
+      "pack": "rh-secrets-context",
+      "provider": "projectdiscovery",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(PDCP_API_KEY|PDCP\\-API\\-KEY|PDCPAPIKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_-]{20,255})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "PDCP_API_KEY",
+        "PDCP-API-KEY",
+        "PDCPAPIKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "PDCP_API_KEY=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"PDCP_API_KEY\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "PDCP_API_KEY=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3dE6gH9jK2mN5pQ8sT1vW4yZ7cF0iLrUoXaB3dE6gH",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "generic-password",
+      "pack": "rh-secrets-context",
+      "provider": "generic",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(password|passwd|pwd|passphrase|db_password|database_password|db\\-password|database\\-password|dbpassword|databasepassword)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([^ \\t\\r\\n\"\\x27,;}{]{12,256})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "password",
+        "passwd",
+        "pwd",
+        "passphrase",
+        "db_password",
+        "database_password",
+        "db-password",
+        "database-password",
+        "dbpassword",
+        "databasepassword"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "password=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"password\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "password=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "generic-secret",
+      "pack": "rh-secrets-context",
+      "provider": "generic",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(api_key|apikey|api_secret|secret_key|client_secret|access_token|auth_token|refresh_token|private_token|service_token|bearer_token|api\\-key|api\\-secret|secret\\-key|client\\-secret|access\\-token|auth\\-token|refresh\\-token|private\\-token|service\\-token|bearer\\-token|apisecret|secretkey|clientsecret|accesstoken|authtoken|refreshtoken|privatetoken|servicetoken|bearertoken|x\\-api\\-key|x\\-auth\\-token|x\\-access\\-token)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([A-Za-z0-9_./+=~:-]{16,512})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "api_key",
+        "apikey",
+        "api_secret",
+        "secret_key",
+        "client_secret",
+        "access_token",
+        "auth_token",
+        "refresh_token",
+        "private_token",
+        "service_token",
+        "bearer_token",
+        "api-key",
+        "api-secret",
+        "secret-key",
+        "client-secret",
+        "access-token",
+        "auth-token",
+        "refresh-token",
+        "private-token",
+        "service-token",
+        "bearer-token",
+        "apisecret",
+        "secretkey",
+        "clientsecret",
+        "accesstoken",
+        "authtoken",
+        "refreshtoken",
+        "privatetoken",
+        "servicetoken",
+        "bearertoken",
+        "x-api-key",
+        "x-auth-token",
+        "x-access-token"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "api_key=\"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "\"api_key\": \"",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3d"
+          ],
+          "suffix": "\""
+        },
+        {
+          "prefix": "X-API-Key: ",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8sT",
+            "1vW4yZ7cF0iLrUoXaB3dE"
+          ],
+          "suffix": "\r\n"
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "api_key=\"",
+            "changeme-placeholder",
+            "\""
+          ],
+          "nativeOnly": true
+        },
+        {
+          "parts": [
+            "unrelated=\"",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoXaB3d",
+            "\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "http-bearer",
+      "pack": "rh-auth",
+      "provider": "generic",
+      "category": "token",
+      "severity": "HIGH",
+      "pattern": "Authorization[ \\t]*:[ \\t]*Bearer[ \\t]+([A-Za-z0-9._~+/-]{16,4096}={0,2})",
+      "capture": 1,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "bearer"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": "Authorization: Bearer ",
+          "valueParts": [
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7cF0iLrUoX",
+            "aB3dE6gH9jK2mN5pQ8",
+            "sT1vW4yZ7c"
+          ],
+          "suffix": "\r\n"
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "http-basic",
+      "pack": "rh-auth",
+      "provider": "generic",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "Authorization[ \\t]*:[ \\t]*Basic[ \\t]+([A-Za-z0-9+/]{8,2048}={0,2})",
+      "capture": 1,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "basic"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": "Authorization: Basic ",
+          "valueParts": [
+            "dmljdG9yOnN5bnRoZX",
+            "RpYy1maXh0dXJl"
+          ],
+          "suffix": "\r\n"
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "jwt",
+      "pack": "rh-auth",
+      "provider": "generic",
+      "category": "token",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_.-])(eyJ[A-Za-z0-9_-]{5,1024}\\.[A-Za-z0-9_-]{2,8192}\\.[A-Za-z0-9_-]{0,2048})($|[^A-Za-z0-9_.-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "jwt",
+      "keywords": [
+        "eyJ"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "eyJhbGciOiJIUzI1Ni",
+            "IsInR5cCI6IkpXVCJ9",
+            ".eyJzdWIiOiJzeW50a",
+            "GV0aWMtZml4dHVyZSJ",
+            "9.aB3dE6gH9jK2mN5p",
+            "Q8sT1vW4yZ7cF0iLrU",
+            "oXaB3dE6g"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "private-key-pkcs8",
+      "pack": "rh-private-keys",
+      "provider": "generic",
+      "category": "private-key",
+      "severity": "HIGH",
+      "pattern": "\\-\\-\\-\\-\\-BEGIN\\ PRIVATE\\ KEY\\-\\-\\-\\-\\-",
+      "capture": 0,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "PRIVATE KEY"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "-----BEGIN PRIVATE",
+            " KEY-----"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "private-key-rsa",
+      "pack": "rh-private-keys",
+      "provider": "generic",
+      "category": "private-key",
+      "severity": "HIGH",
+      "pattern": "\\-\\-\\-\\-\\-BEGIN\\ RSA\\ PRIVATE\\ KEY\\-\\-\\-\\-\\-",
+      "capture": 0,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "PRIVATE KEY"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "-----BEGIN RSA PRI",
+            "VATE KEY-----"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "private-key-dsa",
+      "pack": "rh-private-keys",
+      "provider": "generic",
+      "category": "private-key",
+      "severity": "HIGH",
+      "pattern": "\\-\\-\\-\\-\\-BEGIN\\ DSA\\ PRIVATE\\ KEY\\-\\-\\-\\-\\-",
+      "capture": 0,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "PRIVATE KEY"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "-----BEGIN DSA PRI",
+            "VATE KEY-----"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "private-key-ec",
+      "pack": "rh-private-keys",
+      "provider": "generic",
+      "category": "private-key",
+      "severity": "HIGH",
+      "pattern": "\\-\\-\\-\\-\\-BEGIN\\ EC\\ PRIVATE\\ KEY\\-\\-\\-\\-\\-",
+      "capture": 0,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "PRIVATE KEY"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "-----BEGIN EC PRIV",
+            "ATE KEY-----"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "private-key-openssh",
+      "pack": "rh-private-keys",
+      "provider": "generic",
+      "category": "private-key",
+      "severity": "HIGH",
+      "pattern": "\\-\\-\\-\\-\\-BEGIN\\ OPENSSH\\ PRIVATE\\ KEY\\-\\-\\-\\-\\-",
+      "capture": 0,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "PRIVATE KEY"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "-----BEGIN OPENSSH",
+            " PRIVATE KEY-----"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "private-key-encrypted",
+      "pack": "rh-private-keys",
+      "provider": "generic",
+      "category": "private-key",
+      "severity": "HIGH",
+      "pattern": "\\-\\-\\-\\-\\-BEGIN\\ ENCRYPTED\\ PRIVATE\\ KEY\\-\\-\\-\\-\\-",
+      "capture": 0,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "PRIVATE KEY"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "-----BEGIN ENCRYPT",
+            "ED PRIVATE KEY----",
+            "-"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pgp-private-key",
+      "pack": "rh-private-keys",
+      "provider": "generic",
+      "category": "private-key",
+      "severity": "HIGH",
+      "pattern": "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+      "capture": 0,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "PRIVATE KEY"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "-----BEGIN PGP PRI",
+            "VATE KEY BLOCK----",
+            "-"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "database-uri",
+      "pack": "rh-auth",
+      "provider": "generic",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "((postgres(ql)?|mysql|mariadb|mongodb(\\+srv)?|redis(s)?|amqp(s)?)://[^ \\t\\r\\n/@:\"\\x27<>]{1,128}:[^ \\t\\r\\n/@\"\\x27<>]{1,256}@[^ \\t\\r\\n\"\\x27<>]{1,512})",
+      "capture": 1,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "://"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "postgresql://opera",
+            "tor:aB3dE6gH9jK2mN",
+            "5pQ8sT1vW4@db.exam",
+            "ple.test/app"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "github-url-credential",
+      "pack": "rh-auth",
+      "provider": "github",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(https?://[^ \\t\\r\\n/@:\"\\x27<>]{1,128}:[^ \\t\\r\\n/@\"\\x27<>]{1,256}@github\\.com(/[^ \\t\\r\\n\"\\x27<>]{0,512})?)",
+      "capture": 1,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "github.com"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "https://operator:a",
+            "B3dE6gH9jK2mN5pQ8s",
+            "T1vW4yZ7cF0iLrUoXa",
+            "B3d@github.com/tea",
+            "m/repo"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ipv4",
+      "pack": "rh-network",
+      "provider": "generic",
+      "category": "network",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_.])((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3})($|[^A-Za-z0-9_.])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "ipv4",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "192.168.1.25"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "999.256.1.1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ipv4-cidr",
+      "pack": "rh-network",
+      "provider": "generic",
+      "category": "network",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_.])((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}/(3[0-2]|[12]?[0-9]))($|[^A-Za-z0-9_./])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "cidr",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "10.20.0.0/16"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "10.20.0.0/33"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ipv6",
+      "pack": "rh-network",
+      "provider": "generic",
+      "category": "network",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_:.])(([A-Fa-f0-9]{0,4}:){2,7}[A-Fa-f0-9:.]{0,45}(%[A-Za-z0-9_.-]{1,20})?)($|[^A-Za-z0-9_:.%])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "ipv6",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "2001:db8::1234"
+          ],
+          "suffix": " "
+        },
+        {
+          "prefix": " ",
+          "valueParts": [
+            "::1"
+          ],
+          "suffix": " "
+        },
+        {
+          "prefix": " ",
+          "valueParts": [
+            "::ffff:192.0.2.1"
+          ],
+          "suffix": " "
+        },
+        {
+          "prefix": " ",
+          "valueParts": [
+            "fe80::1%eth0"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "abc:def:ghi:xyz"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hostname",
+      "pack": "rh-network",
+      "provider": "generic",
+      "category": "network",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_.-])([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?){1,15})($|[^A-Za-z0-9_.-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "hostname",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "api.internal.examp",
+            "le.test"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "999.999.999.999"
+          ],
+          "nativeOnly": true
+        }
+      ]
+    },
+    {
+      "id": "email",
+      "pack": "rh-network",
+      "provider": "generic",
+      "category": "network",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_.+-])([A-Za-z0-9_.+-]{1,64}@[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?){1,15})($|[^A-Za-z0-9_.-])",
+      "capture": 2,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "security@example.t",
+            "est"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "invalid@@example.test"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aws-s3-host",
+      "pack": "rh-cloud-locators",
+      "provider": "aws",
+      "category": "endpoint",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9][a-z0-9.-]{1,61}\\.s3([.-](dualstack\\.)?[a-z0-9-]{1,32})?\\.amazonaws\\.com(\\.cn)?)($|[^A-Za-z0-9_.-])",
+      "capture": 2,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "assets.s3.eu-north",
+            "-1.amazonaws.com"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aws-s3-path",
+      "pack": "rh-cloud-locators",
+      "provider": "aws",
+      "category": "endpoint",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_.-])(s3([.-][a-z0-9-]{1,32})?\\.amazonaws\\.com(\\.cn)?/[a-z0-9.-]{3,63})($|[^A-Za-z0-9_.-])",
+      "capture": 2,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "s3.amazonaws.com/e",
+            "xample-assets"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aws-api-gateway",
+      "pack": "rh-cloud-locators",
+      "provider": "aws",
+      "category": "endpoint",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9]{8,32}\\.execute-api\\.[a-z0-9-]{5,32}\\.amazonaws\\.com)($|[^A-Za-z0-9_.-])",
+      "capture": 2,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "abcdefghij.execute",
+            "-api.eu-north-1.am",
+            "azonaws.com"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aws-cloudfront",
+      "pack": "rh-cloud-locators",
+      "provider": "aws",
+      "category": "endpoint",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9-]{8,64}\\.cloudfront\\.net)($|[^A-Za-z0-9_.-])",
+      "capture": 2,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "d1234567890abc.clo",
+            "udfront.net"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aws-cognito",
+      "pack": "rh-cloud-locators",
+      "provider": "aws",
+      "category": "endpoint",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9-]{1,63}\\.auth\\.[a-z0-9-]{5,32}\\.amazoncognito\\.com)($|[^A-Za-z0-9_.-])",
+      "capture": 2,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "example.auth.eu-no",
+            "rth-1.amazoncognit",
+            "o.com"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "azure-storage",
+      "pack": "rh-cloud-locators",
+      "provider": "microsoft",
+      "category": "endpoint",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9]{3,24}\\.(blob|queue|table|file|dfs)\\.core\\.windows\\.net)($|[^A-Za-z0-9_.-])",
+      "capture": 2,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "exampleassets.blob",
+            ".core.windows.net"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "azure-vault",
+      "pack": "rh-cloud-locators",
+      "provider": "microsoft",
+      "category": "endpoint",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9-]{3,24}\\.vault\\.azure\\.net)($|[^A-Za-z0-9_.-])",
+      "capture": 2,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "examplevault.vault",
+            ".azure.net"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "azure-app-service",
+      "pack": "rh-cloud-locators",
+      "provider": "microsoft",
+      "category": "endpoint",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9-]{2,63}\\.azurewebsites\\.net)($|[^A-Za-z0-9_.-])",
+      "capture": 2,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "example-app.azurew",
+            "ebsites.net"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "azure-cosmos",
+      "pack": "rh-cloud-locators",
+      "provider": "microsoft",
+      "category": "endpoint",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9-]{3,63}\\.documents\\.azure\\.com)($|[^A-Za-z0-9_.-])",
+      "capture": 2,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "example.documents.",
+            "azure.com"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gcp-storage",
+      "pack": "rh-cloud-locators",
+      "provider": "google",
+      "category": "endpoint",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_.-])((storage\\.googleapis\\.com/[a-z0-9._-]{3,63}|[a-z0-9._-]{3,63}\\.storage\\.googleapis\\.com))($|[^A-Za-z0-9_.-])",
+      "capture": 2,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "example-assets.sto",
+            "rage.googleapis.co",
+            "m"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gcp-firebase",
+      "pack": "rh-cloud-locators",
+      "provider": "google",
+      "category": "endpoint",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9-]{2,63}\\.(firebaseio\\.com|[a-z0-9.-]{1,64}firebasedatabase\\.app))($|[^A-Za-z0-9_.-])",
+      "capture": 2,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "example-project.fi",
+            "rebaseio.com"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gcp-appspot",
+      "pack": "rh-cloud-locators",
+      "provider": "google",
+      "category": "endpoint",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9-]{2,63}\\.appspot\\.com)($|[^A-Za-z0-9_.-])",
+      "capture": 2,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "example-project.ap",
+            "pspot.com"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gcp-cloud-run",
+      "pack": "rh-cloud-locators",
+      "provider": "google",
+      "category": "endpoint",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9-]{2,100}(\\.[a-z])?\\.run\\.app)($|[^A-Za-z0-9_.-])",
+      "capture": 2,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "example-service-ab",
+            "c-uc.a.run.app"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gcp-cloud-functions",
+      "pack": "rh-cloud-locators",
+      "provider": "google",
+      "category": "endpoint",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9-]{2,100}\\.cloudfunctions\\.net)($|[^A-Za-z0-9_.-])",
+      "capture": 2,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "eu-north1-example.",
+            "cloudfunctions.net"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cloudflare-workers",
+      "pack": "rh-cloud-locators",
+      "provider": "cloudflare",
+      "category": "endpoint",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9.-]{2,100}\\.workers\\.dev)($|[^A-Za-z0-9_.-])",
+      "capture": 2,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "example.user.worke",
+            "rs.dev"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "digitalocean-spaces",
+      "pack": "rh-cloud-locators",
+      "provider": "digitalocean",
+      "category": "endpoint",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9.-]{2,100}\\.digitaloceanspaces\\.com)($|[^A-Za-z0-9_.-])",
+      "capture": 2,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "assets.ams3.digita",
+            "loceanspaces.com"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "supabase-host",
+      "pack": "rh-cloud-locators",
+      "provider": "supabase",
+      "category": "endpoint",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_.-])([a-z0-9-]{5,64}\\.supabase\\.(co|in))($|[^A-Za-z0-9_.-])",
+      "capture": 2,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "example-project.su",
+            "pabase.co"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aws-arn",
+      "pack": "rh-identifiers",
+      "provider": "aws",
+      "category": "identifier",
+      "severity": "INFO",
+      "pattern": "(arn:(aws|aws-cn|aws-us-gov):[a-z0-9-]{1,63}:[a-z0-9-]{0,32}:[0-9]{0,12}:[A-Za-z0-9_./:=+-]{1,512})",
+      "capture": 1,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "arn:"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "arn:aws:iam::12345",
+            "6789012:role/Examp",
+            "leRole"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "oci-ocid",
+      "pack": "rh-identifiers",
+      "provider": "oracle",
+      "category": "identifier",
+      "severity": "INFO",
+      "pattern": "(ocid1\\.[a-z0-9_-]{1,64}\\.[a-z0-9_-]{0,32}\\.[a-z0-9_-]{0,32}\\.[a-z0-9._-]{10,256})",
+      "capture": 1,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "ocid1."
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "ocid1.instance.oc1",
+            ".eu-stockholm-1.ab",
+            "cdefghijklmnopqrst",
+            "uvwxyz0123456789ab",
+            "cd"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "google-oauth-client-id",
+      "pack": "rh-identifiers",
+      "provider": "google",
+      "category": "identifier",
+      "severity": "INFO",
+      "pattern": "([0-9]{6,24}-[A-Za-z0-9_-]{10,128}\\.apps\\.googleusercontent\\.com)",
+      "capture": 1,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "googleusercontent.com"
+      ],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "123456789012-aB3dE",
+            "6gH9jK2mN5pQ8sT1vW",
+            "4yZ7cF0iL.apps.goo",
+            "gleusercontent.com"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "interesting-variable",
+      "pack": "rh-hints",
+      "provider": "generic",
+      "category": "hint",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_])((AWS|AZURE|GCP|GOOGLE|GITHUB|GITLAB|OPENAI|ANTHROPIC|XAI|VENICE|SHODAN|CENSYS|FOFA|PDCP)_[A-Za-z0-9_]{2,64})[\"\\x27]?[ \\t]*[=:]",
+      "capture": 2,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": "export ",
+          "valueParts": [
+            "AWS_SECRET_ACCESS_",
+            "KEY"
+          ],
+          "suffix": "=undefined"
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "recon-parameter",
+      "pack": "rh-hints",
+      "provider": "generic",
+      "category": "hint",
+      "severity": "INFO",
+      "pattern": "(^|[?&; \\t])((redirect|return_url|next|callback|url|uri|path|file|filename|template|query|search|cmd|command|exec|debug|admin|role|token|api_key|access_token|tenant|account|user_id|object_id))=",
+      "capture": 2,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "authored:offline-inventory-heuristic"
+      ],
+      "positive": [
+        {
+          "prefix": "?",
+          "valueParts": [
+            "redirect"
+          ],
+          "suffix": "=https://example.test/"
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose without credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aws-mws-token",
+      "pack": "rh-auth",
+      "provider": "aws",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(amzn\\.mws\\.[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})",
+      "capture": 1,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "user-provided:legacy-mws-token-format"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "amzn.mws.1234abc",
+            "d-5678-90ab-cdef",
+            "-1234567890ab"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "slack-webhook",
+      "pack": "rh-auth",
+      "provider": "slack",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(https://hooks\\.slack\\.com/(services|workflows|triggers)/[A-Za-z0-9_/-]{40,256})",
+      "capture": 1,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "https://hooks.sl",
+            "ack.com/services",
+            "/T00000000/B0000",
+            "0000/A1b2C3d4A1b",
+            "2C3d4A1b2C3d4"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "discord-webhook",
+      "pack": "rh-auth",
+      "provider": "discord",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(https://(canary\\.|ptb\\.)?discord(app)?\\.com/api/webhooks/[0-9]{6,24}/[A-Za-z0-9_.-]{20,255})",
+      "capture": 1,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "https://discord.",
+            "com/api/webhooks",
+            "/123456789012345",
+            "678/A1b2C3d4A1b2",
+            "C3d4A1b2C3d4A1b2",
+            "C3d4A1b2C3d4A1b2",
+            "C3d4A1b2C3d4A1b2",
+            "C3d4"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "telegram-bot-token",
+      "pack": "rh-auth",
+      "provider": "telegram",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "([0-9]{6,12}:[A-Za-z0-9_-]{35})",
+      "capture": 1,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "123456789:Ab3dE6",
+            "gH9jK2mN5pQ8sT1v",
+            "W4yZ7cF0iLrUo"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "azure-storage-connection",
+      "pack": "rh-auth",
+      "provider": "microsoft",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(DefaultEndpointsProtocol=https?;AccountName=[A-Za-z0-9]{3,24};AccountKey=[A-Za-z0-9+/]{80,100}={0,2}(;EndpointSuffix=[A-Za-z0-9.-]{3,128})?)",
+      "capture": 1,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "DefaultEndpoints",
+            "Protocol=https;A",
+            "ccountName=examp",
+            "leassets;Account",
+            "Key=aB3dE6gHaB3d",
+            "E6gHaB3dE6gHaB3d",
+            "E6gHaB3dE6gHaB3d",
+            "E6gHaB3dE6gHaB3d",
+            "E6gHaB3dE6gHaB3d",
+            "E6gHaB3dE6gH;End",
+            "pointSuffix=core",
+            ".windows.net"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "azure-sas-url",
+      "pack": "rh-auth",
+      "provider": "microsoft",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(https://[A-Za-z0-9.-]{3,128}/[^ \\t\\r\\n\"\\x27<>]{0,2048}[?&]sig=[A-Za-z0-9%+/=]{20,256})",
+      "capture": 1,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "https://examplea",
+            "ssets.blob.core.",
+            "windows.net/cont",
+            "ainer/blob?sv=20",
+            "24-11-04&sp=r&si",
+            "g=Ab3dE6gHAb3dE6",
+            "gHAb3dE6gHAb3dE6",
+            "gHAb3dE6gH%3D"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aws-presigned-url",
+      "pack": "rh-auth",
+      "provider": "aws",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(https://[A-Za-z0-9.-]{3,128}/[^ \\t\\r\\n\"\\x27<>]{0,2048}[?&]X-Amz-Signature=[a-f0-9]{64})",
+      "capture": 1,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "https://assets.s",
+            "3.amazonaws.com/",
+            "file?X-Amz-Algor",
+            "ithm=AWS4-HMAC-S",
+            "HA256&X-Amz-Sign",
+            "ature=a13bc58d79",
+            "e0246fa13bc58d79",
+            "e0246fa13bc58d79",
+            "e0246fa13bc58d79",
+            "e0246f"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "google-service-account-id",
+      "pack": "rh-identifiers",
+      "provider": "google",
+      "category": "identifier",
+      "severity": "INFO",
+      "pattern": "\"private_key_id\"[ \\t]*:[ \\t]*\"([a-f0-9]{40})\"",
+      "capture": 1,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": "\"private_key_id\": \"",
+          "valueParts": [
+            "a13bc58d79e0246f",
+            "a13bc58d79e0246f",
+            "a13bc58d"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "square-legacy-oauth",
+      "pack": "rh-auth",
+      "provider": "square",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(EAAA[A-Za-z0-9_-]{60})",
+      "capture": 1,
+      "ignoreCase": false,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [],
+      "sources": [
+        "https://github.com/gitleaks/gitleaks/blob/b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b/config/gitleaks.toml"
+      ],
+      "positive": [
+        {
+          "prefix": " ",
+          "valueParts": [
+            "EAAAaB3dE6gHaB3d",
+            "E6gHaB3dE6gHaB3d",
+            "E6gHaB3dE6gHaB3d",
+            "E6gHaB3dE6gHaB3d"
+          ],
+          "suffix": " "
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "ordinary prose"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "recaptcha-secret-context",
+      "pack": "rh-secrets-context",
+      "provider": "google",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(RECAPTCHA_SECRET_KEY|RECAPTCHA_SECRET|GOOGLE_RECAPTCHA_SECRET|RECAPTCHA\\-SECRET\\-KEY|RECAPTCHA\\-SECRET|GOOGLE\\-RECAPTCHA\\-SECRET|RECAPTCHASECRETKEY|RECAPTCHASECRET|GOOGLERECAPTCHASECRET)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?(6L[A-Za-z0-9_-]{38})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "RECAPTCHA_SECRET_KEY",
+        "RECAPTCHA_SECRET",
+        "GOOGLE_RECAPTCHA_SECRET",
+        "RECAPTCHA-SECRET-KEY",
+        "RECAPTCHA-SECRET",
+        "GOOGLE-RECAPTCHA-SECRET",
+        "RECAPTCHASECRETKEY",
+        "RECAPTCHASECRET",
+        "GOOGLERECAPTCHASECRET"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "RECAPTCHA_SECRET_KEY=\"",
+          "valueParts": [
+            "6LaB3dE6gH9jK2mN5p",
+            "Q8sT1vW4yZ7cF0iLrUoXaB"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "unrelated=",
+            "6LaB3dE6gH9jK2mN5p",
+            "Q8sT1vW4yZ7cF0iLrUoXaB"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "twilio-api-secret-context",
+      "pack": "rh-secrets-context",
+      "provider": "twilio",
+      "category": "credential",
+      "severity": "HIGH",
+      "pattern": "(^|[^A-Za-z0-9_])(TWILIO_API_SECRET|TWILIO_API_KEY_SECRET|TWILIO\\-API\\-SECRET|TWILIO\\-API\\-KEY\\-SECRET|TWILIOAPISECRET|TWILIOAPIKEYSECRET)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([a-fA-F0-9]{32})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 2.8,
+      "validator": "none",
+      "keywords": [
+        "TWILIO_API_SECRET",
+        "TWILIO_API_KEY_SECRET",
+        "TWILIO-API-SECRET",
+        "TWILIO-API-KEY-SECRET",
+        "TWILIOAPISECRET",
+        "TWILIOAPIKEYSECRET"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "TWILIO_API_SECRET=\"",
+          "valueParts": [
+            "a13bc58d79e0246fa1",
+            "3bc58d79e0246f"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "unrelated=",
+            "a13bc58d79e0246fa1",
+            "3bc58d79e0246f"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "trello-public-key-context",
+      "pack": "rh-identifiers",
+      "provider": "trello",
+      "category": "identifier",
+      "severity": "INFO",
+      "pattern": "(^|[^A-Za-z0-9_])(TRELLO_API_KEY|TRELLO_KEY|TRELLO\\-API\\-KEY|TRELLO\\-KEY|TRELLOAPIKEY|TRELLOKEY)[\"\\x27]?[ \\t]*[=:][ \\t]*[\"\\x27]?([a-fA-F0-9]{32})($|[^A-Za-z0-9_./+=~:-])",
+      "capture": 3,
+      "ignoreCase": true,
+      "minEntropy": 0,
+      "validator": "none",
+      "keywords": [
+        "TRELLO_API_KEY",
+        "TRELLO_KEY",
+        "TRELLO-API-KEY",
+        "TRELLO-KEY",
+        "TRELLOAPIKEY",
+        "TRELLOKEY"
+      ],
+      "sources": [
+        "authored:context-key-names-and-entropy"
+      ],
+      "positive": [
+        {
+          "prefix": "TRELLO_API_KEY=\"",
+          "valueParts": [
+            "a13bc58d79e0246fa1",
+            "3bc58d79e0246f"
+          ],
+          "suffix": "\""
+        }
+      ],
+      "negative": [
+        {
+          "parts": [
+            "unrelated=",
+            "a13bc58d79e0246fa1",
+            "3bc58d79e0246f"
+          ]
+        }
+      ]
+    }
+  ]
+}

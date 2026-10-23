@@ -30,6 +30,11 @@ type RunSummary struct {
 // It is intentionally a single-stage primitive: a DAG orchestrator can compose
 // it, but no tool can bypass input validation or output adaptation when it does.
 func RunProfile(ctx context.Context, scope Scope, toolName string, inputs []Record, policy RunPolicy, runID string, quarantine io.Writer) ([]Record, RunSummary, error) {
+	return RunProfileInDirectory(ctx, scope, toolName, inputs, policy, runID, quarantine, "")
+}
+
+// RunProfileInDirectory retains the same pinned process boundary with an isolated stage working directory.
+func RunProfileInDirectory(ctx context.Context, scope Scope, toolName string, inputs []Record, policy RunPolicy, runID string, quarantine io.Writer, directory string) ([]Record, RunSummary, error) {
 	started := time.Now()
 	summary := RunSummary{RunID: runID, Tool: strings.ToLower(strings.TrimSpace(toolName)), StartedAt: started.UTC()}
 	registry := DefaultToolRegistry()
@@ -93,7 +98,7 @@ func RunProfile(ctx context.Context, scope Scope, toolName string, inputs []Reco
 			}
 			stdin.WriteString(rendered)
 		}
-		records, stats, result, err := executeOnce(ctx, socket, profile, profile.Args, stdin.Bytes(), quarantine)
+		records, stats, result, err := executeOnce(ctx, socket, profile, profile.Args, stdin.Bytes(), quarantine, directory)
 		summary.Executions++
 		summary.OutputAccepted += stats.Accepted
 		summary.OutputRejected += stats.Rejected
@@ -118,7 +123,7 @@ func RunProfile(ctx context.Context, scope Scope, toolName string, inputs []Reco
 				args = append(args, profile.TargetFlag)
 			}
 			args = append(args, target)
-			records, stats, result, err := executeOnce(ctx, socket, profile, args, nil, quarantine)
+			records, stats, result, err := executeOnce(ctx, socket, profile, args, nil, quarantine, directory)
 			summary.Executions++
 			summary.OutputAccepted += stats.Accepted
 			summary.OutputRejected += stats.Rejected
@@ -139,11 +144,12 @@ func RunProfile(ctx context.Context, scope Scope, toolName string, inputs []Reco
 	return output, summary, errors.Join(runErrors...)
 }
 
-func executeOnce(ctx context.Context, socket ContractSocket, profile CommandProfile, args []string, stdin []byte, quarantine io.Writer) ([]Record, SocketStats, ExecResult, error) {
+func executeOnce(ctx context.Context, socket ContractSocket, profile CommandProfile, args []string, stdin []byte, quarantine io.Writer, directory string) ([]Record, SocketStats, ExecResult, error) {
 	result, runErr := runExternal(ctx, ExecRequest{
 		Tool:  socket.Tool.Name,
 		Args:  args,
 		Stdin: stdin,
+		Dir:   directory,
 		Limits: ExecLimits{
 			Timeout:        profile.Timeout,
 			MaxStdoutBytes: profile.MaxStdoutBytes,

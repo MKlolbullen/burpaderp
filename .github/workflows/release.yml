@@ -49,6 +49,12 @@ jobs:
       - name: Build and test release jar
         run: ./gradlew clean build --no-daemon --stacktrace -PreleaseVersion=${{ steps.version.outputs.version }}
 
+      - name: Validate curated GF catalog
+        run: |
+          python3 tools/gf/manage.py check
+          python3 tools/gf/manage.py test-grep
+          python3 -m unittest discover -s tools/gf/tests -v
+
       - name: Smoke-check packaged artifact
         shell: bash
         run: |

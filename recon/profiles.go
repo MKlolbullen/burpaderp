@@ -37,6 +37,8 @@ type CommandProfile struct {
 	Timeout        time.Duration `json:"timeout"`
 	MaxStdoutBytes int64         `json:"max_stdout_bytes,omitempty"`
 	MaxStderrBytes int64         `json:"max_stderr_bytes,omitempty"`
+	VersionArgs    []string      `json:"version_args,omitempty"`
+	ExactVersion   string        `json:"exact_version,omitempty"`
 	Description    string        `json:"description,omitempty"`
 }
 
@@ -66,9 +68,34 @@ func DefaultCommandProfiles() map[string]CommandProfile {
 			Description: "stdin resolve + wildcard/poisoning filter; quiet hostname output",
 		},
 		{
+			Tool: "amass", Egress: EgressProvider, InputMode: InputPerTarget, TargetFlag: "-d",
+			Args: []string{"enum", "-passive", "-nocolor", "-json", "-", "-dir", "."}, Timeout: 10 * time.Minute,
+			VersionArgs: []string{"-version"}, ExactVersion: "v3.23.3",
+			MaxStdoutBytes: 8 << 20, MaxStderrBytes: 32 << 10,
+			Description: "Version-pinned Amass 3.23.3 passive mode; other versions cannot inherit this egress classification",
+		},
+		{
+			Tool: "waybackurls", Egress: EgressProvider, InputMode: InputStdin,
+			Timeout: 5 * time.Minute, MaxStdoutBytes: 8 << 20, MaxStderrBytes: 32 << 10,
+			Description: "Archive/provider URL reads; never get-versions or target fetching",
+		},
+		{
+			Tool: "urlfinder", Egress: EgressProvider, InputMode: InputPerTarget, TargetFlag: "-d",
+			Args:    []string{"-silent", "-j", "-all", "-disable-update-check", "-rl", "5"},
+			Timeout: 5 * time.Minute, MaxStdoutBytes: 8 << 20, MaxStderrBytes: 32 << 10,
+			Description: "Passive URL provider collection with JSONL output",
+		},
+		{
+			Tool: "waybackpy", Egress: EgressProvider, InputMode: InputPerTarget, TargetFlag: "--url",
+			Args:    []string{"--cdx", "--match-type", "domain", "--collapse", "urlkey", "--cdx-print", "original", "--limit", "25000"},
+			Timeout: 5 * time.Minute, MaxStdoutBytes: 8 << 20, MaxStderrBytes: 32 << 10,
+			Description: "CDX original URL reads only; SavePageNow is never invoked",
+		},
+		{
 			Tool: "dnsx", Egress: EgressDNS, InputMode: InputStdin,
 			Args: []string{"-json", "-silent", "-a", "-aaaa", "-cname", "-omit-raw", "-disable-update-check"}, Timeout: 10 * time.Minute,
-			Description: "stdin A/AAAA/CNAME enrichment to JSONL",
+			Description:    "stdin A/AAAA/CNAME enrichment to JSONL",
+			MaxStdoutBytes: 8 << 20, MaxStderrBytes: 32 << 10,
 		},
 		{
 			Tool: "naabu", Egress: EgressTCP, InputMode: InputStdin,
@@ -85,6 +112,10 @@ func DefaultCommandProfiles() map[string]CommandProfile {
 			Args: []string{"-jsonl", "-silent", "-depth", "3", "-rate-limit", "20", "-concurrency", "5", "-parallelism", "5"}, Timeout: 20 * time.Minute,
 			Description: "active crawl using JSONL output; execution disabled pending governed egress (#44)",
 		},
+		{Tool: "whatweb", Egress: EgressTargetHTTP, InputMode: InputStdin, Args: []string{"--aggression=1", "--log-json=-", "--input-file=-"}, Timeout: 10 * time.Minute, Description: "Offline JSON report adapter available; target execution requires governed egress"},
+		{Tool: "gospider", Egress: EgressTargetHTTP, InputMode: InputStdin, Args: []string{"--json", "--depth", "2"}, Timeout: 10 * time.Minute, Description: "JSON URL output adapter; target execution requires governed egress"},
+		{Tool: "cariddi", Egress: EgressTargetHTTP, InputMode: InputStdin, Args: []string{"-plain"}, Timeout: 10 * time.Minute, Description: "URL output adapter; target execution requires governed egress"},
+		{Tool: "jsfinder", Egress: EgressTargetHTTP, InputMode: InputPerTarget, TargetFlag: "-u", Timeout: 10 * time.Minute, Description: "Adapt JSFinder URL export file; live retrieval requires governed egress"},
 		{
 			Tool: "gau", Egress: EgressProvider, InputMode: InputStdin,
 			Args: []string{"--threads", "5", "--timeout", "30"}, Timeout: 15 * time.Minute,
@@ -139,6 +170,9 @@ func ValidateCommandProfile(profile CommandProfile, registry ToolRegistry) error
 	}
 	if profile.Timeout <= 0 {
 		return fmt.Errorf("%s profile timeout must be positive", profile.Tool)
+	}
+	if (profile.ExactVersion == "") != (len(profile.VersionArgs) == 0) {
+		return fmt.Errorf("version guard must declare both arguments and expected output")
 	}
 	return nil
 }

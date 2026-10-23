@@ -104,6 +104,20 @@ public class ReconHoundCliTest {
         assertEquals(0, ReconHoundCli.run(args, new PrintStream(new ByteArrayOutputStream())));
     }
 
+    @Test public void offlineGfCredentialCandidatesAreRedactedAndPublicIdentifiersDoNotFailHighThreshold() throws Exception {
+        Path body = temporaryFolder.newFile("gf-response.txt").toPath();
+        Path report = temporaryFolder.getRoot().toPath().resolve("gf.sarif");
+        String secret = "amzn.mws." + "1234abcd-5678-90ab-cdef-1234567890ab";
+        Files.writeString(body, secret);
+        String[] args = {"--body-file", body.toString(), "--content-type", "text/plain", "--fail-on", "high",
+                "-o", report.toString(), "https://does-not-resolve.invalid/"};
+        assertEquals(1, ReconHoundCli.run(args, new PrintStream(new ByteArrayOutputStream())));
+        String sarif = Files.readString(report);
+        assertTrue(sarif.contains("gf-aws-mws-token")); assertTrue(!sarif.contains(secret));
+        Files.writeString(body, "api.example.test 192.168.1.1");
+        assertEquals(0, ReconHoundCli.run(args, new PrintStream(new ByteArrayOutputStream())));
+    }
+
     @Test public void offlineInputRequiresOneMetadataUrlAndARegularFile() throws Exception {
         assertThrows(IllegalArgumentException.class, () -> ReconHoundCli.parseOptions(new String[]{"--body-file", "body.txt"}));
         assertThrows(IllegalArgumentException.class, () -> ReconHoundCli.parseOptions(new String[]{"--body-file", "body.txt", "https://one.test", "https://two.test"}));
