@@ -98,6 +98,7 @@ final class ReconModel {
             return switch (col) { case 0 -> r.kind(); case 1 -> r.url(); default -> r.source(); };
         }
         void add(DiscoveryRow row) { rows.add(0, row); fireTableRowsInserted(0, 0); }
+        List<DiscoveryRow> snapshot() { return new ArrayList<>(rows); }
         void clear() { int n = rows.size(); rows.clear(); if (n > 0) fireTableDataChanged(); }
     }
 
