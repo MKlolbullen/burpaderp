@@ -82,6 +82,12 @@ The build accepts any installed JDK 21 or newer and always emits Java 21-compati
   IPv4/IPv6 literals in traffic) into a dedicated **Hosts / IPs** asset inventory tab, with
   **Export…** (writes `hosts.txt` / `ips.txt` / `assets.txt` to a chosen folder) and **Add all to
   scope** (adds every collected host/IP to Burp's target scope over http and https).
+- Draws those in-scope hosts, open ports, and discovered script files (`.js`, `.json`, `.map`,
+  `.chunk`, `.ts`) on the **Relationships** tab. A network holds a host, a host exposes a port, and
+  a port serves a script file. The tab only paints rows already in the Hosts / IPs and Discovered
+  resources tables — it does not scan, import, or change scope. **Export Meridian JSON** writes a
+  `meridian: 1` report the Meridian chart can open. Name-only hosts still draw; a script file is
+  attached in the export only when its host is an IP.
 - Indexes external payload `.txt` corpora without blindly auto-firing them.
 - Imports contract-validated `reconctl` JSONL through a bounded, scope-rechecking handoff — no tool is
   launched and no request is sent merely by importing results. See [run governance](docs/RUN_GOVERNANCE.md).
@@ -388,7 +394,7 @@ project evidence migrates to schema 2 while preserving historical state and mark
 Findings surface in several places:
 
 - the Recon Hound **suite tab** tables — **Findings**, **Discovered resources**, **Insertion points**,
-  **XSS reflections**, **Active tests**, **Hosts / IPs**, **XSS vector library**, plus the AI views
+  **XSS reflections**, **Active tests**, **Hosts / IPs**, **Relationships**, **XSS vector library**, plus the AI views
   (**AI analysis**, **Agent team**, **AI feed**, **Nuclei templates (AI)**);
 - Burp's **Dashboard / Target issue list** as native audit issues — reportable findings are filed
   through a single deduplicated reporter; active signals/candidates deliberately remain in the plugin
