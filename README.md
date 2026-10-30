@@ -4,6 +4,7 @@
 
 ### The recon-to-exploit toolkit for Burp Suite — passive intel, active testing, and a multi-provider AI agent team you can watch work, all filing **native Burp issues**.
 
+[![CI](https://github.com/0xlolbullen/Nexum/actions/workflows/ci.yml/badge.svg)](https://github.com/0xlolbullen/Nexum/actions/workflows/ci.yml)
 [![CI](https://github.com/MKlolbullen/burpaderp/actions/workflows/ci.yml/badge.svg)](https://github.com/MKlolbullen/burpaderp/actions/workflows/ci.yml)
 [![Release](https://github.com/MKlolbullen/burpaderp/actions/workflows/release.yml/badge.svg)](https://github.com/MKlolbullen/burpaderp/actions/workflows/release.yml)
 [![Latest release](https://img.shields.io/github/v/release/MKlolbullen/burpaderp?color=7e22ce&label=download)](https://github.com/MKlolbullen/burpaderp/releases/latest)
