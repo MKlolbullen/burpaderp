@@ -43,10 +43,17 @@ and nothing that touches the target happens without a human first.
 Or build it yourself:
 
 ```bash
-./gradlew clean build      # -> build/libs/burp-recon-hound-<version>.jar
+./gradlew clean build
 ```
 
 The build accepts any installed JDK 21 or newer and always emits Java 21-compatible bytecode.
+It creates the extension at `build/libs/burp-recon-hound-<version>.jar` and a separate,
+manually loaded runtime-verification harness at
+`build/runtime-verification/recon-hound-runtime-verification.jar`. The harness is not the normal
+scanner; see the [runtime verification kit](docs/BURP_RUNTIME_KIT.md) before loading it.
+
+For the Go sidecar and Python-script checks that Gradle does not run, see the
+[developer validation guide](docs/DEVELOPMENT.md).
 
 > Successor to the original Recon Loop tooling, which was stuck on the legacy Extender API under
 > **Jython (Python 2)** — EOL, awkward threading, no Montoya. This is a native Java 21 extension with no
@@ -504,6 +511,10 @@ net.portswigger.burp.extensions:montoya-api:2026.7
 
 Load the generated JAR (`build/libs/burp-recon-hound-<version>.jar`) through **Burp Suite →
 Extensions → Installed → Add → Java**.
+
+The build also creates the separate manual runtime-verification harness described in the
+[runtime verification kit](docs/BURP_RUNTIME_KIT.md). For complete local CI coverage, including Go
+and Python checks, see the [developer validation guide](docs/DEVELOPMENT.md).
 
 ## Payloads
 
